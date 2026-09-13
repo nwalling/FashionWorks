@@ -240,16 +240,68 @@ resolves loadouts and may cover what PLAN.md expected to need scdatatools for.
 There is a `blender_addon` and material/export contract docs under
 `tools/src/StarBreaker/docs/` worth reading before extending `mtl_to_pbr.py`.
 
+### Verified by rendering real armor
+
+The QRT "Bokto" heavy set (helmet, core, arms, legs, backpack) plus a CDS
+undersuit renders on the shared 220-bone skeleton, with real tint colours and
+normal-mapped detail, and deforms correctly when bones are posed. The scene
+holds **one** skeleton and 220 bone objects across 10 skinned meshes.
+
+**Use Collada for meshes, not glTF.** cgf-converter's glTF keeps skin weights,
+but Blender does not apply its inverse bind matrices: one arms piece imported at
+Z 2.60-3.21 on a 1.745 m skeleton, and the pieces stacked end to end instead of
+overlapping the body. The same asset through `-dae` imports at Z 1.15-1.76,
+which is correct. Collada files are much larger (16 MB versus 3 MB) and that is
+the price. `normalize_armor.CONVERTED_SUFFIXES` prefers `.dae`.
+
+**Scale and up-axis need no correction.** The skeleton is 1.745 m tall with hips
+at 1.00 and head at 1.71, in metres, Z-up in Blender. `--scale` and `--up-axis`
+stay at their no-op defaults.
+
+**Strip vertex colours before export.** CryEngine stores layer-blend masks in
+vertex colour. glTF multiplies `COLOR_0` into base colour and three.js honours
+it, which rendered the whole character vivid magenta and yellow. `_common.strip_vertex_colors`
+removes them in both Blender scripts.
+
+**Option A is restored, but only because Blender does the remap.** Re-exporting
+each item against the canonical armature makes every item GLB carry the same
+220 joints in the same order, so the viewer binds by pointer swap. The runtime
+name-remap in `viewer/src/three/binding.ts` is the safety net it was designed to
+be. Two things make that work:
+
+* unknown vertex groups are removed, but their weight is first moved onto the
+  piece's dominant bone. Dropping it outright left 1080 of 30901 torso vertices
+  unweighted, and Blender's exporter then invented a `neutral_bone`, pinning
+  that cloth to the origin.
+* the strays are of two kinds: `*_override` equipment attachment points, which
+  carry no weight, and simulation chains (`CC_fabric_*`, `*_Skel_Sim`), which do.
+
+**Armor has no albedo texture.** The shader is `LayerBlend_V2` and colour comes
+from the item's tint palette. Textures are addressed by numbered slot, not by
+role: `TexSlot3` is the normal map (`_ddn`/`_ddna`), `TexSlot9` a decal,
+`TexSlot11/12/13` the wear, blend and "hal" layer masks. Filename-suffix
+guessing alone misses all of them; `mtl_to_pbr.TEX_SLOTS` maps by slot first.
+
+**Tint palettes give the real colours.** Each geometry node carries
+`Geometry.Palette.RootRecord`, a `file://` ref to a `TintPaletteTree` whose
+`entryA`/`entryB`/`entryC` each hold a tint colour, a specular colour and a
+glossiness (0-255), plus a glass colour. 1183 of 2615 items resolve a palette.
+v1 uses layer A's colour and glossiness and the normal map; compositing all
+three layers through the blend mask is not done.
+
+**Meshes carry several material slots** (shell, interior, metal, bones, props),
+matching the `.mtl` submaterial order.
+
 ### Still unverified
 
-- Unit scale and up-axis of converted geometry. Cgf-Converter emits a
-  `CryEngine_Z_up` root; the Blender scripts have `--scale` and `--up-axis`
-  flags defaulting to no-op, and nothing has been rendered yet to confirm.
-- `_ddna` gloss encoding and `_spec` semantics. `blender/mtl_to_pbr.py` still
-  implements the PLAN.md §4.3 guess.
+- Compositing the three tint layers through the blend and wear masks. v1 uses
+  layer A only, so a two-tone piece renders single-tone.
 - Whether female meshes bind to the same bone names as male ones.
-- Colour variants: `mtl_var/` material paths differ per variant, but tint
-  palette records (`libs/foundry/records/tintpalettes/`) have not been parsed.
+- Only one set has been converted end to end. `scx convert` has not been run
+  across the full catalog, so per-item failure rates are unknown.
+- Backpack sockets: the rigid piece exports with its origin baked, but the
+  socket bone it should hang from is not yet read from the CDF's `CA_BONE`
+  entry, so backpacks sit at the body origin.
 - 93 items with unresolved localization keys, and some placeholder junk in the
   catalog (`<= PLACEHOLDER =>`, `Body`) that should be flagged and hidden.
 - 331 items have no manufacturer code.

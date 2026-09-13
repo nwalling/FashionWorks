@@ -331,6 +331,24 @@ facts"; the parts that change this plan:
   per aspect ratio as sub-geometry.
 - Meshes ship split as `.skin`/`.skinm` pairs, and LODs 1-5 must be filtered.
 
+## 7b. First real render (2026-09-13)
+
+A full QRT "Bokto" heavy set renders on the shared skeleton. What that took
+beyond the plan:
+
+- **Collada, not glTF, for meshes.** cgf-converter's glTF keeps weights but
+  Blender ignores its inverse bind matrices, so pieces land stacked above the
+  body. §4.2's "verify in spike" resolves to DAE for both meshes and skeletons.
+- **Strip vertex colours before export.** CryEngine keeps blend masks there and
+  glTF multiplies `COLOR_0` into base colour, rendering everything magenta.
+- **Option A works after all**, because §4.3's Blender pass re-exports each item
+  against the canonical armature. Stray vertex groups must have their weight
+  moved to the dominant bone first, or the exporter invents a `neutral_bone`.
+- **§4.3's PBR mapping needs slot numbers.** Armor uses `LayerBlend_V2` with no
+  albedo at all: `TexSlot3` is the normal map, `TexSlot11/12/13` are wear, blend
+  and "hal" masks, and colour comes from a `TintPaletteTree` record.
+- Scale and up-axis needed no correction; the skeleton is 1.745 m, metres, Z-up.
+
 ## 8. Known risks and unknowns (resolve in Task 1)
 
 - Exact DCB field names for armor records and geometry nesting.

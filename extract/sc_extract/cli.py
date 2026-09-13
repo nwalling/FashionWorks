@@ -380,6 +380,19 @@ def synth(ctx: click.Context, skeleton: str | None, items: int) -> None:
     click.secho("these are placeholder primitives, not game assets", fg="yellow")
 
 
+@main.command()
+@click.pass_context
+def refresh(ctx: click.Context) -> None:
+    """Re-point the manifest at the GLBs currently on disk."""
+    from .pipeline import refresh_assets
+
+    settings = _settings(ctx)
+    if not settings.manifest_path().is_file():
+        _fail(f"no manifest at {settings.manifest_path()}; run `scx catalog` first")
+    ready = refresh_assets(settings)
+    click.secho(f"{ready} item(s) renderable", fg="green")
+
+
 @main.command(name="all")
 @click.option("--game-version", default="unknown")
 @click.pass_context

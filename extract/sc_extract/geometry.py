@@ -23,11 +23,35 @@ def _normalize(path: str) -> str:
     return _SEPARATORS.sub("/", path).lstrip("/")
 
 
+# CryEngine splits a mesh across a header and a data file. The DataCore names
+# only the header, but conversion needs both. Verified in build 1.0.191.55227:
+# .skin/.skinm (3450 pairs in the male armor tree), .cgf/.cgfm, .cga/.cgam.
+MESH_DATA_SIBLING = {".skin": ".skinm", ".cgf": ".cgfm", ".cga": ".cgam"}
+
+
+def mesh_siblings(source: str) -> list[str]:
+    """The header path plus its mesh-data sibling, when it has one."""
+    out = [source]
+    for header, data in MESH_DATA_SIBLING.items():
+        if source.lower().endswith(header):
+            out.append(source[: -len(header)] + data)
+            break
+    return out
+
+
 def asset_sources(item: Item) -> list[str]:
-    """Every P4K path this item needs: geometry plus its materials."""
-    sources = [g.source for g in item.geometry]
-    sources += [m for m in item.materials if m]
-    # A .skin sits beside a .mtl of the same stem when the record omits it.
+    """Every P4K path this item needs: geometry, mesh data, and materials."""
+    sources: list[str] = []
+    for geo in item.geometry:
+        for path in mesh_siblings(geo.source):
+            if path not in sources:
+                sources.append(path)
+
+    for material in item.materials:
+        if material and material not in sources:
+            sources.append(material)
+
+    # A mesh usually sits beside a .mtl of the same stem when the record omits it.
     for geo in item.geometry:
         implied = re.sub(r"\.(skin|cgf|chr|cga)$", ".mtl", geo.source, flags=re.IGNORECASE)
         if implied != geo.source and implied not in sources:

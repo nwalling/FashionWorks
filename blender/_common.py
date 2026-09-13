@@ -91,12 +91,40 @@ def make_material(name: str, color=(0.6, 0.6, 0.62, 1.0), roughness=0.55, metall
 # ---------------------------------------------------------------------------
 
 
+def abspath(path: Path | str) -> Path:
+    """Blender's operators reject relative paths, so resolve everything."""
+    return Path(path).expanduser().resolve()
+
+
+def strip_vertex_colors(mesh_obj) -> int:
+    """Remove colour attributes from a mesh. Returns how many were dropped.
+
+    CryEngine stores layer-blend masks in vertex colour. glTF multiplies
+    ``COLOR_0`` into base colour and three.js honours that, so leaving them in
+    renders armor in vivid magenta and yellow instead of its real tint.
+    """
+    data = mesh_obj.data
+    removed = 0
+    attributes = getattr(data, "color_attributes", None)  # Blender 3.2+
+    if attributes is not None:
+        while len(attributes):
+            attributes.remove(attributes[0])
+            removed += 1
+        return removed
+    legacy = getattr(data, "vertex_colors", None)
+    while legacy and len(legacy):
+        legacy.remove(legacy[0])
+        removed += 1
+    return removed
+
+
 def export_glb(path: Path, *, draco: bool = False, selected_only: bool = False) -> Path:
     """Export the scene to a .glb with skins, no animations.
 
     Unsupported keyword arguments are dropped rather than raising, so the same
     call works on 3.3 and 4.x.
     """
+    path = abspath(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     kwargs = {
         "filepath": str(path),
@@ -120,6 +148,7 @@ def export_glb(path: Path, *, draco: bool = False, selected_only: bool = False) 
 
 
 def write_json(path: Path, data) -> Path:
+    path = abspath(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return path

@@ -193,6 +193,7 @@ GEOMETRY_ROOT = "Geometry"
 NODE_PATH = ["Geometry.Geometry.path", "Geometry.path"]
 NODE_MATERIAL = ["Geometry.Material.path", "Material.path"]
 NODE_CHILDREN = "SubGeometry"
+NODE_PALETTE = ["Geometry.Palette.RootRecord", "Palette.RootRecord"]
 
 CLOTHING_STAT_KEYS = (
     "TemperatureResistance",

@@ -78,6 +78,7 @@ def _run_batch(settings: Settings, batch: list[Item], *, draco: bool) -> dict[st
                 "socket": item.socket,
                 "geometry": [{"source": g.source, "side": g.side} for g in item.geometry],
                 "materials": list(item.materials),
+                "tint": item.tint,
             }
             for item in batch
         ],
@@ -99,6 +100,30 @@ def _run_batch(settings: Settings, batch: list[Item], *, draco: bool) -> dict[st
         else:
             errors[item.id] = "blender produced no item.glb"
     return errors
+
+
+def refresh_assets(settings: Settings, manifest: Manifest | None = None) -> int:
+    """Point manifest ``assets.glb`` at the item GLBs that exist on disk.
+
+    Returns how many items are renderable. Also fills in each skeleton's base
+    GLB, so a manifest built before the rig existed picks it up.
+    """
+    manifest = manifest or Manifest.read(settings.manifest_path())
+    ready = 0
+    for item in manifest.items:
+        glb = settings.item_dir(item.id) / "item.glb"
+        if glb.is_file():
+            item.assets.glb = f"items/{item.id}/item.glb"
+            ready += 1
+        else:
+            item.assets.glb = None
+
+    for name, skeleton in manifest.skeletons.items():
+        base = settings.base_dir() / f"{name}.glb"
+        skeleton.glb = f"base/{name}.glb" if base.is_file() else None
+
+    manifest.write(settings.manifest_path())
+    return ready
 
 
 def convert(
@@ -140,11 +165,7 @@ def convert(
                 result.errors.update(errors)
                 result.ok += len(batch) - len(errors)
 
-    # Point the manifest at what actually exists on disk.
-    for item in manifest.items:
-        glb = settings.item_dir(item.id) / "item.glb"
-        item.assets.glb = f"items/{item.id}/item.glb" if glb.is_file() else None
-    manifest.write(settings.manifest_path())
+    refresh_assets(settings, manifest)
 
     if result.errors:
         settings.errors_path().parent.mkdir(parents=True, exist_ok=True)

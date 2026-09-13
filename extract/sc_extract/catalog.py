@@ -217,6 +217,7 @@ class GeoNode:
     path: str
     material: str | None
     depth: int
+    palette: str | None = None
 
     @property
     def suffix(self) -> str:
@@ -260,6 +261,7 @@ def walk_geometry(record: Record) -> list[GeoNode]:
             if key not in seen:
                 seen.add(key)
                 material = F.first(node, F.NODE_MATERIAL)
+                palette = F.first(node, F.NODE_PALETTE)
                 out.append(
                     GeoNode(
                         path=normalized,
@@ -267,6 +269,7 @@ def walk_geometry(record: Record) -> list[GeoNode]:
                         if isinstance(material, str)
                         else None,
                         depth=depth,
+                        palette=palette if isinstance(palette, str) and palette else None,
                     )
                 )
         for child in node.get(F.NODE_CHILDREN) or []:
@@ -313,8 +316,10 @@ def select_wearables(nodes: list[GeoNode], skeleton: str) -> list[GeoNode]:
     return []
 
 
-def geometry_for(record: Record, skeleton: str = "male") -> tuple[list[Geometry], list[str]]:
-    """Return worn geometry plus the material paths that go with it."""
+def geometry_for(
+    record: Record, skeleton: str = "male"
+) -> tuple[list[Geometry], list[str], list[GeoNode]]:
+    """Return worn geometry, its material paths, and the nodes they came from."""
     nodes = walk_geometry(record)
     chosen = select_wearables(nodes, skeleton)
     geometry = [Geometry(source=n.path, side=_side_of(n.path)) for n in chosen]
@@ -322,7 +327,64 @@ def geometry_for(record: Record, skeleton: str = "male") -> tuple[list[Geometry]
     for node in chosen:
         if node.material and node.material not in materials:
             materials.append(node.material)
-    return geometry, materials
+    return geometry, materials, chosen
+
+
+def _srgb(entry: Any, key: str) -> str | None:
+    """An SRGB8 sub-object to a #rrggbb string."""
+    if not isinstance(entry, dict):
+        return None
+    colour = entry.get(key)
+    if not isinstance(colour, dict):
+        return None
+    try:
+        r, g, b = (int(colour[k]) for k in ("r", "g", "b"))
+    except (KeyError, TypeError, ValueError):
+        return None
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def tint_for(nodes: list[GeoNode], index: Index) -> dict[str, Any] | None:
+    """Resolve an item's tint palette.
+
+    Armor in this build has no albedo texture. Its shader (``LayerBlend_V2``)
+    composites three tint layers, and the colours live in a ``TintPaletteTree``
+    record referenced per geometry node. Each of ``entryA``/``entryB``/``entryC``
+    carries a tint colour, a specular colour and a glossiness.
+    """
+    ref = next((n.palette for n in nodes if n.palette), None)
+    if not ref:
+        return None
+    record = index.resolve_ref(ref)
+    if record is None:
+        return {"palette_ref": Index.ref_name(ref)}
+
+    root = F.first(F.record_body(record.data), ["root"])
+    if not isinstance(root, dict):
+        return {"palette_ref": Index.ref_name(ref)}
+
+    layers = []
+    for key in ("entryA", "entryB", "entryC"):
+        entry = root.get(key)
+        if not isinstance(entry, dict):
+            continue
+        glossiness = entry.get("glossiness")
+        layers.append(
+            {
+                "color": _srgb(entry, "tintColor"),
+                "spec": _srgb(entry, "specColor"),
+                "glossiness": (float(glossiness) / 255.0)
+                if isinstance(glossiness, (int, float))
+                else None,
+            }
+        )
+
+    return {
+        "palette_ref": Index.ref_name(ref),
+        "layers": layers,
+        "colors": [layer["color"] for layer in layers if layer["color"]],
+        "glass": _srgb(root, "glassColor"),
+    }
 
 
 def bind_mode_for(geometry: list[Geometry]) -> str:
@@ -488,7 +550,7 @@ def build_item(
     if slot is None:
         return None
 
-    geometry, materials = geometry_for(record, skeleton)
+    geometry, materials, nodes = geometry_for(record, skeleton)
     name_key = _attach(record, F.NAME_KEY)
     desc_key = _attach(record, F.DESCRIPTION_KEY)
     name = loc.get(name_key) if isinstance(name_key, str) else None
@@ -509,6 +571,7 @@ def build_item(
         sub_slot=sub_slot_for(record, slot),
         weight_class=weight_class_for(record),
         manufacturer=manufacturer_for(record, index, loc),
+        tint=tint_for(nodes, index),
         stats=stats_for(record),
         tags=tags_for(record, index),
         geometry=geometry,

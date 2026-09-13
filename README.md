@@ -12,18 +12,20 @@ verified facts, and the commands for each stage.
 
 ## Status
 
-The catalog stage is verified against real game data: build 1.0.191.55227
-(`sc-alpha-4.10.0-hotfix`) yields **2615 armor items** in about 17 seconds, with
-real names, manufacturers, sets and colour variants. Geometry conversion and the
-Blender normalization stage are written but not yet run end to end on real
-meshes, so the viewer still shows synthetic placeholders.
+**Real Star Citizen armor renders in the viewer.** Build 1.0.191.55227
+(`sc-alpha-4.10.0-hotfix`) catalogs **2615 armor items** in about 17 seconds,
+and a full set converts and renders on the shared 220-bone skeleton with its
+real tint colours and normal maps, deforming correctly when posed.
+
+One set has been converted end to end so far; running the whole catalog through
+conversion is the next step.
 
 | Stage | State |
 | --- | --- |
 | Scaffold, config, `scx` CLI | done |
 | Extraction tools built from source | done, `starbreaker` and `cgf-converter` resolve |
 | Catalog (`scx catalog`) | **done, 2615 items from real game data** |
-| Extract / convert | written; real meshes convert with skin weights, not yet wired end to end |
+| Extract / convert | **one full set converted and rendering**; whole-catalog run not yet done |
 | Base rig + normalization | done, verified |
 | Viewer core, tints, export, share links | done, verified |
 | Thumbnails, web build | not started |
