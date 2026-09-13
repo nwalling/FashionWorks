@@ -12,14 +12,16 @@ verified facts, and the commands for each stage.
 
 ## Status
 
-The pipeline and the viewer are built and tested. The extraction stages are
-**not verified against real game data** — Star Citizen is Windows-only and there
-is no `Data.p4k` on the development host. Everything downstream of extraction is
-proven against synthetic placeholder assets.
+The pipeline and the viewer are built and tested, and both extraction tools are
+built from source and working on macOS. The only thing still missing is a
+`Data.p4k`, so the extraction stages are **not yet verified against real game
+data**. Everything downstream of extraction is proven against synthetic
+placeholder assets.
 
 | Stage | State |
 | --- | --- |
 | Scaffold, config, `scx` CLI | done |
+| Extraction tools built from source | done, `starbreaker` and `cgf-converter` resolve |
 | Catalog (`scx catalog`) | written, unit-tested against fixtures, unrun on real data |
 | Extract / convert | written, batch path proven with stand-in inputs |
 | Base rig + normalization | done, verified |
@@ -46,19 +48,21 @@ rebinding path, so pipeline and UI work is not blocked on having the game.
 
 ## Run it against a real install
 
-1. Install [StarBreaker](https://github.com/diogotr7/StarBreaker) and
-   [Cryengine-Converter](https://github.com/Markemp/Cryengine-Converter). On
-   macOS both need building from source; see `CLAUDE.md`.
-2. Point the config at your install:
+1. Build the extraction tools. Neither ships a macOS binary, so this clones
+   and compiles both:
 
-   ```toml
-   # config/settings.local.toml  (gitignored)
-   [paths]
-   sc_root = "C:/Program Files/Roberts Space Industries/StarCitizen/LIVE"
+   ```bash
+   tools/build.sh
+   ```
 
-   [tools]
-   starbreaker = "C:/tools/starbreaker.exe"
-   cgf_converter = "C:/tools/cgf-converter.exe"
+   It needs `cargo` (via rustup) and, for the optional cross-check tool,
+   `dotnet`.
+
+2. Point the pipeline at a `Data.p4k`. Any volume works, including an SD card:
+
+   ```bash
+   extract/.venv/bin/scx use-p4k /Volumes/<card>/StarCitizen/LIVE
+   extract/.venv/bin/scx doctor
    ```
 
 3. Work through the spike before trusting anything general:

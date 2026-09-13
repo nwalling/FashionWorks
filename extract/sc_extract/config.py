@@ -188,3 +188,29 @@ def load_settings(
         draco=bool(convert.get("draco", False)),
         asset_base_url=str(viewer.get("asset_base_url", "/assets")),
     )
+
+
+def merge_sc_root(existing: str, sc_root: Path) -> str:
+    """Return ``settings.local.toml`` text with ``paths.sc_root`` set.
+
+    Preserves any other settings already in the file, and replaces an existing
+    ``sc_root`` rather than appending a second one. Pure so it can be tested
+    without touching the real config.
+    """
+    line = f'sc_root = "{sc_root}"'
+
+    if not existing.strip():
+        return f"[paths]\n{line}\n"
+
+    lines = existing.splitlines()
+    kept = [entry for entry in lines if not entry.strip().startswith("sc_root")]
+
+    if any(entry.strip() == "[paths]" for entry in kept):
+        out: list[str] = []
+        for entry in kept:
+            out.append(entry)
+            if entry.strip() == "[paths]":
+                out.append(line)
+        return "\n".join(out).rstrip() + "\n"
+
+    return "\n".join(kept).rstrip() + f"\n\n[paths]\n{line}\n"

@@ -18,7 +18,9 @@ node_modules/
 /viewer/public/assets
 *.tsbuildinfo
 
-# Tooling downloads
+# Extraction tools: sources are cloned and binaries built by tools/build.sh.
+# The script itself is tracked; nothing it produces is.
+/tools/src/
 /tools/bin/
 
 # OS

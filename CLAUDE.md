@@ -29,25 +29,32 @@ and `PLAN.md` gets corrected.
 | Role | Tool | Note |
 | --- | --- | --- |
 | P4K + DataCore + DDS | **StarBreaker** (diogotr7/StarBreaker) | v0.3.2, May 2026. One binary covers all three. |
-| Geometry -> glTF | **Cgf-Converter** | Repo is now **Markemp/Cryengine-Converter**, C#, v2.0.0. `Markemp/Cgf-Converter` in PLAN.md §0 is a dead name. |
+| Geometry -> glTF | **StarBreaker `skin export`** | Reads `.skin`/`.cgf` straight out of the P4K and writes GLB. No extract-then-convert pass. |
+| Geometry cross-check | Cgf-Converter | Repo is now **Markemp/Cryengine-Converter**, C#. `Markemp/Cgf-Converter` in PLAN.md §0 is a dead name. Optional; use when weights or bone hierarchy look wrong. |
 | Normalization + export | **Blender** | Scripts run on 3.3+ and 4.x; version differences are behind capability checks in `blender/_common.py`, not version numbers. |
 | Fallback | scdatatools devel via the Deltawerks/starfab fork | Only if StarBreaker cannot expose a record type. Needs Python 3.10 + Blender 3.6 side by side. |
 
-### Platform reality (checked 2026-09-13 on this host, macOS arm64)
+### Platform reality (macOS arm64)
 
-Neither extraction tool ships a macOS build:
+Neither extraction tool ships a macOS build, so both are **built from source**
+into `tools/bin` by `tools/build.sh`:
 
-- StarBreaker v0.3.2 releases **linux-x86_64** and **windows-x86_64** CLI only.
-  It is Rust, so `cargo build --release` from source is the macOS route. No
-  `cargo` on this host.
-- Cryengine-Converter releases a Windows `.exe` only. It is .NET, so
-  `dotnet build` is the macOS route. No `dotnet` on this host.
-- Star Citizen is Windows-only, so there is **no `Data.p4k` on this machine**.
+| Tool | Language | Built | Note |
+| --- | --- | --- | --- |
+| StarBreaker | Rust | yes, v0.3.2 | needs `cargo`; installed via rustup, not Homebrew (the `rust` formula did not install cleanly here) |
+| Cryengine-Converter | .NET | yes | app host targets net9.0, Homebrew ships the .NET 10 runtime, so `tools/bin/cgf-converter` is a wrapper setting `DOTNET_ROOT` and `DOTNET_ROLL_FORWARD=Major` |
 
-Consequence: `scx catalog`, `scx extract` and `scx convert` cannot run here.
-They are written and unit-tested, but unverified against real data. Run them on
-a Windows host with the game installed, or point `paths.sc_root` at a copied
-`Data.p4k` and build the two tools from source.
+Both resolve through `tools.search_dirs`, so nothing needs to be on `PATH`.
+
+Star Citizen is Windows-only, so there is no `Data.p4k` on this machine. Point
+the pipeline at one on any volume, including an SD card or external drive:
+
+```bash
+extract/.venv/bin/scx use-p4k /Volumes/<card>/StarCitizen/LIVE
+```
+
+That writes `config/settings.local.toml`. With a P4K present, every stage
+reports ready.
 
 ## Commands
 
@@ -56,6 +63,13 @@ Setup:
 ```bash
 python3.11 -m venv extract/.venv && extract/.venv/bin/pip install -e "extract[dev]"
 npm --prefix viewer install
+tools/build.sh                               # StarBreaker + Cgf-Converter from source
+```
+
+Point at game data:
+
+```bash
+extract/.venv/bin/scx use-p4k /Volumes/<card>/StarCitizen/LIVE
 ```
 
 Pipeline:
@@ -122,6 +136,40 @@ they are marked as such.
 Caveat: all of the above was proven with **synthetic placeholder geometry**
 (`blender/make_synthetic.py`), not game assets. It validates the mechanism, not
 the data.
+
+### Verified from the StarBreaker v0.3.2 CLI source and binary
+
+Read out of `tools/src/StarBreaker/cli/src/*.rs` and confirmed against
+`--help` on the built binary. These are facts about the tool, not about the
+game data, but several of them settle PLAN.md guesses:
+
+- **The triple-nested geometry path is real.** StarBreaker's own query help
+  gives this as a worked example:
+  `EntityClassDefinition.Components[SGeometryResourceParams].Geometry.Geometry.Geometry.path`.
+  That confirms the record type is `EntityClassDefinition`, that `Components`
+  is a polymorphic array indexed by component type name, and that the
+  `Geometry.Geometry.Geometry.path` nesting in PLAN.md §3.1 was correct. It is
+  the first candidate in `fields.py`.
+- **`dcb query` checks a field guess without a full export**, which makes it
+  the fastest way to validate the rest of `fields.py`:
+  `starbreaker dcb query --p4k P --path <dotted path> [--filter G]`.
+- **`skin export` replaces the Cgf-Converter stage.** It takes a P4K path
+  substring and writes GLB directly, so geometry never lands on disk as
+  `.skin` first.
+- **`skin inspect --bone-weights`** dumps per-vertex influence statistics. That
+  is how the spike answers whether a `.skin` carries the full skeleton or a
+  subset, which decides §5.3 Option A versus Option B.
+- **`entity export` resolves loadouts** (`resolve_loadout_indexed`,
+  `LoadoutNode`) and can emit GLB, STL or `.blend`. PLAN.md §0 expected to need
+  the scdatatools fork for character loadout assembly; this may cover it.
+- **P4K converters** are `cryxml`, `dds-png`, `dds-merge`, `all`, and
+  `--convert` is repeatable.
+- Every subcommand accepts `SC_DATA_P4K` instead of `--p4k`. The wrappers in
+  `tools.py` always pass the flag so a stray environment variable cannot
+  redirect a run.
+- There is a `blender_addon` directory and a set of material and export
+  contract docs under `tools/src/StarBreaker/docs/`. Worth reading before
+  hand-rolling more of `mtl_to_pbr.py`.
 
 ### Unverified — fill these in during the Task 1 spike
 

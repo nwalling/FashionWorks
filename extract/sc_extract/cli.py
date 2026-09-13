@@ -21,7 +21,14 @@ from pathlib import Path
 import click
 
 from . import __version__
-from .config import REPO_ROOT, ConfigError, Settings, load_settings
+from .config import (
+    LOCAL_CONFIG,
+    REPO_ROOT,
+    ConfigError,
+    Settings,
+    load_settings,
+    merge_sc_root,
+)
 from .manifest import SLOTS, Manifest
 
 BLENDER_DIR = REPO_ROOT / "blender"
@@ -98,8 +105,9 @@ def doctor(ctx: click.Context) -> None:
         ),
         (
             "convert",
-            statuses["cgf-converter"].available and statuses["blender"].available,
-            "needs cgf-converter + blender",
+            (statuses["starbreaker"].available or statuses["cgf-converter"].available)
+            and statuses["blender"].available,
+            "needs blender + one of starbreaker / cgf-converter",
         ),
         ("rig", statuses["blender"].available, "needs blender"),
         ("synth", statuses["blender"].available, "needs blender only"),
@@ -113,6 +121,32 @@ def doctor(ctx: click.Context) -> None:
             click.secho(f"  {name:<10} blocked  ({why})", fg="yellow")
     if blocked:
         click.echo("\nSet missing paths in config/settings.local.toml.")
+
+
+@main.command(name="use-p4k")
+@click.argument("path", type=click.Path(exists=True, path_type=Path))
+def use_p4k(path: Path) -> None:
+    """Point the pipeline at a Data.p4k, writing config/settings.local.toml.
+
+    PATH may be the Data.p4k itself or the directory holding it, on any volume
+    (an SD card or external drive is fine).
+    """
+    resolved = path.expanduser().resolve()
+    p4k = resolved if resolved.is_file() else resolved / "Data.p4k"
+    if not p4k.is_file():
+        _fail(f"no Data.p4k at {p4k}")
+        return
+
+    size_gb = p4k.stat().st_size / 1_000_000_000
+    local = LOCAL_CONFIG
+    existing = local.read_text() if local.is_file() else ""
+    local.parent.mkdir(parents=True, exist_ok=True)
+    local.write_text(merge_sc_root(existing, p4k.parent))
+
+    click.secho(f"sc_root = {p4k.parent}", fg="green")
+    click.echo(f"  Data.p4k   {p4k.name}  {size_gb:.1f} GB")
+    click.echo(f"  written to {local}")
+    click.echo("\nNext: scx doctor, then scripts/spike.sh <set-name>")
 
 
 # ---------------------------------------------------------------------------

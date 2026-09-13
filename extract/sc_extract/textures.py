@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 
 from .config import Settings
-from .tools import ToolMissing, require, run
+from .tools import ToolMissing, starbreaker_dds_to_png, starbreaker_dds_to_png_all
 
 log = logging.getLogger(__name__)
 
@@ -56,12 +56,13 @@ def group_mips(paths: list[Path]) -> dict[Path, list[Path]]:
 
 
 def merge_and_convert(settings: Settings, dds: Path, *, out_dir: Path) -> Path:
-    """Merge split mips and convert one DDS to PNG. Returns the PNG path."""
-    binary = require("starbreaker", settings)
+    """Convert one already-extracted DDS to PNG. Returns the PNG path.
+
+    StarBreaker's ``dds to-png`` merges split mips itself, so there is no
+    separate merge call for the single-file path.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
-    target = out_dir / f"{dds.stem}.png"
-    run([str(binary), "dds", "convert", str(dds), "-o", str(target)])
-    return target
+    return starbreaker_dds_to_png(settings, dds, out_dir / f"{dds.stem}.png")
 
 
 def convert_all(settings: Settings, *, out_dir: Path | None = None) -> list[Path]:
@@ -72,7 +73,24 @@ def convert_all(settings: Settings, *, out_dir: Path | None = None) -> list[Path
     """
     out_dir = out_dir or (settings.interim_dir / "textures")
     candidates = [p for p in settings.raw_dir.rglob("*.dds") if not _MIP_SUFFIX.search(p.name)]
-    written: list[Path] = []
+    if not candidates:
+        log.info("no DDS files under %s", settings.raw_dir)
+        return []
+
+    # One batch call beats one process per texture; fall back to per-file so a
+    # single bad texture cannot lose the whole run.
+    try:
+        starbreaker_dds_to_png_all(settings, settings.raw_dir, out_dir)
+        written = sorted(out_dir.rglob("*.png"))
+        if written:
+            log.info("converted %d textures in batch", len(written))
+            return written
+    except ToolMissing:
+        raise
+    except Exception as exc:  # noqa: BLE001 - fall through to the per-file path
+        log.warning("batch texture conversion failed (%s); retrying per file", exc)
+
+    written = []
     for dds in candidates:
         target = out_dir / dds.relative_to(settings.raw_dir).with_suffix(".png")
         if target.is_file():

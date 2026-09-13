@@ -29,7 +29,17 @@ The original plan assumes `scdatatools` is a drop-in. Its state as of September 
 - Cryengine-Converter releases a Windows `.exe` only. It is .NET, so `dotnet build` is the macOS route.
 - Star Citizen itself is Windows-only, so a macOS host has no `Data.p4k` unless one is copied over.
 
-Phases 1-2 therefore run on Windows (or Linux via Proton) unless both tools are built from source. Phase 0's exit criteria cannot be met on a Mac without that work. `scx doctor` reports which stages the current host can run.
+**Resolved (2026-09-13):** both are now built from source into `tools/bin` by `tools/build.sh`, so the pipeline runs on macOS. Only `Data.p4k` itself is still needed. `scx doctor` reports which stages the current host can run, and `scx use-p4k <path>` points it at a P4K on any volume.
+
+**CORRECTION (2026-09-13) — Cgf-Converter is no longer required.** StarBreaker v0.3.2 has `skin export`, which reads a `.skin`/`.cgf` out of the P4K and writes GLB directly. That removes the extract-then-convert pass in §4.2 and the .NET dependency. Cgf-Converter is kept only as a cross-check when weights or bone hierarchy look wrong.
+
+**CONFIRMED (2026-09-13) — the geometry field path in §3.1 was right.** StarBreaker's `dcb query` help documents this exact path as a worked example:
+
+```
+EntityClassDefinition.Components[SGeometryResourceParams].Geometry.Geometry.Geometry.path
+```
+
+So the record type is `EntityClassDefinition`, `Components` is a polymorphic array indexed by component type name, and the triple `Geometry.Geometry.Geometry` nesting is real. `dcb query` also gives a cheap way to check the remaining field guesses one at a time, without a full export.
 
 Legal note (factual, not a recommendation): all extracted geometry/textures are CIG copyright. CIG publishes a fan content policy; the public web deployment in Phase 4 depends on what that policy permits for redistributing extracted assets. Local use has no distribution component.
 
