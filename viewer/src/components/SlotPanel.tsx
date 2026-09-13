@@ -1,0 +1,169 @@
+import { useMemo, useState } from 'react';
+
+import type { Item, Slot } from '../manifest';
+import { SLOTS, selectableItems, variantsOf } from '../manifest';
+import { useStore } from '../store';
+
+function uniqueSorted(values: Array<string | null | undefined>): string[] {
+  return [...new Set(values.filter((v): v is string => Boolean(v)))].sort();
+}
+
+export function SlotPanel() {
+  const manifest = useStore((state) => state.manifest);
+  const loadout = useStore((state) => state.loadout);
+  const filters = useStore((state) => state.filters);
+  const setFilter = useStore((state) => state.setFilter);
+  const equip = useStore((state) => state.equip);
+  const equipSet = useStore((state) => state.equipSet);
+  const visibleItems = useStore((state) => state.visibleItems);
+  const [activeSlot, setActiveSlot] = useState<Slot>('helmet');
+
+  const all = useMemo(() => (manifest ? selectableItems(manifest) : []), [manifest]);
+  const byId = useMemo(() => new Map(all.map((item) => [item.id, item])), [all]);
+  const weightClasses = useMemo(() => uniqueSorted(all.map((i) => i.weight_class)), [all]);
+  const manufacturers = useMemo(() => uniqueSorted(all.map((i) => i.manufacturer.code)), [all]);
+  const sets = useMemo(() => uniqueSorted(all.map((i) => i.set)), [all]);
+
+  const items = visibleItems(activeSlot);
+  const equippedId = loadout.slots[activeSlot];
+
+  return (
+    <section className="panel">
+      <nav className="tabs">
+        {SLOTS.map((slot) => (
+          <button
+            key={slot}
+            className={slot === activeSlot ? 'tab active' : 'tab'}
+            onClick={() => setActiveSlot(slot)}
+          >
+            {slot}
+            {loadout.slots[slot] ? <span className="dot" /> : null}
+          </button>
+        ))}
+      </nav>
+
+      <div className="filters">
+        <input
+          type="search"
+          placeholder="Search"
+          value={filters.search}
+          onChange={(event) => setFilter('search', event.target.value)}
+        />
+        <select
+          value={filters.weightClass ?? ''}
+          onChange={(event) => setFilter('weightClass', event.target.value || null)}
+        >
+          <option value="">Any weight</option>
+          {weightClasses.map((value) => (
+            <option key={value} value={value}>
+              {value}
+            </option>
+          ))}
+        </select>
+        <select
+          value={filters.manufacturer ?? ''}
+          onChange={(event) => setFilter('manufacturer', event.target.value || null)}
+        >
+          <option value="">Any maker</option>
+          {manufacturers.map((value) => (
+            <option key={value} value={value}>
+              {value}
+            </option>
+          ))}
+        </select>
+        <select
+          value={filters.set ?? ''}
+          onChange={(event) => setFilter('set', event.target.value || null)}
+        >
+          <option value="">Any set</option>
+          {sets.map((value) => (
+            <option key={value} value={value}>
+              {value}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <ul className="items">
+        <li>
+          <button
+            className={equippedId === null ? 'item active' : 'item'}
+            onClick={() => equip(activeSlot, null)}
+          >
+            <span className="item-name">None</span>
+          </button>
+        </li>
+        {items.map((item) => (
+          <ItemRow
+            key={item.id}
+            item={item}
+            equippedId={equippedId}
+            variants={variantsOf(item, byId)}
+            onEquip={(id) => equip(activeSlot, id)}
+            onEquipSet={() => (item.set ? equipSet(item.set) : undefined)}
+          />
+        ))}
+        {items.length === 0 ? <li className="empty">No items match these filters.</li> : null}
+      </ul>
+    </section>
+  );
+}
+
+function ItemRow({
+  item,
+  equippedId,
+  variants,
+  onEquip,
+  onEquipSet,
+}: {
+  item: Item;
+  equippedId: string | null;
+  variants: Item[];
+  onEquip: (id: string) => void;
+  onEquipSet: () => void;
+}) {
+  const activeVariant = variants.find((v) => v.id === equippedId) ?? item;
+  const isEquipped = variants.some((v) => v.id === equippedId);
+
+  return (
+    <li>
+      <button
+        className={isEquipped ? 'item active' : 'item'}
+        onClick={() => onEquip(activeVariant.id)}
+      >
+        <span className="item-name">{item.name}</span>
+        <span className="item-meta">
+          {[item.manufacturer.code, item.weight_class].filter(Boolean).join(' · ')}
+        </span>
+      </button>
+      {variants.length > 1 ? (
+        <div className="swatches">
+          {variants.map((variant) => (
+            <button
+              key={variant.id}
+              title={variant.class_name}
+              className={variant.id === equippedId ? 'swatch active' : 'swatch'}
+              style={{ background: swatchColor(variant) }}
+              onClick={() => onEquip(variant.id)}
+            />
+          ))}
+        </div>
+      ) : null}
+      {item.set ? (
+        <button className="link" onClick={onEquipSet}>
+          equip full set
+        </button>
+      ) : null}
+    </li>
+  );
+}
+
+function swatchColor(item: Item): string {
+  const colors = item.tint?.colors;
+  if (Array.isArray(colors) && typeof colors[0] === 'number') {
+    const [r, g, b] = colors as number[];
+    const channel = (v: number) => Math.round(Math.min(1, Math.max(0, v)) * 255);
+    return `rgb(${channel(r)}, ${channel(g)}, ${channel(b)})`;
+  }
+  return '#4a5058';
+}

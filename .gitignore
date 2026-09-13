@@ -1,0 +1,28 @@
+# Extracted / generated game data — never committed (CIG copyright, see CLAUDE.md)
+/data/
+!/data/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Node / viewer
+node_modules/
+/viewer/dist/
+/viewer/public/assets
+*.tsbuildinfo
+
+# Tooling downloads
+/tools/bin/
+
+# OS
+.DS_Store
+
+# Machine-specific overrides
+config/settings.local.toml

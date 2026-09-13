@@ -1,0 +1,332 @@
+"""``scx`` command line interface.
+
+Stages, in pipeline order::
+
+    scx doctor      # what is available on this host, and what is blocking
+    scx catalog     # Data.p4k -> data/out/manifest.json
+    scx extract     # manifest -> data/raw (geometry, materials, textures)
+    scx convert     # data/raw -> data/out/items/<id>/item.glb
+    scx rig         # base skeleton + undersuit -> data/out/base/<skeleton>.glb
+    scx synth       # dev-only: synthetic manifest + GLBs, no game data needed
+    scx all         # catalog + extract + convert + rig
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import sys
+from pathlib import Path
+
+import click
+
+from . import __version__
+from .config import REPO_ROOT, ConfigError, Settings, load_settings
+from .manifest import SLOTS, Manifest
+
+BLENDER_DIR = REPO_ROOT / "blender"
+
+
+def _setup_logging(verbose: int) -> None:
+    level = logging.WARNING if verbose == 0 else logging.INFO if verbose == 1 else logging.DEBUG
+    logging.basicConfig(level=level, format="%(levelname)-7s %(name)s: %(message)s")
+
+
+def _settings(ctx: click.Context) -> Settings:
+    return ctx.obj["settings"]
+
+
+def _fail(message: str) -> None:
+    click.secho(f"error: {message}", fg="red", err=True)
+    sys.exit(1)
+
+
+@click.group(context_settings={"help_option_names": ["-h", "--help"]})
+@click.version_option(__version__, prog_name="scx")
+@click.option("-v", "--verbose", count=True, help="-v info, -vv debug")
+@click.option("--config", type=click.Path(path_type=Path), default=None, help="settings.toml path")
+@click.pass_context
+def main(ctx: click.Context, verbose: int, config: Path | None) -> None:
+    """SC Armor Kitbasher extraction pipeline."""
+    _setup_logging(verbose)
+    try:
+        settings = load_settings(config)
+    except ConfigError as exc:
+        _fail(str(exc))
+        return
+    ctx.obj = {"settings": settings}
+
+
+# ---------------------------------------------------------------------------
+# doctor
+# ---------------------------------------------------------------------------
+
+
+@main.command()
+@click.pass_context
+def doctor(ctx: click.Context) -> None:
+    """Report host readiness for each pipeline stage."""
+    from . import tools
+
+    settings = _settings(ctx)
+    click.secho("paths", bold=True)
+    p4k = settings.p4k_path
+    click.echo(f"  sc_root       {settings.sc_root or '(unset)'}")
+    click.echo(
+        f"  Data.p4k      {p4k or '(unset)'} "
+        f"{'[found]' if settings.has_game_data() else '[MISSING]'}"
+    )
+    click.echo(f"  out_dir       {settings.out_dir}")
+
+    click.secho("tools", bold=True)
+    statuses = {s.name: s for s in tools.status(settings)}
+    for status in statuses.values():
+        mark = "ok " if status.available else "MISSING"
+        click.echo(f"  {status.name:<14} {mark:<8} {status.path or ''} {status.version or ''}")
+
+    click.secho("stages", bold=True)
+    checks = [
+        (
+            "catalog",
+            settings.has_game_data() and statuses["starbreaker"].available,
+            "needs Data.p4k + starbreaker",
+        ),
+        (
+            "extract",
+            settings.has_game_data() and statuses["starbreaker"].available,
+            "needs Data.p4k + starbreaker",
+        ),
+        (
+            "convert",
+            statuses["cgf-converter"].available and statuses["blender"].available,
+            "needs cgf-converter + blender",
+        ),
+        ("rig", statuses["blender"].available, "needs blender"),
+        ("synth", statuses["blender"].available, "needs blender only"),
+    ]
+    blocked = False
+    for name, ready, why in checks:
+        if ready:
+            click.secho(f"  {name:<10} ready", fg="green")
+        else:
+            blocked = True
+            click.secho(f"  {name:<10} blocked  ({why})", fg="yellow")
+    if blocked:
+        click.echo("\nSet missing paths in config/settings.local.toml.")
+
+
+# ---------------------------------------------------------------------------
+# catalog
+# ---------------------------------------------------------------------------
+
+
+@main.command()
+@click.option("--filter", "filter_glob", default=None, help="DCB export filter glob")
+@click.option("--include-npc", is_flag=True, help="keep NPC-only pieces")
+@click.option("--force", is_flag=True, help="re-export the DCB even if cached")
+@click.option("--game-version", default="unknown", help="value for manifest.game_version")
+@click.pass_context
+def catalog(
+    ctx: click.Context, filter_glob: str | None, include_npc: bool, force: bool, game_version: str
+) -> None:
+    """Build data/out/manifest.json from the DataCore."""
+    from . import catalog as catalog_mod
+    from . import dcb
+    from .localization import Localization
+
+    settings = _settings(ctx)
+    if not settings.has_game_data():
+        _fail(
+            "no Data.p4k available on this host. Set paths.sc_root in "
+            "config/settings.local.toml, then re-run. `scx doctor` shows the details."
+        )
+
+    dcb.export(settings, filter_glob=filter_glob, force=force)
+    index = dcb.Index.load(settings.dcb_dir)
+
+    loc_file = settings.raw_dir / settings.localization_p4k_path()
+    if loc_file.is_file():
+        loc = Localization.from_file(loc_file)
+    else:
+        click.secho(
+            f"warning: no localization at {loc_file}; names stay as class names",
+            fg="yellow",
+            err=True,
+        )
+        loc = Localization.empty()
+
+    manifest, stats = catalog_mod.build(
+        index, loc, game_version=game_version, include_npc=include_npc
+    )
+    manifest.write(settings.manifest_path())
+
+    click.secho(f"wrote {settings.manifest_path()}", fg="green")
+    for slot, count in manifest.counts_by_slot().items():
+        click.echo(f"  {slot:<10} {count}")
+    click.echo(f"  {'total':<10} {len(manifest.items)}")
+
+    if loc.missing:
+        settings.errors_path().parent.mkdir(parents=True, exist_ok=True)
+        settings.errors_path().write_text(
+            json.dumps({"unresolved_localization_keys": sorted(loc.missing)}, indent=2)
+        )
+        click.secho(
+            f"{len(loc.missing)} unresolved @keys listed in {settings.errors_path()}",
+            fg="yellow",
+        )
+
+
+# ---------------------------------------------------------------------------
+# extract
+# ---------------------------------------------------------------------------
+
+
+@main.command()
+@click.option("--slot", type=click.Choice(SLOTS), default=None)
+@click.option("--item", "item_id", default=None, help="single item id")
+@click.pass_context
+def extract(ctx: click.Context, slot: str | None, item_id: str | None) -> None:
+    """Extract raw geometry, materials and textures for catalog items."""
+    from . import geometry, textures
+
+    settings = _settings(ctx)
+    if not settings.manifest_path().is_file():
+        _fail(f"no manifest at {settings.manifest_path()}; run `scx catalog` first")
+
+    manifest = Manifest.read(settings.manifest_path())
+    if item_id:
+        item = manifest.by_id().get(item_id)
+        if item is None:
+            _fail(f"no item {item_id} in manifest")
+            return
+        paths = geometry.extract_item(settings, item)
+        click.secho(f"extracted {len(paths)} files for {item.class_name}", fg="green")
+    else:
+        count = geometry.extract_manifest(settings, manifest, slot=slot)
+        click.secho(f"requested {count} source paths", fg="green")
+
+    written = textures.convert_all(settings)
+    click.secho(f"converted {len(written)} textures", fg="green")
+
+
+# ---------------------------------------------------------------------------
+# convert
+# ---------------------------------------------------------------------------
+
+
+@main.command()
+@click.option("--slot", type=click.Choice(SLOTS), default=None)
+@click.option("--item", "item_id", default=None)
+@click.option("--all", "convert_all_items", is_flag=True)
+@click.option("--jobs", type=int, default=None, help="override convert.jobs")
+@click.option("--web", is_flag=True, help="enable Draco/KTX2 for a web build")
+@click.pass_context
+def convert(
+    ctx: click.Context,
+    slot: str | None,
+    item_id: str | None,
+    convert_all_items: bool,
+    jobs: int | None,
+    web: bool,
+) -> None:
+    """Convert raw geometry to normalized per-item GLBs."""
+    from . import pipeline
+
+    settings = _settings(ctx)
+    if not settings.manifest_path().is_file():
+        _fail(f"no manifest at {settings.manifest_path()}; run `scx catalog` first")
+    if not (slot or item_id or convert_all_items):
+        _fail("pass one of --item, --slot or --all")
+
+    result = pipeline.convert(
+        settings,
+        slot=slot,
+        item_id=item_id,
+        jobs=jobs or settings.jobs,
+        draco=web or settings.draco,
+    )
+    click.secho(f"converted {result.ok} items, {len(result.errors)} failed", fg="green")
+    if result.errors:
+        click.secho(f"see {settings.errors_path()}", fg="yellow")
+
+
+# ---------------------------------------------------------------------------
+# rig / synth
+# ---------------------------------------------------------------------------
+
+
+@main.command()
+@click.option("--skeleton", default=None, help="male|female (default: catalog.skeleton)")
+@click.pass_context
+def rig(ctx: click.Context, skeleton: str | None) -> None:
+    """Build data/out/base/<skeleton>.glb from the canonical .chr."""
+    from .tools import blender_run
+
+    settings = _settings(ctx)
+    name = skeleton or settings.skeleton
+    blender_run(
+        settings,
+        BLENDER_DIR / "build_base_rig.py",
+        args=[
+            "--skeleton",
+            name,
+            "--out-dir",
+            str(settings.base_dir()),
+            "--interim-dir",
+            str(settings.interim_dir),
+        ],
+    )
+    click.secho(f"wrote {settings.base_dir() / f'{name}.glb'}", fg="green")
+
+
+@main.command()
+@click.option("--skeleton", default=None)
+@click.option("--items", type=int, default=30, help="how many placeholder items to generate")
+@click.pass_context
+def synth(ctx: click.Context, skeleton: str | None, items: int) -> None:
+    """Generate a synthetic rig + manifest so the viewer runs without game data.
+
+    Development stand-in only: the meshes are primitives, not game assets. It
+    exercises the same manifest schema, joint order and skinned/socket split as
+    a real run, so viewer work is not blocked on having a Data.p4k.
+    """
+    from .synthetic import build_manifest
+    from .tools import blender_run
+
+    settings = _settings(ctx)
+    name = skeleton or settings.skeleton
+    blender_run(
+        settings,
+        BLENDER_DIR / "make_synthetic.py",
+        args=["--skeleton", name, "--out-dir", str(settings.out_dir), "--items", str(items)],
+        timeout=900,
+    )
+
+    descriptors = settings.out_dir / "synth-items.json"
+    if not descriptors.is_file():
+        _fail(f"blender did not write {descriptors}")
+        return
+
+    manifest = build_manifest(settings, descriptors)
+    manifest.write(settings.manifest_path())
+    click.secho(
+        f"wrote {settings.manifest_path()} with {len(manifest.items)} synthetic items", fg="green"
+    )
+    for slot, count in manifest.counts_by_slot().items():
+        click.echo(f"  {slot:<10} {count}")
+    click.secho("these are placeholder primitives, not game assets", fg="yellow")
+
+
+@main.command(name="all")
+@click.option("--game-version", default="unknown")
+@click.pass_context
+def all_stages(ctx: click.Context, game_version: str) -> None:
+    """Run catalog, extract, convert and rig in order."""
+    ctx.invoke(catalog, game_version=game_version)
+    ctx.invoke(extract)
+    ctx.invoke(convert, convert_all_items=True)
+    ctx.invoke(rig)
+
+
+if __name__ == "__main__":
+    main()

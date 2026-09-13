@@ -1,0 +1,118 @@
+[
+  {
+    "__ref": "{11111111-1111-1111-1111-111111111111}",
+    "ClassName": "aeg_pathfinder_helmet_light_slate",
+    "Components": {
+      "SAttachableComponentParams": {
+        "AttachDef": {
+          "Type": "Char_Armor_Helmet",
+          "SubType": "Char_Armor_Helmet_Light",
+          "Size": 1,
+          "Manufacturer": "{99999999-0000-0000-0000-000000000001}",
+          "Localization": {
+            "Name": "@item_Name_aeg_pathfinder_helmet",
+            "Description": "@item_Desc_aeg_pathfinder_helmet"
+          }
+        }
+      },
+      "SGeometryResourceParams": {
+        "Geometry": {
+          "Geometry": {
+            "Geometry": { "path": "Data\\Objects\\Characters\\Human\\male_v7\\aeg\\pathfinder\\helmet.skin" },
+            "Material": { "path": "Data/Objects/Characters/Human/male_v7/aeg/pathfinder/helmet.mtl" }
+          }
+        }
+      },
+      "SCItemClothingParams": {
+        "TemperatureResistance": { "min": -40, "max": 65 },
+        "CarryCapacity": 0,
+        "IgnoredField": true
+      },
+      "STagsComponentParams": { "tags": ["{88888888-0000-0000-0000-000000000001}"] }
+    }
+  },
+  {
+    "__ref": "{11111111-1111-1111-1111-111111111112}",
+    "ClassName": "aeg_pathfinder_helmet_light_sand",
+    "Components": {
+      "SAttachableComponentParams": {
+        "AttachDef": {
+          "Type": "Char_Armor_Helmet",
+          "SubType": "Char_Armor_Helmet_Light",
+          "Manufacturer": "{99999999-0000-0000-0000-000000000001}",
+          "Localization": { "Name": "@item_Name_aeg_pathfinder_helmet" }
+        }
+      },
+      "SGeometryResourceParams": {
+        "Geometry": {
+          "Geometry": {
+            "Geometry": { "path": "Data/Objects/Characters/Human/male_v7/aeg/pathfinder/helmet.skin" }
+          }
+        }
+      }
+    }
+  },
+  {
+    "__ref": "{22222222-2222-2222-2222-222222222222}",
+    "ClassName": "rsi_bastion_arms_medium",
+    "Components": [
+      {
+        "SAttachableComponentParams": {
+          "AttachDef": {
+            "Type": "Char_Armor_Arms",
+            "SubType": "Char_Armor_Arms_Medium",
+            "Manufacturer": "{99999999-0000-0000-0000-000000000002}",
+            "Localization": { "Name": "@item_Name_rsi_bastion_arms" }
+          }
+        }
+      },
+      {
+        "SGeometryResourceParams": {
+          "Geometry": {
+            "Geometry": {
+              "Geometry": { "path": "Data/Objects/Characters/Human/male_v7/rsi/bastion/arm_l.skin" },
+              "SubGeometry": [
+                { "Geometry": { "path": "Data/Objects/Characters/Human/male_v7/rsi/bastion/arm_r.skin" } }
+              ]
+            }
+          }
+        }
+      }
+    ]
+  },
+  {
+    "__ref": "{33333333-3333-3333-3333-333333333333}",
+    "ClassName": "test_debug_helmet_prototype",
+    "Components": {
+      "SAttachableComponentParams": {
+        "AttachDef": { "Type": "Char_Armor_Helmet", "Localization": { "Name": "@item_Name_missing" } }
+      }
+    }
+  },
+  {
+    "__ref": "{44444444-4444-4444-4444-444444444444}",
+    "ClassName": "behr_p8sc_smg",
+    "Components": {
+      "SAttachableComponentParams": {
+        "AttachDef": { "Type": "WeaponPersonal", "Localization": { "Name": "@item_Name_p8sc" } }
+      }
+    }
+  },
+  {
+    "__ref": "{99999999-0000-0000-0000-000000000001}",
+    "ClassName": "Manufacturer_AEG",
+    "Code": "AEG",
+    "Name": "Aegis Dynamics"
+  },
+  {
+    "__ref": "{99999999-0000-0000-0000-000000000002}",
+    "ClassName": "Manufacturer_RSI",
+    "Code": "RSI",
+    "Name": "Roberts Space Industries"
+  },
+  {
+    "__ref": "{88888888-0000-0000-0000-000000000001}",
+    "ClassName": "Tag_Light",
+    "tagName": "weight_light"
+  }
+]

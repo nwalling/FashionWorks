@@ -1,0 +1,62 @@
+# SC Armor Kitbasher — project configuration.
+#
+# RULE: no path in this repo may be hardcoded outside this file.
+# Machine-specific values belong in config/settings.local.toml (gitignored),
+# which is deep-merged over this file. Any value may also be overridden by an
+# environment variable named SCX_<SECTION>_<KEY>, e.g. SCX_PATHS_SC_ROOT.
+
+[paths]
+# Root of a Star Citizen install (the directory that contains Data.p4k).
+# Empty means "not available on this host" — extraction stages will refuse to
+# run and say so rather than failing deep inside a subprocess.
+sc_root = ""
+
+# Everything the pipeline writes, relative to the repo root unless absolute.
+data_dir     = "data"
+raw_dir      = "data/raw"
+dcb_dir      = "data/dcb"
+interim_dir  = "data/interim"
+out_dir      = "data/out"
+
+[tools]
+# Binary names or absolute paths. Bare names are resolved on PATH, then against
+# tools.search_dirs. Leave empty to mark a tool as unavailable on this host.
+starbreaker    = "starbreaker"
+cgf_converter  = "cgf-converter"
+blender        = ""
+search_dirs    = ["tools/bin"]
+
+[tools.blender_candidates]
+# Checked in order when tools.blender is empty.
+darwin  = ["/Applications/Blender.app/Contents/MacOS/Blender"]
+linux   = ["/usr/bin/blender", "/usr/local/bin/blender"]
+windows = ["C:/Program Files/Blender Foundation/Blender 4.2/blender.exe"]
+
+[extract]
+# Localization table to resolve @item_Name_* keys against.
+locale            = "english"
+localization_path = "Data/Localization/{locale}/global.ini"
+
+# Where character assets live inside the p4k. Verified in the Task 1 spike.
+character_root = "Data/Objects/Characters/Human"
+
+[catalog]
+# Which skeleton the manifest and base rig are built for.
+skeleton = "male"
+
+# Items flagged with any of these are kept in the manifest but excluded from
+# the default viewer listing rather than dropped.
+exclude_flags = ["npc", "test", "no_geometry"]
+
+[convert]
+# Parallel worker processes for Cgf-Converter / Blender.
+jobs = 4
+# Items per Blender invocation, to amortize its ~2s startup.
+blender_batch_size = 20
+# Draco mesh compression — off locally, on for web builds (`scx convert --web`).
+draco = false
+
+[viewer]
+# Base URL the viewer loads manifest.json and item GLBs from.
+# "/assets" resolves to viewer/public/assets, symlinked to out_dir in dev.
+asset_base_url = "/assets"
