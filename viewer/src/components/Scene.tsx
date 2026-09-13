@@ -57,7 +57,7 @@ export function Scene({
       <Suspense fallback={null}>
         <Environment preset={preset} />
         {baseGlb ? (
-          <BaseCharacter glb={baseGlb} hideBody={loadout.slots.undersuit !== null}>
+          <BaseCharacter glb={baseGlb}>
             {SLOTS.map((slot) => {
               const id = loadout.slots[slot];
               const item = id ? byId.get(id) : undefined;

@@ -101,7 +101,7 @@ def test_merged_text_round_trips_through_the_loader(tmp_path: Path) -> None:
     base = tmp_path / "settings.toml"
     base.write_text(BASE)
     local = tmp_path / "local.toml"
-    local.write_text(merge_sc_root('[tools]\njobs = 1\n', tmp_path / "LIVE"))
+    local.write_text(merge_sc_root("[tools]\njobs = 1\n", tmp_path / "LIVE"))
 
     settings = load_settings(base, local_path=local, environ={}, root=tmp_path)
     assert settings.sc_root == tmp_path / "LIVE"

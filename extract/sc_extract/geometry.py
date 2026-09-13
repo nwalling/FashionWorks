@@ -39,8 +39,15 @@ def mesh_siblings(source: str) -> list[str]:
     return out
 
 
-def asset_sources(item: Item) -> list[str]:
-    """Every P4K path this item needs: geometry, mesh data, and materials."""
+def asset_sources(item: Item, *, speculative: bool = True) -> list[str]:
+    """Every P4K path this item needs: geometry, mesh data, and materials.
+
+    ``speculative`` adds a ``.mtl`` guessed from each mesh's stem, for records
+    that name no material. Those guesses frequently do not exist, so callers
+    deciding *whether extraction is still outstanding* must pass
+    ``speculative=False``: otherwise a path that can never appear keeps looking
+    like missing work and the P4K is rescanned on every run.
+    """
     sources: list[str] = []
     for geo in item.geometry:
         for path in mesh_siblings(geo.source):
@@ -51,11 +58,11 @@ def asset_sources(item: Item) -> list[str]:
         if material and material not in sources:
             sources.append(material)
 
-    # A mesh usually sits beside a .mtl of the same stem when the record omits it.
-    for geo in item.geometry:
-        implied = re.sub(r"\.(skin|cgf|chr|cga)$", ".mtl", geo.source, flags=re.IGNORECASE)
-        if implied != geo.source and implied not in sources:
-            sources.append(implied)
+    if speculative:
+        for geo in item.geometry:
+            implied = re.sub(r"\.(skin|cgf|chr|cga)$", ".mtl", geo.source, flags=re.IGNORECASE)
+            if implied != geo.source and implied not in sources:
+                sources.append(implied)
     return sources
 
 

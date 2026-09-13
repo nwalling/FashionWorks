@@ -28,3 +28,6 @@ node_modules/
 
 # Machine-specific overrides
 config/settings.local.toml
+
+# Scratch pages used to eyeball generated textures
+/viewer/public/_*/

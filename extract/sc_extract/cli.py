@@ -326,25 +326,53 @@ def convert(
 
 @main.command()
 @click.option("--skeleton", default=None, help="male|female (default: catalog.skeleton)")
+@click.option("--chr", "chr_file", default=None, help="converted skeleton (.dae)")
+@click.option("--undersuit", default=None, help="converted undersuit mesh for the base body")
+@click.option("--undersuit-item", default=None, help="manifest item id supplying its materials")
 @click.pass_context
-def rig(ctx: click.Context, skeleton: str | None) -> None:
-    """Build data/out/base/<skeleton>.glb from the canonical .chr."""
+def rig(
+    ctx: click.Context,
+    skeleton: str | None,
+    chr_file: str | None,
+    undersuit: str | None,
+    undersuit_item: str | None,
+) -> None:
+    """Build data/out/base/<skeleton>.glb from the canonical skeleton."""
+    import json as _json
+
+    from .pipeline import material_descriptors
     from .tools import blender_run
 
     settings = _settings(ctx)
     name = skeleton or settings.skeleton
-    blender_run(
-        settings,
-        BLENDER_DIR / "build_base_rig.py",
-        args=[
-            "--skeleton",
-            name,
-            "--out-dir",
-            str(settings.base_dir()),
-            "--interim-dir",
-            str(settings.interim_dir),
-        ],
-    )
+
+    args = [
+        "--skeleton", name,
+        "--out-dir", str(settings.base_dir()),
+        "--interim-dir", str(settings.interim_dir),
+        "--smooth-angle", str(settings.smooth_angle),
+    ]
+    if chr_file:
+        args += ["--chr", chr_file]
+    if undersuit:
+        args += ["--undersuit", undersuit]
+
+    # The base body needs the same materials as any other piece, or it renders
+    # as a flat untextured mannequin under the armor.
+    if undersuit_item and settings.manifest_path().is_file():
+        manifest = Manifest.read(settings.manifest_path())
+        item = manifest.by_id().get(undersuit_item)
+        if item is None:
+            _fail(f"no item {undersuit_item} in the manifest")
+            return
+        slots = material_descriptors(settings, item)
+        spec = settings.interim_dir / f"base-materials-{name}.json"
+        spec.parent.mkdir(parents=True, exist_ok=True)
+        spec.write_text(_json.dumps(slots, indent=1))
+        args += ["--materials", str(spec)]
+        click.echo(f"base body materials: {len(slots)} slot(s) from {item.name}")
+
+    blender_run(settings, BLENDER_DIR / "build_base_rig.py", args=args)
     click.secho(f"wrote {settings.base_dir() / f'{name}.glb'}", fg="green")
 
 

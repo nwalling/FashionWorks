@@ -141,9 +141,7 @@ def weight_from_record_path(record: Record) -> str | None:
     return None
 
 
-def manufacturer_for(
-    record: Record, index: Index, loc: Localization | None = None
-) -> Manufacturer:
+def manufacturer_for(record: Record, index: Index, loc: Localization | None = None) -> Manufacturer:
     """Resolve the manufacturer, localizing its name.
 
     The reference is a ``file://`` path ending ``scitemmanufacturer.<code>.json``,

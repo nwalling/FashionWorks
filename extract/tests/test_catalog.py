@@ -52,9 +52,7 @@ def test_manufacturer_reference_resolves(index: Index, loc: Localization) -> Non
     assert helmet.manufacturer.name == "Clark Defense Systems"
 
 
-def test_geometry_picks_the_worn_mesh_not_the_carry_prop(
-    index: Index, loc: Localization
-) -> None:
+def test_geometry_picks_the_worn_mesh_not_the_carry_prop(index: Index, loc: Localization) -> None:
     """The top of the geometry tree is the dropped-item prop, not the armor."""
     manifest, _ = build(index, loc)
     helmet = next(i for i in manifest.items if i.class_name.endswith("helmet_02_02_01"))
@@ -118,9 +116,7 @@ def test_stats_keep_only_known_fields(index: Index, loc: Localization) -> None:
     assert "IgnoredField" not in helmet.stats
 
 
-def test_tags_split_from_a_space_separated_string(
-    index: Index, loc: Localization
-) -> None:
+def test_tags_split_from_a_space_separated_string(index: Index, loc: Localization) -> None:
     manifest, _ = build(index, loc)
     helmet = next(i for i in manifest.items if i.class_name.endswith("helmet_02_02_01"))
     assert helmet.tags == ["Marine_Light", "Set_02", "Color_01", "Helmet"]

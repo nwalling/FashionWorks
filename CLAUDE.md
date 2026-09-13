@@ -374,6 +374,32 @@ regex.
 replacing the file: catalog and convert both report there, and a catalog re-run
 used to erase the convert failures.
 
+### Shading, and why armor looked low-poly
+
+Nothing was wrong with the geometry: pieces convert at LOD0 with 28-40k
+triangles, and LOD variants are filtered by name. The problem was normals.
+CryEngine hard-surface meshes depend on custom split normals, and **neither the
+Collada nor the glTF import brings them across**: a mesh arrives with all
+28,138 polygons smooth shaded and no auto-smooth, so Blender averages normals
+straight over sharp panel edges. `_common.shade_auto_smooth` keeps edges above
+`convert.smooth_angle` (default 40 degrees) hard, and the triangulate step
+preserves custom normals where they do exist.
+
+### The base body
+
+The base GLB is built by `build_base_rig.py`, which for a long time never ran
+the material pipeline, so the body kept Blender's placeholder materials and
+rendered as a flat white mannequin under the armor. `scx rig --undersuit-item`
+now passes real material descriptors, the same ones armor gets.
+
+**Hiding the base body needs a coverage test, not the slot name.** Several
+records in the undersuit slot are partial: a torso wrap, a necksock. Hiding the
+whole body for those leaves a legless torso. Height alone does not separate
+them either, since a waist-up piece measured 1.20 against a 1.64 body, or 73%.
+What separates them is whether the piece reaches the feet: measured on real
+items, full suits start at y=0.00 while a torso wrap starts at y=0.65. The
+viewer hides the base only for a piece that reaches both the feet and the chest.
+
 ### Still unverified
 
 - Compositing the three tint layers through the blend and wear masks. v1 uses

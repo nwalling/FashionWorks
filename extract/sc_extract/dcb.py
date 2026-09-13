@@ -93,9 +93,7 @@ def export(
         starbreaker_dcb_extract(settings, out_dir=out_dir, fmt="json", filter_glob=pattern)
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    cache_path.write_text(
-        json.dumps({"key": key, "filters": filters, "p4k": str(p4k)}, indent=2)
-    )
+    cache_path.write_text(json.dumps({"key": key, "filters": filters, "p4k": str(p4k)}, indent=2))
     return out_dir
 
 

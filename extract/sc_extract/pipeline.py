@@ -9,10 +9,13 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 
+from . import material, tint
 from .config import REPO_ROOT, Settings
 from .manifest import Item, Manifest
 from .tools import (
@@ -41,6 +44,10 @@ def input_hash(settings: Settings, item: Item) -> str:
     digest = hashlib.sha256()
     digest.update(item.class_name.encode())
     digest.update(str(settings.draco).encode())
+    digest.update(str(settings.smooth_angle).encode())
+    digest.update(json.dumps(item.tint, sort_keys=True, default=str).encode())
+    for mtl in discover_materials(settings, item):
+        digest.update(mtl.name.encode())
     for source in [g.source for g in item.geometry] + list(item.materials):
         path = settings.raw_dir / source
         digest.update(source.encode())
@@ -92,7 +99,9 @@ def ensure_extracted(settings: Settings, items: list[Item], *, textures: bool = 
 
     wanted: list[str] = []
     for item in items:
-        for source in geometry_mod.asset_sources(item):
+        # Only genuinely required paths: a guessed .mtl that does not exist
+        # would otherwise make every run look like it still has work to do.
+        for source in geometry_mod.asset_sources(item, speculative=False):
             if raw_path(settings, source) is None and source not in wanted:
                 wanted.append(source)
     if not wanted:
@@ -102,7 +111,20 @@ def ensure_extracted(settings: Settings, items: list[Item], *, textures: bool = 
     # once per call, and on an SD card that dominates.
     prefixes = sorted({str(Path(s).parent) for s in wanted})
     converters = ["cryxml", "dds-png"] if textures else ["cryxml"]
+    done_marker = settings.raw_dir / ".extracted-prefixes"
+    # Compared case-insensitively: the DataCore spells the same directory both
+    # Objects/... and objects/..., and the marker records whichever came first.
+    already = (
+        {line.strip().lower() for line in done_marker.read_text().splitlines() if line.strip()}
+        if done_marker.is_file()
+        else set()
+    )
+
+    extracted = []
     for prefix in prefixes:
+        if prefix.lower() in already:
+            # Already pulled once; anything still missing is absent from the P4K.
+            continue
         try:
             starbreaker_p4k_extract(
                 settings,
@@ -110,8 +132,15 @@ def ensure_extracted(settings: Settings, items: list[Item], *, textures: bool = 
                 regex=path_regex(prefix),
                 convert=converters,
             )
+            extracted.append(prefix)
         except ToolError as exc:
             log.warning("extraction failed for %s: %s", prefix, exc)
+
+    if extracted:
+        done_marker.parent.mkdir(parents=True, exist_ok=True)
+        done_marker.write_text(
+            "\n".join(sorted(already | {p.lower() for p in extracted})) + "\n"
+        )
     return len(wanted)
 
 
@@ -147,6 +176,109 @@ def ensure_converted(settings: Settings, item: Item, *, fmt: str = "dae") -> lis
     return out
 
 
+@lru_cache(maxsize=1)
+def _png_index(root: str) -> dict[str, str]:
+    """Lowercased filename -> path, for every PNG under the raw tree.
+
+    Built once. Scanning 20k+ files per texture lookup made a full run crawl.
+    """
+    index: dict[str, str] = {}
+    for path in Path(root).rglob("*.png"):
+        index.setdefault(path.name.lower(), str(path))
+    return index
+
+
+def texture_on_disk(settings: Settings, reference: str) -> Path | None:
+    """Resolve a .mtl texture reference to the extracted PNG.
+
+    Materials name ``.tif`` files; extraction converts them to ``.png`` with
+    ``--convert dds-png``. Case varies between the material and the archive, so
+    the fallback is a case-insensitive index rather than a fresh directory walk.
+    """
+    stem = re.sub(r"\.(tif|dds)(\.\d+[ab]?)?$", "", Path(reference).name, flags=re.IGNORECASE)
+    direct = settings.raw_dir / "Data" / Path(reference).parent / f"{stem}.png"
+    if direct.is_file():
+        return direct
+    found = _png_index(str(settings.raw_dir / "Data")).get(f"{stem.lower()}.png")
+    return Path(found) if found else None
+
+
+def discover_materials(settings: Settings, item: Item) -> list[Path]:
+    """Find an item's ``.mtl`` files, declared or not.
+
+    A quarter of the catalog declares no material at all: nothing in the
+    record's geometry tree carries a ``Material.path``. The file is still there,
+    named after the mesh with a two-digit suffix, so
+    ``m_qrt_utility_heavy_core_02.skin`` pairs with
+    ``m_qrt_utility_heavy_core_02_01.mtl``. Without this those items render
+    untextured in a flat colour.
+    """
+    found: list[Path] = []
+
+    for relative in item.materials:
+        path = settings.raw_dir / "Data" / relative
+        if path.is_file():
+            found.append(path)
+            continue
+        sibling = next((settings.raw_dir / "Data").rglob(Path(relative).name), None)
+        if sibling is not None:
+            found.append(sibling)
+
+    if found:
+        return found
+
+    for geo in item.geometry:
+        mesh = raw_path(settings, geo.source)
+        if mesh is None:
+            continue
+        exact = mesh.with_suffix(".mtl")
+        if exact.is_file():
+            found.append(exact)
+            continue
+        # "<mesh stem>_NN.mtl" beside the mesh, lowest suffix first.
+        candidates = sorted(mesh.parent.glob(f"{mesh.stem}_*.mtl"))
+        if candidates:
+            found.append(candidates[0])
+        else:
+            log.warning("no material found for %s", geo.source)
+    return found
+
+
+def material_descriptors(settings: Settings, item: Item) -> list[dict]:
+    """Parse an item's materials and bake its tint palette into textures.
+
+    Armor's LayerBlend_V2 shader has no albedo: three palette layers are
+    composited through the material's blend mask. glTF cannot carry that as a
+    node graph, so the composite is baked to images here, before Blender runs.
+    """
+    layers = tint.layers_from_tint(item.tint)
+    out: list[dict] = []
+
+    for mtl in discover_materials(settings, item):
+        for sub in material.parse(mtl):
+            descriptor = sub.as_dict()
+            resolved: dict[str, str] = {}
+            for role, reference in sub.textures.items():
+                path = texture_on_disk(settings, reference)
+                if path is not None:
+                    resolved[role] = str(path)
+            descriptor["resolved"] = resolved
+
+            if sub.tintable and layers:
+                composed = tint.compose(
+                    Path(resolved["blend"]) if "blend" in resolved else None,
+                    layers,
+                    settings.interim_dir / "tint",
+                    Path(resolved.get("blend", sub.name)).stem or sub.name,
+                    wear_path=Path(resolved["wear"]) if "wear" in resolved else None,
+                )
+                descriptor["composed"] = {k: str(v) for k, v in composed.items()}
+            else:
+                descriptor["composed"] = {}
+            out.append(descriptor)
+    return out
+
+
 def _batches(items: list[Item], size: int) -> list[list[Item]]:
     return [items[i : i + size] for i in range(0, len(items), size)]
 
@@ -160,6 +292,7 @@ def _run_batch(settings: Settings, batch: list[Item], *, draco: bool) -> dict[st
         "base_dir": str(settings.base_dir()),
         "skeleton": settings.skeleton,
         "draco": draco,
+        "smooth_angle": settings.smooth_angle,
         "items": [
             {
                 "id": item.id,
@@ -170,6 +303,7 @@ def _run_batch(settings: Settings, batch: list[Item], *, draco: bool) -> dict[st
                 "geometry": [{"source": g.source, "side": g.side} for g in item.geometry],
                 "materials": list(item.materials),
                 "tint": item.tint,
+                "material_slots": material_descriptors(settings, item),
             }
             for item in batch
         ],

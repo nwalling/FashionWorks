@@ -101,6 +101,7 @@ class Settings:
     jobs: int
     blender_batch_size: int
     draco: bool
+    smooth_angle: float
 
     # viewer
     asset_base_url: str
@@ -216,6 +217,7 @@ def load_settings(
         jobs=int(convert.get("jobs", 4)),
         blender_batch_size=int(convert.get("blender_batch_size", 20)),
         draco=bool(convert.get("draco", False)),
+        smooth_angle=float(convert.get("smooth_angle", 40.0)),
         asset_base_url=str(viewer.get("asset_base_url", "/assets")),
     )
 

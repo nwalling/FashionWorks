@@ -215,8 +215,16 @@ def starbreaker_dcb_extract(
     """
     binary = require("starbreaker", settings)
     out_dir.mkdir(parents=True, exist_ok=True)
-    argv = [str(binary), "dcb", "extract", *_p4k_args(settings),
-            "--output", str(out_dir), "--format", fmt]
+    argv = [
+        str(binary),
+        "dcb",
+        "extract",
+        *_p4k_args(settings),
+        "--output",
+        str(out_dir),
+        "--format",
+        fmt,
+    ]
     if filter_glob:
         argv += ["--filter", filter_glob]
     run(argv)
@@ -311,7 +319,9 @@ def starbreaker_skin_export(settings: Settings, p4k_path: str, out_glb: Path) ->
     return out_glb
 
 
-def starbreaker_skin_inspect(settings: Settings, p4k_path: str, *, bone_weights: bool = False) -> str:
+def starbreaker_skin_inspect(
+    settings: Settings, p4k_path: str, *, bone_weights: bool = False
+) -> str:
     """Print parsed mesh metadata. With ``bone_weights``, dumps per-vertex
     influence statistics, which is how the Task 1 spike answers whether a
     .skin carries the full skeleton or a subset."""
@@ -341,8 +351,19 @@ def starbreaker_dds_to_png_all(
     """Batch DDS to PNG: ``starbreaker dds to-png-all -i D -o D [--filter G]``."""
     binary = require("starbreaker", settings)
     out_dir.mkdir(parents=True, exist_ok=True)
-    run([str(binary), "dds", "to-png-all", "-i", str(in_dir), "-o", str(out_dir),
-         "--filter", filter_glob])
+    run(
+        [
+            str(binary),
+            "dds",
+            "to-png-all",
+            "-i",
+            str(in_dir),
+            "-o",
+            str(out_dir),
+            "--filter",
+            filter_glob,
+        ]
+    )
     return out_dir
 
 

@@ -6,6 +6,8 @@ requires-python = ">=3.11"
 dependencies = [
     "click>=8.1",
     "rich>=13.7",
+    # Compositing the tint palette into albedo/ORM images (sc_extract.tint).
+    "pillow>=10.0",
 ]
 
 [project.optional-dependencies]

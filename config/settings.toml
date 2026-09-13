@@ -56,6 +56,11 @@ blender_batch_size = 20
 # Draco mesh compression — off locally, on for web builds (`scx convert --web`).
 draco = false
 
+# Edges sharper than this stay hard. CryEngine meshes arrive with no custom
+# split normals, so without this every panel edge is averaged smooth and the
+# armor looks soft and low-poly however dense it is.
+smooth_angle = 40.0
+
 [viewer]
 # Base URL the viewer loads manifest.json and item GLBs from.
 # "/assets" resolves to viewer/public/assets, symlinked to out_dir in dev.

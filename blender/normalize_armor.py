@@ -113,8 +113,10 @@ def rebind(mesh, armature, *, log: list[str]) -> None:
     mesh.matrix_parent_inverse.identity()
 
 
-def cleanup(mesh) -> None:
-    """Strip vertex colours and extra UVs, limit to 4 influences, triangulate."""
+def cleanup(mesh, *, smooth_angle: float = 40.0) -> None:
+    """Shade, strip vertex colours and extra UVs, limit influences, triangulate."""
+    C.shade_auto_smooth(mesh, smooth_angle)
+
     dropped = C.strip_vertex_colors(mesh)
     if dropped:
         print(f"[normalize] dropped {dropped} colour attribute(s) from {mesh.name}")
@@ -135,6 +137,8 @@ def cleanup(mesh) -> None:
 
     modifier = mesh.modifiers.new("Triangulate", "TRIANGULATE")
     modifier.quad_method = "SHORTEST_DIAGONAL"
+    if hasattr(modifier, "keep_custom_normals"):
+        modifier.keep_custom_normals = True
 
 
 def socket_locator(socket: str | None):
@@ -219,8 +223,6 @@ def process_item(item: dict, spec: dict, *, errors: dict[str, str]) -> None:
     out_dir = C.abspath(Path(spec["out_dir"]) / "items" / item_id)
     interim = C.abspath(spec["interim_dir"])
     base_dir = C.abspath(spec["base_dir"])
-    raw_dir = C.abspath(spec["raw_dir"])
-    texture_dir = raw_dir / "Data"
     notes: list[str] = []
     bind_mode = item.get("bind_mode", "skinned")
 
@@ -256,19 +258,17 @@ def process_item(item: dict, spec: dict, *, errors: dict[str, str]) -> None:
         return
 
     material_meta: list[dict] = []
+    slots = item.get("material_slots") or []
     for mesh in mesh_objects:
-        for mtl in item.get("materials", []):
-            meta = mtl_to_pbr.apply_materials(
-                mesh, raw_dir / "Data" / mtl, texture_dir, item.get("tint")
-            )
-            material_meta.extend(meta)
+        if slots:
+            material_meta.extend(mtl_to_pbr.apply_materials(mesh, slots))
 
         if bind_mode == "skinned":
             rebind(mesh, armature, log=notes)
         else:
             place_at_socket(mesh, armature, item.get("socket"), log=notes)
 
-        cleanup(mesh)
+        cleanup(mesh, smooth_angle=float(spec.get("smooth_angle", 40.0)))
 
     if bind_mode != "skinned" and armature is not None:
         bpy.data.objects.remove(armature, do_unlink=True)

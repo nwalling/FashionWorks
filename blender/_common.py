@@ -118,6 +118,38 @@ def strip_vertex_colors(mesh_obj) -> int:
     return removed
 
 
+def shade_auto_smooth(mesh_obj, angle_degrees: float = 40.0) -> str:
+    """Smooth shading with sharp edges above ``angle_degrees``.
+
+    CryEngine hard-surface meshes rely on custom split normals, and neither the
+    Collada nor the glTF import brings them across: everything arrives smooth
+    shaded with no auto-smooth, so Blender averages normals over genuinely sharp
+    panel edges. The result reads as soft and low-poly no matter how many
+    triangles the mesh has.
+
+    Blender 4.1 removed ``use_auto_smooth`` in favour of a "Smooth by Angle"
+    operator, so both are handled. Returns which path was taken.
+    """
+    from math import radians
+
+    data = mesh_obj.data
+    for polygon in data.polygons:
+        polygon.use_smooth = True
+
+    if hasattr(data, "use_auto_smooth"):  # Blender <= 4.0
+        data.use_auto_smooth = True
+        data.auto_smooth_angle = radians(angle_degrees)
+        return "use_auto_smooth"
+
+    try:  # Blender >= 4.1
+        bpy.context.view_layer.objects.active = mesh_obj
+        bpy.ops.object.shade_smooth_by_angle(angle=radians(angle_degrees))
+        return "shade_smooth_by_angle"
+    except (AttributeError, RuntimeError) as exc:
+        print(f"[shading] could not set auto-smooth: {exc}")
+        return "none"
+
+
 def export_glb(path: Path, *, draco: bool = False, selected_only: bool = False) -> Path:
     """Export the scene to a .glb with skins, no animations.
 

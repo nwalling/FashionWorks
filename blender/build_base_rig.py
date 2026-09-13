@@ -23,6 +23,7 @@ Run::
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -32,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bpy  # type: ignore[import-not-found]
 
 import _common as C
+import mtl_to_pbr
 
 IMPORTERS = {
     ".gltf": lambda p: bpy.ops.import_scene.gltf(filepath=str(p)),
@@ -160,8 +162,12 @@ def main() -> None:
     ap.add_argument("--chr", dest="chr_file", default=None,
                     help="converted skeleton; default <interim>/bhm_skeleton_v7.dae")
     ap.add_argument("--undersuit", default=None, help="optional undersuit mesh to include")
+    ap.add_argument("--materials", default=None,
+                    help="JSON list of material descriptors for the undersuit")
     ap.add_argument("--scale", type=float, default=1.0)
     ap.add_argument("--up-axis", default="z", choices=["z", "y"])
+    ap.add_argument("--smooth-angle", type=float, default=40.0,
+                    help="edges sharper than this stay hard (degrees)")
     args = ap.parse_args(C.script_args())
 
     out_dir = C.abspath(args.out_dir)
@@ -183,12 +189,23 @@ def main() -> None:
     rig_name = armature.name
     print(f"[rig] {len(armature.data.bones)} bones from {chr_file.name}")
 
+    slots: list[dict] = []
+    if args.materials:
+        path = C.abspath(args.materials)
+        if path.is_file():
+            slots = json.loads(path.read_text())
+
     if args.undersuit:
         before = {o.name for o in bpy.context.scene.objects}
         if import_any(C.abspath(args.undersuit)):
             added = [o for o in bpy.context.scene.objects if o.name not in before]
             for obj in added:
                 if obj.type == "MESH":
+                    # The base body goes through the same material pipeline as
+                    # armor, or it renders as a flat untextured mannequin.
+                    if slots:
+                        applied = mtl_to_pbr.apply_materials(obj, slots)
+                        print(f"[rig] applied {len(applied)} material slot(s) to {obj.name}")
                     unknown = rebind_to(obj, armature)
                     if unknown:
                         print(f"[rig] undersuit groups not on the rig: {sorted(unknown)[:6]}")
@@ -201,6 +218,7 @@ def main() -> None:
                     bpy.data.objects.remove(obj, do_unlink=True)
 
     for mesh in meshes():
+        C.shade_auto_smooth(mesh, args.smooth_angle)
         dropped = C.strip_vertex_colors(mesh)
         if dropped:
             print(f"[rig] dropped {dropped} colour attribute(s) from {mesh.name}")

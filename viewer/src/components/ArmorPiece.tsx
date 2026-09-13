@@ -20,7 +20,7 @@ import { useBaseSkeleton } from './BaseCharacter';
 export function ArmorPiece({ item, tint }: { item: Item; tint?: string }) {
   const url = assetUrl(item.assets.glb ?? '');
   const { scene } = useGLTF(url);
-  const { skeleton, root } = useBaseSkeleton();
+  const { skeleton, root, bodyBox, setBodyCover } = useBaseSkeleton();
 
   const instance = useMemo(() => cloneSkinned(scene) as THREE.Object3D, [scene]);
   const [attached, setAttached] = useState<THREE.Object3D[]>([]);
@@ -66,11 +66,26 @@ export function ArmorPiece({ item, tint }: { item: Item; tint?: string }) {
     }
 
     setAttached(meshes);
+
+    // A full-body undersuit replaces the built-in body; a partial one must not,
+    // or the character loses its legs. Height alone does not separate them: a
+    // waist-up piece measured 1.20 against a 1.64 body, which is 73%. What does
+    // separate them is whether the piece reaches the feet. Measured on real
+    // items, full suits start at y=0.00 and a torso wrap starts at y=0.65.
+    if (item.slot === 'undersuit' && meshes.length > 0 && bodyBox) {
+      const box = new THREE.Box3();
+      for (const mesh of meshes) box.expandByObject(mesh);
+      const reachesFeet = !box.isEmpty() && box.min.y <= bodyBox.min.y + 0.15;
+      const reachesChest = !box.isEmpty() && box.max.y >= bodyBox.min.y + (bodyBox.max.y - bodyBox.min.y) * 0.6;
+      setBodyCover(item.id, reachesFeet && reachesChest);
+    }
+
     return () => {
       setAttached([]);
+      setBodyCover(item.id, false);
       detach(meshes, clonedGeometries);
     };
-  }, [instance, skeleton, root, item.bind_mode, item.socket, item.class_name]);
+  }, [instance, skeleton, root, item, bodyBox, setBodyCover]);
 
   // Tinting clones the material so the shared cache entry keeps its own colour.
   useEffect(() => {

@@ -137,9 +137,7 @@ def components(record: Any) -> list[dict]:
         return [c for c in found if isinstance(c, dict)]
     if isinstance(found, dict):
         # Defensive: an exporter that keys components by type name.
-        return [
-            {TYPE: name, **value} for name, value in found.items() if isinstance(value, dict)
-        ]
+        return [{TYPE: name, **value} for name, value in found.items() if isinstance(value, dict)]
     return []
 
 
