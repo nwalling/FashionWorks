@@ -397,33 +397,50 @@ What separates them is whether the piece reaches the feet: measured on real
 items, full suits start at y=0.00 while a torso wrap starts at y=0.65. The
 viewer hides the base only for a piece that reaches both the feet and the chest.
 
-### Poses
+### Poses: why there are none
 
-`viewer/src/three/poses.ts` puts the shared skeleton into T-pose, idle or
-crouch. Because armor binds to these same bones, posing the skeleton moves every
-equipped piece with it.
+The viewer shows the T-pose only. An earlier attempt added hand-authored idle
+and crouch poses; those were removed, because inventing poses is worse than
+showing none.
 
-Poses are **world-space aim directions**, not per-bone Euler angles. Two things
-forced that:
+The real ones **are** in the archive, and this is how far the investigation got,
+so nobody repeats it:
 
-* Mirroring hand-authored Eulers across the body does not work. The left arm
-  went down correctly and the right went out sideways, because the limbs do not
-  share a local axis convention.
-* "First child bone" is not the anatomical child. The rig interleaves
-  deformation and IK helpers and their order differs per side: `LeftArm` lists
-  `LeftForeArm` first, while `RightArm` lists `RightDelt_def` first and
-  `RightForeArm` fifth. `CHAIN` names the real child for every posed bone.
+* `bhm_skeleton_v7.chrparams` names the animation databases. For a bare-handed
+  human they are under
+  `Animations/Characters/Human/male_v7/weapons/no_weapon/locomotion/`:
+  `stand.dba` (9.2 MB), `crouch.dba` (2.9 MB), plus `hunch` and `prone`.
+* `stand.dba` holds 189 clips and `crouch.dba` 43. The useful ones are
+  `nw_neutral_crouch_idle.caf` and, for standing, a clip whose final frame
+  settles into idle such as `nw_stand_idle_turn360_planted`. Clips suffixed
+  `_add` are additive deltas layered at runtime and are no use alone.
+* StarBreaker parses both formats (`crates/starbreaker-3d/src/animation/`,
+  `parse_dba`, `clip_final_pose`, `bone_name_hash`) but **does not expose
+  animation on its CLI**. A ~150-line shim over the crate dumped a clip's
+  final-frame local pose: 145 bones, every name resolved against our skeleton.
 
-With both fixed, hands land at exactly mirrored positions.
+**What blocks it.** Those rotations are absolute local rotations in the
+CryEngine rig's own bone frames. Our skeleton reached glTF through
+cgf-converter, Collada, Blender and the glTF exporter, and its local bone
+frames no longer match. Applying the rotations directly lays the character on
+its back. Seven axis conventions were tried, including the documented
+Blender-Z-up-wxyz to glTF-Y-up mapping and every plausible permutation; none
+produce a standing figure, because this is not an axis problem.
 
-Crouch does not hard-code how far the hips drop. Folding the legs lifts the
-feet, so the pose measures the lowest foot before and after and moves the hips
-to put them back on the ground. The correction is converted into the hips'
-parent space rather than applied as raw world Y.
+Making it work needs proper retargeting: read the animation rig's bind pose out
+of the `.chr` in the same space as the clips, express each clip frame as a delta
+from that bind pose, and rebase those deltas onto our bone frames. StarBreaker
+has the pieces for the first half (`find_block_for_skeleton`,
+`apply_pose_to_skeleton`). The whitepaper under
+`tools/src/StarBreaker/docs/star-citizen-animation-formats-whitepaper.md` is the
+reference, and it explicitly excludes the Mannequin layer that composes poses at
+runtime.
 
-These are authored by eye. The game's own animations live in CryEngine
-animation files the pipeline does not read; StarBreaker ships research notes on
-those formats under `tools/src/StarBreaker/docs/`.
+One trap worth recording: when measuring whether a pose differs from the rest
+pose, capture the rest from a genuinely unposed skeleton. The viewer applied a
+pose on load, so the first comparison captured the posed state as "rest" and
+reported zero difference everywhere, which looked like a parsing failure and was
+not.
 
 ### Backdrops
 

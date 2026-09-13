@@ -5,7 +5,6 @@ import { shareUrl } from '../loadout';
 import { useStore } from '../store';
 import { exportCombinedGlb, exportLoadoutJson, exportScreenshot } from '../exporters';
 import { BACKDROPS, type BackdropName } from './Backdrop';
-import { POSES, type PoseName } from '../three/poses';
 import { HDR_PRESETS, type HdrPreset } from './Scene';
 
 export function LoadoutBar({
@@ -14,16 +13,12 @@ export function LoadoutBar({
   onPreset,
   backdrop,
   onBackdrop,
-  pose,
-  onPose,
 }: {
   capture: { gl: THREE.WebGLRenderer; scene: THREE.Scene; camera: THREE.Camera } | null;
   preset: HdrPreset;
   onPreset: (preset: HdrPreset) => void;
   backdrop: BackdropName;
   onBackdrop: (backdrop: BackdropName) => void;
-  pose: PoseName;
-  onPose: (pose: PoseName) => void;
 }) {
   const manifest = useStore((state) => state.manifest);
   const loadout = useStore((state) => state.loadout);
@@ -63,17 +58,6 @@ export function LoadoutBar({
       <button onClick={save}>Save</button>
       <button onClick={restore}>Restore</button>
       <span className="spacer" />
-      <select
-        value={pose}
-        title="Pose"
-        onChange={(event) => onPose(event.target.value as PoseName)}
-      >
-        {Object.entries(POSES).map(([value, entry]) => (
-          <option key={value} value={value}>
-            {entry.label}
-          </option>
-        ))}
-      </select>
       <select
         value={backdrop}
         title="Backdrop behind the character"

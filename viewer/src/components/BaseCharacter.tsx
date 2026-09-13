@@ -4,7 +4,6 @@ import * as THREE from 'three';
 
 import { assetUrl } from '../manifest';
 import { findSkeleton } from '../three/binding';
-import { POSES, applyPose, type PoseName } from '../three/poses';
 
 interface SkeletonContextValue {
   skeleton: THREE.Skeleton | null;
@@ -28,12 +27,9 @@ export function useBaseSkeleton(): SkeletonContextValue {
 
 export function BaseCharacter({
   glb,
-  pose = 'tpose',
   children,
 }: {
   glb: string;
-  /** Which named pose the shared skeleton is put into. */
-  pose?: PoseName;
   children?: React.ReactNode;
 }) {
   const { scene } = useGLTF(assetUrl(glb));
@@ -98,12 +94,6 @@ export function BaseCharacter({
     setValue({ skeleton, root, bodyBox, setBodyCover });
   }, [root, bodyBox, setBodyCover]);
 
-  // Posing the shared skeleton moves every bound piece with it, since armor
-  // binds to these same bones rather than carrying its own copy.
-  useEffect(() => {
-    if (!value.skeleton) return;
-    applyPose(value.skeleton, POSES[pose] ?? POSES.tpose);
-  }, [value.skeleton, pose]);
 
   return (
     <SkeletonContext.Provider value={value}>

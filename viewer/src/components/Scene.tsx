@@ -7,7 +7,6 @@ import { useStore } from '../store';
 import { SLOTS, paletteColor } from '../manifest';
 import { ArmorPiece } from './ArmorPiece';
 import { BACKDROPS, Backdrop, type BackdropName } from './Backdrop';
-import { type PoseName } from '../three/poses';
 import { BaseCharacter } from './BaseCharacter';
 
 export const HDR_PRESETS = ['warehouse', 'city', 'sunset'] as const;
@@ -30,12 +29,10 @@ function CaptureBridge({ onReady }: { onReady: (state: { gl: THREE.WebGLRenderer
 export function Scene({
   preset,
   backdrop,
-  pose,
   onReady,
 }: {
   preset: HdrPreset;
   backdrop: BackdropName;
-  pose: PoseName;
   onReady: (state: { gl: THREE.WebGLRenderer; scene: THREE.Scene; camera: THREE.Camera }) => void;
 }) {
   const manifest = useStore((state) => state.manifest);
@@ -70,7 +67,7 @@ export function Scene({
         <Environment preset={preset} />
         {BACKDROPS[backdrop] ? <Backdrop file={BACKDROPS[backdrop]} /> : null}
         {baseGlb ? (
-          <BaseCharacter glb={baseGlb} pose={pose}>
+          <BaseCharacter glb={baseGlb}>
             {SLOTS.map((slot) => {
               const id = loadout.slots[slot];
               const item = id ? byId.get(id) : undefined;
