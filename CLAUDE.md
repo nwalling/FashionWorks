@@ -29,8 +29,9 @@ and `PLAN.md` gets corrected.
 | Role | Tool | Note |
 | --- | --- | --- |
 | P4K + DataCore + DDS | **StarBreaker** (diogotr7/StarBreaker) | v0.3.2, May 2026. One binary covers all three. |
-| Geometry -> glTF | **StarBreaker `skin export`** | Reads `.skin`/`.cgf` straight out of the P4K and writes GLB. No extract-then-convert pass. |
-| Geometry cross-check | Cgf-Converter | Repo is now **Markemp/Cryengine-Converter**, C#. `Markemp/Cgf-Converter` in PLAN.md §0 is a dead name. Optional; use when weights or bone hierarchy look wrong. |
+| Skinned geometry -> glTF | **Cgf-Converter** (Markemp/**Cryengine-Converter**) | The only tool that keeps `JOINTS_0`/`WEIGHTS_0`. Required, not optional. `Markemp/Cgf-Converter` in PLAN.md §0 is a dead repo name. |
+| Skeletons -> Collada | Cgf-Converter with `-dae` | A `.chr` loses its bones in glTF and converts correctly to Collada. |
+| Rigid/prop meshes | StarBreaker `skin export` | Fast P4K-to-GLB, but **mesh only, no skin weights**. Fine for backpacks and props. |
 | Normalization + export | **Blender** | Scripts run on 3.3+ and 4.x; version differences are behind capability checks in `blender/_common.py`, not version numbers. |
 | Fallback | scdatatools devel via the Deltawerks/starfab fork | Only if StarBreaker cannot expose a record type. Needs Python 3.10 + Blender 3.6 side by side. |
 
@@ -137,59 +138,121 @@ Caveat: all of the above was proven with **synthetic placeholder geometry**
 (`blender/make_synthetic.py`), not game assets. It validates the mechanism, not
 the data.
 
-### Verified from the StarBreaker v0.3.2 CLI source and binary
+### Verified against real game data
 
-Read out of `tools/src/StarBreaker/cli/src/*.rs` and confirmed against
-`--help` on the built binary. These are facts about the tool, not about the
-game data, but several of them settle PLAN.md guesses:
+Build **1.0.191.55227** (`sc-alpha-4.10.0-hotfix`, 3 Sep 2026), a 158 GB
+`Data.p4k`. A full catalog run takes about 17 seconds and yields **2615 items**
+(739 helmet, 474 torso, 516 arms, 472 legs, 162 backpack, 252 undersuit),
+399 canonical plus 2216 colour variants across 165 sets, every one with real
+geometry.
 
-- **The triple-nested geometry path is real.** StarBreaker's own query help
-  gives this as a worked example:
-  `EntityClassDefinition.Components[SGeometryResourceParams].Geometry.Geometry.Geometry.path`.
-  That confirms the record type is `EntityClassDefinition`, that `Components`
-  is a polymorphic array indexed by component type name, and that the
-  `Geometry.Geometry.Geometry.path` nesting in PLAN.md §3.1 was correct. It is
-  the first candidate in `fields.py`.
-- **`dcb query` checks a field guess without a full export**, which makes it
-  the fastest way to validate the rest of `fields.py`:
-  `starbreaker dcb query --p4k P --path <dotted path> [--filter G]`.
-- **`skin export` replaces the Cgf-Converter stage.** It takes a P4K path
-  substring and writes GLB directly, so geometry never lands on disk as
-  `.skin` first.
-- **`skin inspect --bone-weights`** dumps per-vertex influence statistics. That
-  is how the spike answers whether a `.skin` carries the full skeleton or a
-  subset, which decides §5.3 Option A versus Option B.
-- **`entity export` resolves loadouts** (`resolve_loadout_indexed`,
-  `LoadoutNode`) and can emit GLB, STL or `.blend`. PLAN.md §0 expected to need
-  the scdatatools fork for character loadout assembly; this may cover it.
-- **P4K converters** are `cryxml`, `dds-png`, `dds-merge`, `all`, and
-  `--convert` is repeatable.
-- Every subcommand accepts `SC_DATA_P4K` instead of `--p4k`. The wrappers in
-  `tools.py` always pass the flag so a stray environment variable cannot
-  redirect a run.
-- There is a `blender_addon` directory and a set of material and export
-  contract docs under `tools/src/StarBreaker/docs/`. Worth reading before
-  hand-rolling more of `mtl_to_pbr.py`.
+**Record shape.** `Components` is a *list* whose members carry their type in
+`_Type_`, not a dict keyed by type name. The record body is wrapped in
+`_RecordValue_`, with `_RecordName_` (`EntityClassDefinition.<class_name>`) and
+`_RecordId_` alongside. Look components up with `fields.component`, never by
+dotted path.
 
-### Unverified — fill these in during the Task 1 spike
+**Slots.** `AttachDef.Type` uses exactly the `Char_Armor_*` family PLAN.md
+guessed: `Char_Armor_Helmet|Torso|Arms|Legs|Backpack|Undersuit`. CIG calls the
+torso slot **`core`** in paths and filenames. Weight class comes from
+`AttachDef.SubType` and includes **`superheavy`**, which PLAN.md missed.
 
-- Exact DataCore field names and geometry nesting depth. Current guesses:
-  `extract/sc_extract/fields.py`. Every candidate list there is ordered; delete
-  the ones that turn out wrong rather than leaving them.
-- Whether `AttachDef.Type` really uses the `Char_Armor_*` family, and its exact
-  member spellings.
-- Whether Cgf-Converter's glTF output preserves skin weights, or whether DAE is
-  required.
-- Whether a `.skin` bone list is the full skeleton or a subset. Decides whether
-  the Option B remap in `viewer/src/three/binding.ts` ever fires.
-- Unit scale and up-axis of converted geometry. `build_base_rig.py` has
-  `--scale` and `--up-axis` flags defaulting to no-op.
-- `_ddna` gloss encoding and `_spec` semantics. Current mapping in
-  `blender/mtl_to_pbr.py` is the PLAN.md §4.3 guess.
-- Real bone names. `blender/make_synthetic.py` uses placeholders
-  (`spine_01`, `upperarm_l`, ...) that are certainly not CIG's.
-- Female armor: separate meshes or shared meshes on a different skeleton.
-- Items that use attachment records rather than direct geometry (helmet visors).
+**The geometry field is a trap.** `SGeometryResourceParams.Geometry` is a tree,
+and the triple-nested `Geometry.Geometry.Geometry.path` PLAN.md §3.1 predicted
+does resolve, but at the *root* it is the **dropped-item carry prop**, not the
+worn mesh. For torso, arms and legs it is literally a storage crate
+(`crate_armor_core_1_005x005x005.cgf`). The worn meshes hang off `SubGeometry`,
+one per gender:
+
+```
+Geometry                      -> carry prop (.cgf), or a .cdf for some helmets
+  SubGeometry[0]              -> carry prop again
+  SubGeometry[1]              -> female_v2/... f_*.skin   <- worn, female
+    SubGeometry[]             -> prop, or shared visor meshes
+  SubGeometry[2]              -> male_v7/...   m_*.skin   <- worn, male
+    SubGeometry[]             -> prop, or shared visor meshes
+```
+
+`catalog.walk_geometry` flattens the tree and `catalog.select_wearables` picks
+per skeleton, dropping LODs, carry props and the shared visors. Taking the root
+blindly produces a catalog of crates.
+
+**References** are relative `file://` URLs ending `<record type>.<name>.json`,
+e.g. `scitemmanufacturer.cds.json`. `dcb.Index.ref_name` parses them. A
+manufacturer record's `Name` is itself a localization key
+(`@manufacturer_NameCDS`).
+
+**Tags** are one space-separated string, not a list of refs:
+`"Marine_Light Set_02 Color_02 SM_Marine"`. `Set_<n>` and `Color_<n>` give exact
+set grouping and variant linking, far better than guessing from class names.
+
+**Localization** resolves cleanly: `@item_Name_<class_name>` and
+`@item_Desc_<class_name>` against `Data/Localization/english/global.ini`
+(90,363 keys). 93 keys out of 2615 items are unresolved, listed in
+`data/out/errors.json`.
+
+**Meshes ship split**: `.skin` + `.skinm` (3450 pairs in the male armor tree),
+`.cgf` + `.cgfm`, `.cga` + `.cgam`. The DataCore names the `.skin`, but a few
+assets only ship `.cga`. StarBreaker's `skin export` matches on a P4K path
+*substring* against **backslash** paths, and accepts only `.skinm`/`.cgfm`, so
+pass a bare filename.
+
+**Skinning, and why Option A is dead.** This is the most consequential finding.
+
+* Cgf-Converter's glTF output for a `.skin` **does** carry `JOINTS_0` and
+  `WEIGHTS_0`. StarBreaker's `skin export` does **not** — it writes a rigid
+  mesh under a `CryEngine_Z_up` node. Only Cgf-Converter can produce skinned
+  armor.
+* A `.chr` skeleton exports **220 joints to Collada** (`World`, `Hips`,
+  `Spine`..`Spine3`, `LeftUpLeg`, ...) but collapses to a single node in glTF.
+  Skeletons must go through `-dae`.
+* One armor piece exports **41 joints, of which only 16 exist in the base
+  skeleton**, in an order that does not match. The other 25 are attachment
+  bones the armor itself introduces: `magazine_attach_*_override`,
+  `grenade_attach_*_override`, `thruster_*_override`, `backpack_attach_1_override`,
+  `militaryMultitool_attach_override`.
+
+  So PLAN.md §5.3 **Option A cannot work**, and Option B is not merely a
+  fallback, it is the mechanism. The canonical armature must be the base
+  skeleton **plus the union of the `*_override` bones across all armor**, and
+  `viewer/src/three/binding.ts` must remap rather than skip. It currently skips
+  a mesh whose bones are unknown, which would reject every real piece.
+
+**CDF indirection.** Some helmets point at a `.cdf`, a CryXML character
+definition naming the real mesh. Across 640 male armor CDFs the attachment
+types are `CA_SKIN` (751, skinned, `Binding` is the mesh), `CA_BONE` (186,
+rigid, carries `BoneName` + `RelPosition` + `RelRotation`, which is exactly the
+socket transform), `CA_PROX` (173, collision proxies) and `CA_PROW` (302,
+simulated strands). Only the first two are renderable. Parser: `sc_extract/cdf.py`.
+17 items still resolve to a `.cdf` and are flagged `cdf` in the manifest.
+
+**Backpacks** are rigid: a single `.cga` under `Characters/Human/backpack/`,
+no gendered skin, so they bind to a socket. 135 items come out `socket`.
+
+**Base skeletons**: `male_v7/export/bhm_skeleton_v7.chr` and
+`female_v2/export/bhf_skeleton_v2.chr`.
+
+**StarBreaker CLI notes.** `dcb query <PATH>` takes the path *positionally*, and
+its `--filter` wants `*name*`, while `dcb extract --filter` matches record paths
+and wants `**/name*`. `dcb query` is the cheapest way to test a field guess.
+`skin inspect --bone-weights` dumps per-vertex influences. `entity export`
+resolves loadouts and may cover what PLAN.md expected to need scdatatools for.
+There is a `blender_addon` and material/export contract docs under
+`tools/src/StarBreaker/docs/` worth reading before extending `mtl_to_pbr.py`.
+
+### Still unverified
+
+- Unit scale and up-axis of converted geometry. Cgf-Converter emits a
+  `CryEngine_Z_up` root; the Blender scripts have `--scale` and `--up-axis`
+  flags defaulting to no-op, and nothing has been rendered yet to confirm.
+- `_ddna` gloss encoding and `_spec` semantics. `blender/mtl_to_pbr.py` still
+  implements the PLAN.md §4.3 guess.
+- Whether female meshes bind to the same bone names as male ones.
+- Colour variants: `mtl_var/` material paths differ per variant, but tint
+  palette records (`libs/foundry/records/tintpalettes/`) have not been parsed.
+- 93 items with unresolved localization keys, and some placeholder junk in the
+  catalog (`<= PLACEHOLDER =>`, `Body`) that should be flagged and hidden.
+- 331 items have no manufacturer code.
 
 ## Layout
 

@@ -1,118 +1,180 @@
 [
   {
-    "__ref": "{11111111-1111-1111-1111-111111111111}",
-    "ClassName": "aeg_pathfinder_helmet_light_slate",
-    "Components": {
-      "SAttachableComponentParams": {
-        "AttachDef": {
-          "Type": "Char_Armor_Helmet",
-          "SubType": "Char_Armor_Helmet_Light",
-          "Size": 1,
-          "Manufacturer": "{99999999-0000-0000-0000-000000000001}",
-          "Localization": {
-            "Name": "@item_Name_aeg_pathfinder_helmet",
-            "Description": "@item_Desc_aeg_pathfinder_helmet"
-          }
-        }
-      },
-      "SGeometryResourceParams": {
-        "Geometry": {
-          "Geometry": {
-            "Geometry": { "path": "Data\\Objects\\Characters\\Human\\male_v7\\aeg\\pathfinder\\helmet.skin" },
-            "Material": { "path": "Data/Objects/Characters/Human/male_v7/aeg/pathfinder/helmet.mtl" }
-          }
-        }
-      },
-      "SCItemClothingParams": {
-        "TemperatureResistance": { "min": -40, "max": 65 },
-        "CarryCapacity": 0,
-        "IgnoredField": true
-      },
-      "STagsComponentParams": { "tags": ["{88888888-0000-0000-0000-000000000001}"] }
-    }
-  },
-  {
-    "__ref": "{11111111-1111-1111-1111-111111111112}",
-    "ClassName": "aeg_pathfinder_helmet_light_sand",
-    "Components": {
-      "SAttachableComponentParams": {
-        "AttachDef": {
-          "Type": "Char_Armor_Helmet",
-          "SubType": "Char_Armor_Helmet_Light",
-          "Manufacturer": "{99999999-0000-0000-0000-000000000001}",
-          "Localization": { "Name": "@item_Name_aeg_pathfinder_helmet" }
-        }
-      },
-      "SGeometryResourceParams": {
-        "Geometry": {
-          "Geometry": {
-            "Geometry": { "path": "Data/Objects/Characters/Human/male_v7/aeg/pathfinder/helmet.skin" }
-          }
-        }
-      }
-    }
-  },
-  {
-    "__ref": "{22222222-2222-2222-2222-222222222222}",
-    "ClassName": "rsi_bastion_arms_medium",
-    "Components": [
-      {
-        "SAttachableComponentParams": {
+    "_RecordName_": "EntityClassDefinition.cds_combat_light_helmet_02_02_01",
+    "_RecordId_": "11111111-1111-1111-1111-111111111111",
+    "_RecordTag_": "Character",
+    "_RecordValue_": {
+      "_Type_": "EntityClassDefinition",
+      "Components": [
+        {
+          "_Type_": "SAttachableComponentParams",
           "AttachDef": {
-            "Type": "Char_Armor_Arms",
-            "SubType": "Char_Armor_Arms_Medium",
-            "Manufacturer": "{99999999-0000-0000-0000-000000000002}",
-            "Localization": { "Name": "@item_Name_rsi_bastion_arms" }
-          }
-        }
-      },
-      {
-        "SGeometryResourceParams": {
-          "Geometry": {
-            "Geometry": {
-              "Geometry": { "path": "Data/Objects/Characters/Human/male_v7/rsi/bastion/arm_l.skin" },
-              "SubGeometry": [
-                { "Geometry": { "path": "Data/Objects/Characters/Human/male_v7/rsi/bastion/arm_r.skin" } }
-              ]
+            "_Type_": "SItemAttachmentDef",
+            "Type": "Char_Armor_Helmet",
+            "SubType": "Light",
+            "Size": 1,
+            "Manufacturer": "file://./../../../libs/foundry/records/scitemmanufacturer/armor/scitemmanufacturer.cds.json",
+            "Tags": "Marine_Light Set_02 Color_01 Helmet",
+            "Localization": {
+              "_Type_": "SCItemLocalization",
+              "Name": "@item_Name_cds_combat_light_helmet_02_02_01",
+              "Description": "@item_Desc_cds_combat_light_helmet_02_02_01"
             }
           }
+        },
+        {
+          "_Type_": "SGeometryResourceParams",
+          "Geometry": {
+            "Geometry": {
+              "Geometry": { "path": "Objects\\Characters\\Human\\male_v7\\armor\\cds\\m_cds_light_helmet_carry_prop.cgf" },
+              "Material": { "path": "Objects/Characters/Human/male_v7/armor/cds/mtl_var/m_cds_light_helmet_01_02.mtl" }
+            },
+            "SubGeometry": [
+              {
+                "Geometry": {
+                  "Geometry": { "path": "objects/characters/human/female_v2/armor/cds/f_cds_light_helmet_01.skin" },
+                  "Material": { "path": "Objects/Characters/Human/male_v7/armor/cds/mtl_var/m_cds_light_helmet_01_02.mtl" }
+                },
+                "SubGeometry": []
+              },
+              {
+                "Geometry": {
+                  "Geometry": { "path": "objects/characters/human/male_v7/armor/cds/m_cds_light_helmet_01.skin" },
+                  "Material": { "path": "Objects/Characters/Human/male_v7/armor/cds/mtl_var/m_cds_light_helmet_01_02.mtl" }
+                },
+                "SubGeometry": [
+                  { "Geometry": { "Geometry": { "path": "Objects/Characters/Human/male_v7/armor/shared/visor/m_fp_visor_16x9.skin" } } },
+                  { "Geometry": { "Geometry": { "path": "objects/characters/human/male_v7/armor/cds/m_cds_light_helmet_01_lod2.skin" } } }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "_Type_": "SCItemClothingParams",
+          "TemperatureResistance": { "MinResistance": -32.0, "MaxResistance": 62.0 },
+          "RadiationResistance": { "MaximumRadiationCapacity": 26000.0 },
+          "IgnoredField": true
         }
-      }
-    ]
-  },
-  {
-    "__ref": "{33333333-3333-3333-3333-333333333333}",
-    "ClassName": "test_debug_helmet_prototype",
-    "Components": {
-      "SAttachableComponentParams": {
-        "AttachDef": { "Type": "Char_Armor_Helmet", "Localization": { "Name": "@item_Name_missing" } }
-      }
+      ]
     }
   },
   {
-    "__ref": "{44444444-4444-4444-4444-444444444444}",
-    "ClassName": "behr_p8sc_smg",
-    "Components": {
-      "SAttachableComponentParams": {
-        "AttachDef": { "Type": "WeaponPersonal", "Localization": { "Name": "@item_Name_p8sc" } }
-      }
+    "_RecordName_": "EntityClassDefinition.cds_combat_light_helmet_02_03_01",
+    "_RecordId_": "11111111-1111-1111-1111-111111111112",
+    "_RecordValue_": {
+      "_Type_": "EntityClassDefinition",
+      "Components": [
+        {
+          "_Type_": "SAttachableComponentParams",
+          "AttachDef": {
+            "Type": "Char_Armor_Helmet",
+            "SubType": "Light",
+            "Manufacturer": "file://./../../scitemmanufacturer.cds.json",
+            "Tags": "Marine_Light Set_02 Color_02 Helmet",
+            "Localization": { "Name": "@item_Name_cds_combat_light_helmet_02_02_01" }
+          }
+        },
+        {
+          "_Type_": "SGeometryResourceParams",
+          "Geometry": {
+            "Geometry": { "Geometry": { "path": "Objects/Characters/Human/male_v7/armor/cds/m_cds_light_helmet_carry_prop.cgf" } },
+            "SubGeometry": [
+              { "Geometry": { "Geometry": { "path": "objects/characters/human/male_v7/armor/cds/m_cds_light_helmet_01.skin" } } }
+            ]
+          }
+        }
+      ]
     }
   },
   {
-    "__ref": "{99999999-0000-0000-0000-000000000001}",
-    "ClassName": "Manufacturer_AEG",
-    "Code": "AEG",
-    "Name": "Aegis Dynamics"
+    "_RecordName_": "EntityClassDefinition.rsi_medium_arms_01_01_01",
+    "_RecordId_": "22222222-2222-2222-2222-222222222222",
+    "_RecordValue_": {
+      "_Type_": "EntityClassDefinition",
+      "Components": [
+        {
+          "_Type_": "SAttachableComponentParams",
+          "AttachDef": {
+            "Type": "Char_Armor_Arms",
+            "SubType": "Medium",
+            "Manufacturer": "file://./../../scitemmanufacturer.rsi.json",
+            "Tags": "Set_01 Color_01",
+            "Localization": { "Name": "@item_Name_rsi_medium_arms" }
+          }
+        },
+        {
+          "_Type_": "SGeometryResourceParams",
+          "Geometry": {
+            "Geometry": { "Geometry": { "path": "Objects/Characters/Human/male_v7/armor/rsi/m_rsi_medium_arms_carry_prop.cgf" } },
+            "SubGeometry": [
+              { "Geometry": { "Geometry": { "path": "objects/characters/human/male_v7/armor/rsi/m_rsi_medium_arm_l.skin" } } },
+              { "Geometry": { "Geometry": { "path": "objects/characters/human/male_v7/armor/rsi/m_rsi_medium_arm_r.skin" } } }
+            ]
+          }
+        }
+      ]
+    }
   },
   {
-    "__ref": "{99999999-0000-0000-0000-000000000002}",
-    "ClassName": "Manufacturer_RSI",
-    "Code": "RSI",
-    "Name": "Roberts Space Industries"
+    "_RecordName_": "EntityClassDefinition.cds_combat_light_backpack_01_01_01",
+    "_RecordId_": "55555555-5555-5555-5555-555555555555",
+    "_RecordValue_": {
+      "_Type_": "EntityClassDefinition",
+      "Components": [
+        {
+          "_Type_": "SAttachableComponentParams",
+          "AttachDef": {
+            "Type": "Char_Armor_Backpack",
+            "SubType": "Light",
+            "Manufacturer": "file://./../../scitemmanufacturer.cds.json",
+            "Localization": { "Name": "@item_Name_cds_backpack" }
+          }
+        },
+        {
+          "_Type_": "SGeometryResourceParams",
+          "Geometry": {
+            "Geometry": { "Geometry": { "path": "Objects/Characters/Human/backpack/cds/cds_combat_light_backpack_01.cga" } },
+            "SubGeometry": []
+          }
+        }
+      ]
+    }
   },
   {
-    "__ref": "{88888888-0000-0000-0000-000000000001}",
-    "ClassName": "Tag_Light",
-    "tagName": "weight_light"
+    "_RecordName_": "EntityClassDefinition.test_debug_helmet_prototype",
+    "_RecordId_": "33333333-3333-3333-3333-333333333333",
+    "_RecordValue_": {
+      "_Type_": "EntityClassDefinition",
+      "Components": [
+        {
+          "_Type_": "SAttachableComponentParams",
+          "AttachDef": { "Type": "Char_Armor_Helmet", "Localization": { "Name": "@item_Name_missing" } }
+        }
+      ]
+    }
+  },
+  {
+    "_RecordName_": "EntityClassDefinition.behr_p8sc_smg",
+    "_RecordId_": "44444444-4444-4444-4444-444444444444",
+    "_RecordValue_": {
+      "_Type_": "EntityClassDefinition",
+      "Components": [
+        {
+          "_Type_": "SAttachableComponentParams",
+          "AttachDef": { "Type": "WeaponPersonal", "Localization": { "Name": "@item_Name_p8sc" } }
+        }
+      ]
+    }
+  },
+  {
+    "_RecordName_": "SCItemManufacturer.cds",
+    "_RecordId_": "99999999-0000-0000-0000-000000000001",
+    "_RecordValue_": { "_Type_": "SCItemManufacturer", "Code": "CDS", "Name": "Clark Defense Systems" }
+  },
+  {
+    "_RecordName_": "SCItemManufacturer.rsi",
+    "_RecordId_": "99999999-0000-0000-0000-000000000002",
+    "_RecordValue_": { "_Type_": "SCItemManufacturer", "Code": "RSI", "Name": "Roberts Space Industries" }
   }
 ]

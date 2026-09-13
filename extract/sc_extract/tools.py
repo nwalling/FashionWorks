@@ -349,23 +349,44 @@ def cgf_convert(
     out_dir: Path,
     fmt: str = "gltf",
     data_dir: Path | None = None,
+    textures: bool = True,
 ) -> Path:
-    """Convert one .skin/.cgf/.chr to glTF (``fmt='gltf'``) or Collada (``'dae'``)."""
+    """Convert one .skin/.cgf/.chr to glTF or Collada.
+
+    VERIFIED against build 1.0.191.55227:
+
+    * glTF output **does** carry ``JOINTS_0``/``WEIGHTS_0`` for a ``.skin``.
+      StarBreaker's ``skin export`` does not, so this is the only path that
+      produces skinned armor.
+    * a ``.chr`` skeleton loses its bones in glTF but converts correctly to
+      Collada, so skeletons must use ``fmt="dae"``.
+
+    The tool has no output-path option; it writes beside its input. The result
+    is moved into ``out_dir`` afterwards.
+    """
     binary = require("cgf-converter", settings)
     out_dir.mkdir(parents=True, exist_ok=True)
     flag = {"gltf": "-gltf", "glb": "-glb", "dae": "-dae"}[fmt]
-    argv = [
-        str(binary),
-        str(source),
-        flag,
-        "-objectdir",
-        str(data_dir or settings.raw_dir),
-        "-outputfile",
-        str(out_dir / source.stem),
-    ]
+
+    argv = [str(binary), str(source), flag, "-objectdir", str(data_dir or settings.raw_dir)]
+    if not textures:
+        argv.append("-notex")
     run(argv)
+
     suffix = {"gltf": ".gltf", "glb": ".glb", "dae": ".dae"}[fmt]
-    return out_dir / f"{source.stem}{suffix}"
+    produced = source.with_suffix(suffix)
+    if not produced.is_file():
+        raise ToolError(f"cgf-converter produced no {suffix} for {source}")
+
+    target = out_dir / produced.name
+    # glTF text output also emits a sidecar .bin that must travel with it.
+    for extra in (produced, produced.with_suffix(".bin")):
+        if extra.is_file():
+            destination = out_dir / extra.name
+            if destination != extra:
+                destination.write_bytes(extra.read_bytes())
+                extra.unlink()
+    return target
 
 
 # --------------------------------------------------------------------------

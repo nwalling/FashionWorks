@@ -12,18 +12,18 @@ verified facts, and the commands for each stage.
 
 ## Status
 
-The pipeline and the viewer are built and tested, and both extraction tools are
-built from source and working on macOS. The only thing still missing is a
-`Data.p4k`, so the extraction stages are **not yet verified against real game
-data**. Everything downstream of extraction is proven against synthetic
-placeholder assets.
+The catalog stage is verified against real game data: build 1.0.191.55227
+(`sc-alpha-4.10.0-hotfix`) yields **2615 armor items** in about 17 seconds, with
+real names, manufacturers, sets and colour variants. Geometry conversion and the
+Blender normalization stage are written but not yet run end to end on real
+meshes, so the viewer still shows synthetic placeholders.
 
 | Stage | State |
 | --- | --- |
 | Scaffold, config, `scx` CLI | done |
 | Extraction tools built from source | done, `starbreaker` and `cgf-converter` resolve |
-| Catalog (`scx catalog`) | written, unit-tested against fixtures, unrun on real data |
-| Extract / convert | written, batch path proven with stand-in inputs |
+| Catalog (`scx catalog`) | **done, 2615 items from real game data** |
+| Extract / convert | written; real meshes convert with skin weights, not yet wired end to end |
 | Base rig + normalization | done, verified |
 | Viewer core, tints, export, share links | done, verified |
 | Thumbnails, web build | not started |

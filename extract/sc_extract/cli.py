@@ -105,9 +105,8 @@ def doctor(ctx: click.Context) -> None:
         ),
         (
             "convert",
-            (statuses["starbreaker"].available or statuses["cgf-converter"].available)
-            and statuses["blender"].available,
-            "needs blender + one of starbreaker / cgf-converter",
+            statuses["cgf-converter"].available and statuses["blender"].available,
+            "needs cgf-converter + blender (only cgf-converter keeps skin weights)",
         ),
         ("rig", statuses["blender"].available, "needs blender"),
         ("synth", statuses["blender"].available, "needs blender only"),
@@ -155,18 +154,34 @@ def use_p4k(path: Path) -> None:
 
 
 @main.command()
-@click.option("--filter", "filter_glob", default=None, help="DCB export filter glob")
+@click.option(
+    "--filter",
+    "filter_glob",
+    default=None,
+    multiple=True,
+    help="DCB export filter glob; repeatable. Record paths, so lead with **/.",
+)
 @click.option("--include-npc", is_flag=True, help="keep NPC-only pieces")
 @click.option("--force", is_flag=True, help="re-export the DCB even if cached")
-@click.option("--game-version", default="unknown", help="value for manifest.game_version")
+@click.option(
+    "--game-version",
+    default=None,
+    help="manifest.game_version; read from build_manifest.id when omitted",
+)
 @click.pass_context
 def catalog(
-    ctx: click.Context, filter_glob: str | None, include_npc: bool, force: bool, game_version: str
+    ctx: click.Context,
+    filter_glob: tuple[str, ...],
+    include_npc: bool,
+    force: bool,
+    game_version: str | None,
 ) -> None:
     """Build data/out/manifest.json from the DataCore."""
     from . import catalog as catalog_mod
     from . import dcb
+    from .config import read_game_version
     from .localization import Localization
+    from .tools import starbreaker_p4k_extract
 
     settings = _settings(ctx)
     if not settings.has_game_data():
@@ -175,10 +190,20 @@ def catalog(
             "config/settings.local.toml, then re-run. `scx doctor` shows the details."
         )
 
-    dcb.export(settings, filter_glob=filter_glob, force=force)
+    game_version = game_version or read_game_version(settings.sc_root) or "unknown"
+
+    dcb.export(settings, filter_glob=list(filter_glob) or None, force=force)
     index = dcb.Index.load(settings.dcb_dir)
 
     loc_file = settings.raw_dir / settings.localization_p4k_path()
+    if not loc_file.is_file():
+        click.echo("extracting the localization table...")
+        starbreaker_p4k_extract(
+            settings,
+            out_dir=settings.raw_dir,
+            filter_glob=f"**/{settings.localization_p4k_path()}",
+            convert=None,
+        )
     if loc_file.is_file():
         loc = Localization.from_file(loc_file)
     else:
@@ -190,7 +215,11 @@ def catalog(
         loc = Localization.empty()
 
     manifest, stats = catalog_mod.build(
-        index, loc, game_version=game_version, include_npc=include_npc
+        index,
+        loc,
+        game_version=game_version,
+        include_npc=include_npc,
+        skeleton=settings.skeleton,
     )
     manifest.write(settings.manifest_path())
 

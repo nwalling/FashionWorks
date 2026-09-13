@@ -11,6 +11,7 @@ Nothing else in this package may hardcode a filesystem path.
 
 from __future__ import annotations
 
+import json
 import os
 import tomllib
 from dataclasses import dataclass, field
@@ -21,6 +22,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_DIR = REPO_ROOT / "config"
 DEFAULT_CONFIG = CONFIG_DIR / "settings.toml"
 LOCAL_CONFIG = CONFIG_DIR / "settings.local.toml"
+
+# Distinguishes "caller said nothing, use the default local file" from
+# "caller explicitly said: no local override". Passing None used to mean the
+# former, which silently leaked the developer's machine config into tests.
+USE_DEFAULT_LOCAL = object()
 
 
 class ConfigError(RuntimeError):
@@ -132,14 +138,15 @@ def _abs(value: str, root: Path) -> Path:
 def load_settings(
     path: Path | None = None,
     *,
-    local_path: Path | None = None,
+    local_path: Path | None | Any = USE_DEFAULT_LOCAL,
     environ: dict[str, str] | None = None,
     root: Path | None = None,
 ) -> Settings:
     """Load and resolve settings. Raises ConfigError if the base file is absent."""
     root = root or REPO_ROOT
     path = path or DEFAULT_CONFIG
-    local_path = LOCAL_CONFIG if local_path is None else local_path
+    if local_path is USE_DEFAULT_LOCAL:
+        local_path = LOCAL_CONFIG
     environ = os.environ if environ is None else environ
 
     if not path.is_file():
@@ -214,3 +221,28 @@ def merge_sc_root(existing: str, sc_root: Path) -> str:
         return "\n".join(out).rstrip() + "\n"
 
     return "\n".join(kept).rstrip() + f"\n\n[paths]\n{line}\n"
+
+
+def read_game_version(sc_root: Path | None) -> str | None:
+    """Game version from ``build_manifest.id`` beside ``Data.p4k``.
+
+    The file is JSON with a ``Data`` object holding ``Version`` and ``Branch``,
+    e.g. ``1.0.191.55227`` on ``sc-alpha-4.10.0-hotfix``.
+    """
+    if sc_root is None:
+        return None
+    manifest = sc_root / "build_manifest.id"
+    if not manifest.is_file():
+        return None
+    try:
+        data = json.loads(manifest.read_text(encoding="utf-8-sig"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    body = data.get("Data") if isinstance(data, dict) else None
+    if not isinstance(body, dict):
+        return None
+    version = str(body.get("Version") or "").strip()
+    branch = str(body.get("Branch") or "").strip()
+    if version and branch:
+        return f"{version} ({branch})"
+    return version or branch or None

@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -43,10 +43,26 @@ def _cache_key(p4k: Path) -> str:
     return digest[:16]
 
 
-def export(settings: Settings, *, filter_glob: str | None = None, force: bool = False) -> Path:
+# Record paths the catalog needs. StarBreaker's DCB filter matches the record's
+# own path, so each pattern must lead with "**/".
+DEFAULT_FILTERS = (
+    "**/entities/scitem/characters/human/**",  # the wearables themselves
+    "**/scitemmanufacturer/**",  # manufacturer codes and names
+    "**/tintpalettes/**",  # per-item colour palettes
+)
+
+
+def export(
+    settings: Settings,
+    *,
+    filter_glob: str | Sequence[str] | None = None,
+    force: bool = False,
+) -> Path:
     """Export the DCB to ``dcb_dir``, skipping if the cached export is current.
 
-    The cache key is the P4K's size and mtime, per PLAN.md §3.1.
+    The cache key is the P4K's size and mtime (PLAN.md §3.1). ``filter_glob``
+    may be one pattern or several; the tool takes a single ``--filter``, so
+    several patterns mean several passes into the same directory.
     """
     out_dir = settings.dcb_dir
     p4k = settings.p4k_path
@@ -55,6 +71,13 @@ def export(settings: Settings, *, filter_glob: str | None = None, force: bool = 
             "no Data.p4k available; set paths.sc_root in config/settings.local.toml"
         )
 
+    if filter_glob is None:
+        filters: list[str | None] = list(DEFAULT_FILTERS)
+    elif isinstance(filter_glob, str):
+        filters = [filter_glob]
+    else:
+        filters = list(filter_glob) or [None]
+
     key = _cache_key(p4k)
     cache_path = out_dir / CACHE_FILE
     if not force and cache_path.is_file():
@@ -62,14 +85,16 @@ def export(settings: Settings, *, filter_glob: str | None = None, force: bool = 
             cached = json.loads(cache_path.read_text())
         except json.JSONDecodeError:
             cached = {}
-        if cached.get("key") == key and cached.get("filter") == filter_glob:
+        if cached.get("key") == key and cached.get("filters") == filters:
             log.info("DCB export is current (key=%s); skipping", key)
             return out_dir
 
-    starbreaker_dcb_extract(settings, out_dir=out_dir, fmt="json", filter_glob=filter_glob)
+    for pattern in filters:
+        starbreaker_dcb_extract(settings, out_dir=out_dir, fmt="json", filter_glob=pattern)
+
     out_dir.mkdir(parents=True, exist_ok=True)
     cache_path.write_text(
-        json.dumps({"key": key, "filter": filter_glob, "p4k": str(p4k)}, indent=2)
+        json.dumps({"key": key, "filters": filters, "p4k": str(p4k)}, indent=2)
     )
     return out_dir
 
@@ -83,18 +108,25 @@ def iter_json(root: Path) -> Iterator[Path]:
 
 
 def _record_id(data: dict[str, Any], path: Path) -> str:
-    value = F.first(data, F.RECORD_ID)
+    """Prefer the DataCore GUID; fall back to the file stem, which is stable."""
+    value = data.get(F.RECORD_ID) if isinstance(data, dict) else None
     if isinstance(value, dict):
         value = value.get("value") or value.get("__ref")
     if isinstance(value, str) and value.strip("{} 0-"):
         return value.strip("{}")
-    # No usable GUID in the export: fall back to the path, which is stable.
+    legacy = F.first(data, ["__ref", "Reference", "reference", "id", "GUID", "guid"])
+    if isinstance(legacy, str) and legacy.strip("{} 0-"):
+        return legacy.strip("{}")
     return path.stem
 
 
 def _class_name(data: dict[str, Any], path: Path) -> str:
-    value = F.first(data, F.CLASS_NAME)
-    return value if isinstance(value, str) and value else path.stem
+    """``_RecordName_`` minus its type prefix, e.g. ``cds_combat_light_helmet_01``."""
+    name = F.class_name_of(data)
+    if name:
+        return name
+    legacy = F.first(data, ["ClassName", "className", "Name", "name"])
+    return legacy if isinstance(legacy, str) and legacy else path.stem
 
 
 class Index:
@@ -114,13 +146,36 @@ class Index:
         self.by_class.setdefault(record.class_name.lower(), record)
 
     def resolve_ref(self, ref: Any) -> Record | None:
-        """Resolve a record reference, which may be a GUID string or a dict."""
+        """Resolve a record reference.
+
+        References in this build are relative ``file://`` URLs into the foundry
+        record tree, e.g.::
+
+            file://./../../libs/foundry/records/scitemmanufacturer/armor/scitemmanufacturer.cds.json
+
+        The filename is ``<record type>.<record name>.json``, so the name is
+        what follows the first dot. GUIDs and bare names are still accepted.
+        """
         if isinstance(ref, dict):
             ref = ref.get("__ref") or ref.get("value") or ref.get("Reference")
-        if not isinstance(ref, str):
+        if not isinstance(ref, str) or not ref.strip():
             return None
-        key = ref.strip("{}")
-        return self.by_id.get(key) or self.by_class.get(key.lower())
+
+        name = self.ref_name(ref)
+        if name is None:
+            return None
+        return self.by_id.get(name) or self.by_class.get(name.lower())
+
+    @staticmethod
+    def ref_name(ref: str) -> str | None:
+        """The record name a reference points at, or None."""
+        value = ref.strip()
+        if value.startswith("file://"):
+            stem = value.rsplit("/", 1)[-1]
+            stem = stem[: -len(".json")] if stem.lower().endswith(".json") else stem
+            # "<type>.<name>" -> "<name>"; a name may itself contain dots.
+            return stem.split(".", 1)[1] if "." in stem else stem
+        return value.strip("{}") or None
 
     @classmethod
     def load(cls, root: Path, *, limit: int | None = None) -> Index:

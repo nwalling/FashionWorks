@@ -97,104 +97,109 @@ def collect(record: Any, paths: list[str]) -> list[Any]:
 
 
 # ---------------------------------------------------------------------------
-# Candidate paths
+# Record shape
+# ---------------------------------------------------------------------------
+# VERIFIED against a real export (sc-alpha-4.10.0, build 1.0.191.55227).
+#
+# A StarBreaker JSON record looks like:
+#
+#   {"_RecordName_": "EntityClassDefinition.cds_combat_light_helmet_02_02_01",
+#    "_RecordId_":   "<guid>",
+#    "_RecordTag_":  "Character",
+#    "_RecordValue_": {"_Type_": "EntityClassDefinition",
+#                      "Components": [ {"_Type_": "SAttachableComponentParams", ...},
+#                                      {"_Type_": "SGeometryResourceParams", ...}, ... ]}}
+#
+# Components is a LIST whose members carry their type in "_Type_", not a dict
+# keyed by type name. Look them up with :func:`component`, never by dotted path.
+
+RECORD_NAME = "_RecordName_"
+RECORD_ID = "_RecordId_"
+RECORD_VALUE = "_RecordValue_"
+RECORD_TAG = "_RecordTag_"
+TYPE = "_Type_"
+
+
+def record_body(record: Any) -> dict:
+    """The record payload, tolerating both wrapped and already-unwrapped input."""
+    if isinstance(record, dict):
+        body = record.get(RECORD_VALUE)
+        if isinstance(body, dict):
+            return body
+        return record
+    return {}
+
+
+def components(record: Any) -> list[dict]:
+    body = record_body(record)
+    found = body.get("Components")
+    if isinstance(found, list):
+        return [c for c in found if isinstance(c, dict)]
+    if isinstance(found, dict):
+        # Defensive: an exporter that keys components by type name.
+        return [
+            {TYPE: name, **value} for name, value in found.items() if isinstance(value, dict)
+        ]
+    return []
+
+
+def component(record: Any, type_name: str) -> dict | None:
+    """Return the component with ``_Type_ == type_name``, or None."""
+    for entry in components(record):
+        if entry.get(TYPE) == type_name:
+            return entry
+    return None
+
+
+def class_name_of(record: Any) -> str | None:
+    """``EntityClassDefinition.foo_bar`` -> ``foo_bar``."""
+    name = record.get(RECORD_NAME) if isinstance(record, dict) else None
+    if not isinstance(name, str) or not name:
+        return None
+    return name.split(".", 1)[1] if "." in name else name
+
+
+def record_type_of(record: Any) -> str | None:
+    name = record.get(RECORD_NAME) if isinstance(record, dict) else None
+    if isinstance(name, str) and "." in name:
+        return name.split(".", 1)[0]
+    body = record_body(record)
+    value = body.get(TYPE)
+    return value if isinstance(value, str) else None
+
+
+# ---------------------------------------------------------------------------
+# Component field paths (relative to the component dict)
 # ---------------------------------------------------------------------------
 
-COMPONENTS = "Components"
+ATTACHABLE = "SAttachableComponentParams"
+GEOMETRY_COMPONENT = "SGeometryResourceParams"
+CLOTHING = "SCItemClothingParams"
+SUIT_ARMOR = "SCItemSuitArmorParams"
+TAGS_COMPONENT = "STagsComponentParams"
 
-ATTACH_TYPE = [
-    "Components.SAttachableComponentParams.AttachDef.Type",
-    "SAttachableComponentParams.AttachDef.Type",
-    "Components.[].SAttachableComponentParams.AttachDef.Type",
-    "AttachDef.Type",
-]
+ATTACH_TYPE = ["AttachDef.Type", "AttachDef.type"]
+ATTACH_SUBTYPE = ["AttachDef.SubType"]
+ATTACH_SIZE = ["AttachDef.Size"]
+MANUFACTURER_REF = ["AttachDef.Manufacturer"]
+NAME_KEY = ["AttachDef.Localization.Name"]
+DESCRIPTION_KEY = ["AttachDef.Localization.Description"]
+TAGS = ["AttachDef.Tags", "tags", "Tags"]
 
-ATTACH_SUBTYPE = [
-    "Components.SAttachableComponentParams.AttachDef.SubType",
-    "SAttachableComponentParams.AttachDef.SubType",
-    "Components.[].SAttachableComponentParams.AttachDef.SubType",
-    "AttachDef.SubType",
-]
+# Inside SGeometryResourceParams, the tree root is `Geometry`; each node has
+# `Geometry.Geometry.path` plus `Geometry.Material.path`, and children in
+# `SubGeometry`. See :func:`sc_extract.catalog.walk_geometry`.
+GEOMETRY_ROOT = "Geometry"
+NODE_PATH = ["Geometry.Geometry.path", "Geometry.path"]
+NODE_MATERIAL = ["Geometry.Material.path", "Material.path"]
+NODE_CHILDREN = "SubGeometry"
 
-ATTACH_SIZE = [
-    "Components.SAttachableComponentParams.AttachDef.Size",
-    "SAttachableComponentParams.AttachDef.Size",
-    "Components.[].SAttachableComponentParams.AttachDef.Size",
-]
-
-MANUFACTURER_REF = [
-    "Components.SAttachableComponentParams.AttachDef.Manufacturer",
-    "SAttachableComponentParams.AttachDef.Manufacturer",
-    "Components.[].SAttachableComponentParams.AttachDef.Manufacturer",
-    "Manufacturer",
-]
-
-NAME_KEY = [
-    "Components.SAttachableComponentParams.AttachDef.Localization.Name",
-    "SAttachableComponentParams.AttachDef.Localization.Name",
-    "Components.[].SAttachableComponentParams.AttachDef.Localization.Name",
-    "Localization.Name",
-]
-
-DESCRIPTION_KEY = [
-    "Components.SAttachableComponentParams.AttachDef.Localization.Description",
-    "SAttachableComponentParams.AttachDef.Localization.Description",
-    "Components.[].SAttachableComponentParams.AttachDef.Localization.Description",
-    "Localization.Description",
-]
-
-# The nesting depth of Geometry is the single most uncertain field in the plan.
-# List every plausible depth; the spike prunes this to the one that is real.
-GEOMETRY_PATH = [
-    "Components.SGeometryResourceParams.Geometry.Geometry.Geometry.path",
-    "Components.SGeometryResourceParams.Geometry.Geometry.path",
-    "Components.SGeometryResourceParams.Geometry.path",
-    "SGeometryResourceParams.Geometry.Geometry.Geometry.path",
-    "SGeometryResourceParams.Geometry.Geometry.path",
-    "SGeometryResourceParams.Geometry.path",
-    "Components.[].SGeometryResourceParams.Geometry.Geometry.Geometry.path",
-    "Components.[].SGeometryResourceParams.Geometry.Geometry.path",
-]
-
-# Sub-geometry lists (L/R limb pairs, visor sub-meshes).
-SUB_GEOMETRY = [
-    "Components.SGeometryResourceParams.Geometry.Geometry.SubGeometry",
-    "Components.SGeometryResourceParams.Geometry.SubGeometry",
-    "SGeometryResourceParams.Geometry.Geometry.SubGeometry",
-]
-
-TINT_PALETTE = [
-    "Components.SGeometryResourceParams.Geometry.Geometry.Geometry.Tint",
-    "Components.SGeometryResourceParams.Geometry.Geometry.Tint",
-    "Components.SGeometryResourceParams.Palette",
-    "SGeometryResourceParams.Geometry.Geometry.Geometry.Tint",
-]
-
-MATERIAL_PATH = [
-    "Components.SGeometryResourceParams.Geometry.Geometry.Material.path",
-    "Components.SGeometryResourceParams.Geometry.Material.path",
-    "SGeometryResourceParams.Geometry.Geometry.Material.path",
-]
-
-ARMOR_PARAMS = [
-    "Components.SCItemClothingParams",
-    "Components.SCItemArmorParams",
-    "SCItemClothingParams",
-    "SCItemArmorParams",
-]
-
-TAGS = [
-    "Components.STagsComponentParams.tags",
-    "Components.SAttachableComponentParams.AttachDef.Tags",
-    "tags",
-    "Tags",
-]
-
-CLASS_NAME = ["ClassName", "className", "__class", "Name", "name"]
-
-RECORD_ID = ["__ref", "Reference", "reference", "id", "GUID", "guid"]
-
-RECORD_TYPE = ["__type", "__polymorphicType", "type", "Type"]
+CLOTHING_STAT_KEYS = (
+    "TemperatureResistance",
+    "RadiationResistance",
+    "Flight",
+    "Chunks",
+)
 
 # Values of ATTACH_TYPE that mark an item as wearable FPS armor.
 # HYPOTHESIS — confirm against the real export before trusting the slot counts.
@@ -217,7 +222,7 @@ SLOT_NAME_HINTS: list[tuple[str, str]] = [
     ("_hel_", "helmet"),
     ("torso", "torso"),
     ("_tor_", "torso"),
-    ("core", "torso"),
+    ("core", "torso"),  # VERIFIED: CIG calls the torso slot "core"
     ("chest", "torso"),
     ("arms", "arms"),
     ("_arm", "arms"),
@@ -225,7 +230,9 @@ SLOT_NAME_HINTS: list[tuple[str, str]] = [
     ("_leg", "legs"),
 ]
 
+# Longest first: "superheavy" must not be matched as "heavy".
 WEIGHT_CLASS_HINTS: list[tuple[str, str]] = [
+    ("superheavy", "superheavy"),
     ("heavy", "heavy"),
     ("medium", "medium"),
     ("light", "light"),

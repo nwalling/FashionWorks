@@ -14,7 +14,7 @@ def test_only_armor_records_become_items(index: Index, loc: Localization) -> Non
     manifest, stats = build(index, loc)
     class_names = {item.class_name for item in manifest.items}
     assert "behr_p8sc_smg" not in class_names, "weapons must not enter the armor catalog"
-    assert "Manufacturer_AEG" not in class_names
+    assert "cds" not in class_names, "manufacturer records are not items"
     assert stats.considered == 8
     assert stats.matched == len(manifest.items)
 
@@ -24,15 +24,16 @@ def test_slots_and_counts(index: Index, loc: Localization) -> None:
     counts = manifest.counts_by_slot()
     assert counts["helmet"] == 3
     assert counts["arms"] == 1
+    assert counts["backpack"] == 1
     assert counts["torso"] == 0
 
 
 def test_names_resolve_through_localization(index: Index, loc: Localization) -> None:
     manifest, _ = build(index, loc)
-    helmet = next(i for i in manifest.items if i.class_name.endswith("helmet_light_slate"))
-    assert helmet.name == "AEG Pathfinder Helmet"
-    assert helmet.description == "A light exploration helmet, rated to -40C."
-    assert helmet.name_key == "@item_Name_aeg_pathfinder_helmet"
+    helmet = next(i for i in manifest.items if i.class_name.endswith("helmet_02_02_01"))
+    assert helmet.name == "FBL-8a Helmet SecondWind"
+    assert helmet.description == "A light combat helmet, rated to -32C."
+    assert helmet.name_key == "@item_Name_cds_combat_light_helmet_02_02_01"
 
 
 def test_unresolved_name_falls_back_to_class_name(index: Index, loc: Localization) -> None:
@@ -44,28 +45,62 @@ def test_unresolved_name_falls_back_to_class_name(index: Index, loc: Localizatio
 
 
 def test_manufacturer_reference_resolves(index: Index, loc: Localization) -> None:
+    """A file:// ref resolves to the manufacturer record, giving code and name."""
     manifest, _ = build(index, loc)
-    helmet = next(i for i in manifest.items if i.class_name.endswith("helmet_light_slate"))
-    assert helmet.manufacturer == Manufacturer(code="AEG", name="Aegis Dynamics")
+    helmet = next(i for i in manifest.items if i.class_name.endswith("helmet_02_02_01"))
+    assert helmet.manufacturer.code == "CDS"
+    assert helmet.manufacturer.name == "Clark Defense Systems"
 
 
-def test_geometry_paths_are_normalized_and_paired(index: Index, loc: Localization) -> None:
+def test_geometry_picks_the_worn_mesh_not_the_carry_prop(
+    index: Index, loc: Localization
+) -> None:
+    """The top of the geometry tree is the dropped-item prop, not the armor."""
     manifest, _ = build(index, loc)
-    helmet = next(i for i in manifest.items if i.class_name.endswith("helmet_light_slate"))
-    assert helmet.geometry[0].source == (
-        "Data/Objects/Characters/Human/male_v7/aeg/pathfinder/helmet.skin"
-    ), "backslashes must be normalized"
+    helmet = next(i for i in manifest.items if i.class_name.endswith("helmet_02_02_01"))
+    sources = [g.source for g in helmet.geometry]
+    assert sources == ["objects/characters/human/male_v7/armor/cds/m_cds_light_helmet_01.skin"]
+    assert not any("carry_prop" in s for s in sources)
+    assert not any("female_v2" in s for s in sources), "male skeleton was requested"
+    assert not any("visor" in s for s in sources), "shared visors are not the helmet"
+    assert not any("_lod" in s for s in sources)
 
+
+def test_geometry_pairs_left_and_right(index: Index, loc: Localization) -> None:
+    manifest, _ = build(index, loc)
     arms = next(i for i in manifest.items if i.slot == "arms")
     assert [g.side for g in arms.geometry] == ["left", "right"]
     assert len(arms.geometry) == 2
 
 
-def test_components_may_be_a_list(index: Index, loc: Localization) -> None:
+def test_female_skeleton_selects_female_meshes(index: Index, loc: Localization) -> None:
+    manifest, _ = catalog.build(index, loc, game_version="test", skeleton="female")
+    helmet = next(i for i in manifest.items if i.class_name.endswith("helmet_02_02_01"))
+    assert helmet.geometry[0].source.startswith("objects/characters/human/female_v2/")
+
+
+def test_backpacks_bind_to_a_socket(index: Index, loc: Localization) -> None:
+    manifest, _ = build(index, loc)
+    backpack = next(i for i in manifest.items if i.slot == "backpack")
+    assert backpack.geometry[0].source.endswith(".cga")
+    assert backpack.bind_mode == "socket"
+
+
+def test_backslashes_are_normalized(index: Index, loc: Localization) -> None:
+    manifest, _ = build(index, loc)
+    for item in manifest.items:
+        for geometry in item.geometry:
+            assert "\\" not in geometry.source
+
+
+def test_manufacturer_falls_back_to_the_code_in_the_reference(
+    index: Index, loc: Localization
+) -> None:
+    """Refs are file:// paths ending <type>.<code>.json."""
     manifest, _ = build(index, loc)
     arms = next(i for i in manifest.items if i.slot == "arms")
     assert arms.manufacturer.code == "RSI"
-    assert arms.weight_class == "medium"
+    assert arms.weight_class == "medium", "SubType carries the weight class"
 
 
 def test_flags_mark_test_and_missing_geometry(index: Index, loc: Localization) -> None:
@@ -77,20 +112,24 @@ def test_flags_mark_test_and_missing_geometry(index: Index, loc: Localization) -
 
 def test_stats_keep_only_known_fields(index: Index, loc: Localization) -> None:
     manifest, _ = build(index, loc)
-    helmet = next(i for i in manifest.items if i.class_name.endswith("helmet_light_slate"))
+    helmet = next(i for i in manifest.items if i.class_name.endswith("helmet_02_02_01"))
     assert "TemperatureResistance" in helmet.stats
+    assert "RadiationResistance" in helmet.stats
     assert "IgnoredField" not in helmet.stats
 
 
-def test_tags_resolve_to_names(index: Index, loc: Localization) -> None:
+def test_tags_split_from_a_space_separated_string(
+    index: Index, loc: Localization
+) -> None:
     manifest, _ = build(index, loc)
-    helmet = next(i for i in manifest.items if i.class_name.endswith("helmet_light_slate"))
-    assert helmet.tags == ["weight_light"]
+    helmet = next(i for i in manifest.items if i.class_name.endswith("helmet_02_02_01"))
+    assert helmet.tags == ["Marine_Light", "Set_02", "Color_01", "Helmet"]
 
 
 def test_colour_variants_link_to_one_canonical_item(index: Index, loc: Localization) -> None:
+    """Same set and slot, differing Color_ tag, means one entry with swatches."""
     manifest, _ = build(index, loc)
-    helmets = [i for i in manifest.items if i.slot == "helmet" and "pathfinder" in i.class_name]
+    helmets = [i for i in manifest.items if i.slot == "helmet" and "helmet_02_0" in i.class_name]
     canonical = [i for i in helmets if i.variant_of is None]
     variants = [i for i in helmets if i.variant_of is not None]
     assert len(canonical) == 1

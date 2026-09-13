@@ -31,7 +31,7 @@ The original plan assumes `scdatatools` is a drop-in. Its state as of September 
 
 **Resolved (2026-09-13):** both are now built from source into `tools/bin` by `tools/build.sh`, so the pipeline runs on macOS. Only `Data.p4k` itself is still needed. `scx doctor` reports which stages the current host can run, and `scx use-p4k <path>` points it at a P4K on any volume.
 
-**CORRECTION (2026-09-13) — Cgf-Converter is no longer required.** StarBreaker v0.3.2 has `skin export`, which reads a `.skin`/`.cgf` out of the P4K and writes GLB directly. That removes the extract-then-convert pass in §4.2 and the .NET dependency. Cgf-Converter is kept only as a cross-check when weights or bone hierarchy look wrong.
+**RETRACTED (2026-09-13).** An earlier note here claimed StarBreaker's `skin export` replaced Cgf-Converter. Tested against real data, it does not: it writes a rigid mesh with no `JOINTS_0`/`WEIGHTS_0`. **Cgf-Converter is required** for skinned armor, exactly as §0 originally said. Skeletons additionally need its `-dae` output, since a `.chr` loses its bones through glTF. `skin export` remains useful for rigid props.
 
 **CONFIRMED (2026-09-13) — the geometry field path in §3.1 was right.** StarBreaker's `dcb query` help documents this exact path as a worked example:
 
@@ -306,6 +306,30 @@ Each task is one session or PR. Acceptance criteria are what Claude Code should 
 - Accept: full catalog converted; web build loads a set from a remote asset URL.
 
 ---
+
+## 7a. Task 1 spike results (2026-09-13, build 1.0.191.55227)
+
+Run against a real 158 GB `Data.p4k`. Full detail in CLAUDE.md → "Verified
+facts"; the parts that change this plan:
+
+- **§3.1 was right about the field path and the attach types.** `Char_Armor_*`
+  is real, and `Geometry.Geometry.Geometry.path` resolves.
+- **…but that path is the wrong mesh.** At the tree root it names the
+  dropped-item carry prop — a storage crate for torso, arms and legs. The worn
+  meshes are in `SubGeometry`, one branch per gender. §4.1 must walk the tree,
+  not read the root.
+- **§3.3 slot names:** the torso slot is called `core`. Weight classes include
+  `superheavy`.
+- **§3.4 set grouping and variants are given, not guessed.** Items carry
+  `Set_<n>` and `Color_<n>` tags in a space-separated `AttachDef.Tags` string.
+- **§5.3 Option A is impossible.** An armor `.skin` exports 41 joints of which
+  only 16 are in the 220-bone base skeleton; the rest are `*_override`
+  attachment bones the piece introduces, in a non-matching order. Option B is
+  the mechanism, and §4.3's canonical armature must be the base skeleton plus
+  the union of override bones.
+- **§8's visor risk is real:** helmets carry shared first-person visor meshes
+  per aspect ratio as sub-geometry.
+- Meshes ship split as `.skin`/`.skinm` pairs, and LODs 1-5 must be filtered.
 
 ## 8. Known risks and unknowns (resolve in Task 1)
 

@@ -4,8 +4,8 @@ from sc_extract.localization import Localization
 
 
 def test_parses_keys_and_strips_bom(loc: Localization) -> None:
-    assert loc.get("@item_Name_aeg_pathfinder_helmet") == "AEG Pathfinder Helmet"
-    assert len(loc) == 4
+    assert loc.get("@item_Name_cds_combat_light_helmet_02_02_01") == "FBL-8a Helmet SecondWind"
+    assert len(loc) == 5
 
 
 def test_ignores_comments() -> None:
