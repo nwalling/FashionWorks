@@ -13,7 +13,6 @@ Stages, in pipeline order::
 
 from __future__ import annotations
 
-import json
 import logging
 import sys
 from pathlib import Path
@@ -229,10 +228,7 @@ def catalog(
     click.echo(f"  {'total':<10} {len(manifest.items)}")
 
     if loc.missing:
-        settings.errors_path().parent.mkdir(parents=True, exist_ok=True)
-        settings.errors_path().write_text(
-            json.dumps({"unresolved_localization_keys": sorted(loc.missing)}, indent=2)
-        )
+        settings.write_errors("unresolved_localization_keys", sorted(loc.missing))
         click.secho(
             f"{len(loc.missing)} unresolved @keys listed in {settings.errors_path()}",
             fg="yellow",
@@ -401,6 +397,44 @@ def refresh(ctx: click.Context) -> None:
         _fail(f"no manifest at {settings.manifest_path()}; run `scx catalog` first")
     ready = refresh_assets(settings)
     click.secho(f"{ready} item(s) renderable", fg="green")
+
+
+@main.command(name="sets")
+@click.option("--incomplete", is_flag=True, help="also list sets missing a core slot")
+@click.option("--pending", is_flag=True, help="only sets with unconverted items")
+@click.pass_context
+def sets_cmd(ctx: click.Context, incomplete: bool, pending: bool) -> None:
+    """List armor sets and how much of each is converted."""
+    from collections import defaultdict
+
+    settings = _settings(ctx)
+    if not settings.manifest_path().is_file():
+        _fail(f"no manifest at {settings.manifest_path()}; run `scx catalog` first")
+
+    manifest = Manifest.read(settings.manifest_path())
+    core = {"helmet", "torso", "arms", "legs"}
+    grouped: dict[str, list] = defaultdict(list)
+    for item in manifest.items:
+        if item.geometry and item.variant_of is None and item.set:
+            grouped[item.set].append(item)
+
+    rows = []
+    for key, items in grouped.items():
+        slots = {i.slot for i in items}
+        ready = sum(1 for i in items if i.assets.glb)
+        if not incomplete and not core <= slots:
+            continue
+        if pending and ready == len(items):
+            continue
+        maker = next((i.manufacturer.code for i in items if i.manufacturer.code), "")
+        weight = next((i.weight_class for i in items if i.weight_class), "")
+        rows.append((key, maker, weight, ready, len(items), sorted(slots)))
+
+    rows.sort(key=lambda r: (r[2] or "", r[1] or "", r[0]))
+    for key, maker, weight, ready, total, slots in rows:
+        mark = "done" if ready == total else f"{ready}/{total}"
+        click.echo(f"  {key:<30} {maker:<6} {weight or '-':<11} {mark:<7} {','.join(slots)}")
+    click.secho(f"{len(rows)} set(s)", fg="green")
 
 
 @main.command(name="all")

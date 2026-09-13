@@ -126,6 +126,29 @@ class Settings:
     def errors_path(self) -> Path:
         return self.out_dir / "errors.json"
 
+    def write_errors(self, section: str, payload: object) -> Path:
+        """Merge one section into errors.json instead of replacing the file.
+
+        The catalog and convert stages both report here. Overwriting meant a
+        catalog re-run silently erased the list of items that had failed to
+        convert.
+        """
+        import json as _json
+
+        path = self.errors_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        existing: dict = {}
+        if path.is_file():
+            try:
+                loaded = _json.loads(path.read_text())
+                if isinstance(loaded, dict):
+                    existing = loaded
+            except _json.JSONDecodeError:
+                existing = {}
+        existing[section] = payload
+        path.write_text(_json.dumps(existing, indent=2) + "\n")
+        return path
+
     def localization_p4k_path(self) -> str:
         return self.localization_path.format(locale=self.locale)
 

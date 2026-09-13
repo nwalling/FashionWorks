@@ -46,6 +46,8 @@ main { display: flex; flex: 1; min-height: 0; }
 .stage { flex: 1; min-width: 0; position: relative; }
 aside {
   width: 340px;
+  min-width: 340px;
+  overflow-x: hidden;
   border-left: 1px solid var(--line);
   background: var(--panel);
   overflow-y: auto;
@@ -77,6 +79,8 @@ aside {
 
 .filters { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px; }
 .filters input { grid-column: 1 / -1; }
+/* Long option text must not widen the grid track, or the panel scrolls sideways. */
+.filters select, .filters input { min-width: 0; width: 100%; }
 input, select, button {
   font: inherit;
   background: var(--panel-2);

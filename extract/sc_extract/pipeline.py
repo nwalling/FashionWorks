@@ -15,7 +15,13 @@ from pathlib import Path
 
 from .config import REPO_ROOT, Settings
 from .manifest import Item, Manifest
-from .tools import ToolError, blender_run, cgf_convert, starbreaker_p4k_extract
+from .tools import (
+    ToolError,
+    blender_run,
+    cgf_convert,
+    path_regex,
+    starbreaker_p4k_extract,
+)
 
 log = logging.getLogger(__name__)
 
@@ -99,7 +105,9 @@ def ensure_extracted(settings: Settings, items: list[Item], *, textures: bool = 
     for prefix in prefixes:
         try:
             starbreaker_p4k_extract(
-                settings, out_dir=settings.raw_dir, filter_glob=f"**/{prefix}/**",
+                settings,
+                out_dir=settings.raw_dir,
+                regex=path_regex(prefix),
                 convert=converters,
             )
         except ToolError as exc:
@@ -276,7 +284,5 @@ def convert(
 
     refresh_assets(settings, manifest)
 
-    if result.errors:
-        settings.errors_path().parent.mkdir(parents=True, exist_ok=True)
-        settings.errors_path().write_text(json.dumps({"convert": result.errors}, indent=2))
+    settings.write_errors("convert", result.errors)
     return result

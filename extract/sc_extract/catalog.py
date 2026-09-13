@@ -33,6 +33,11 @@ SUB_SLOT_HINTS: list[tuple[str, str]] = [
 TEST_PATTERNS = re.compile(r"(^|_)(test|debug|placeholder|template|wip|dev)(_|$)", re.IGNORECASE)
 NPC_PATTERNS = re.compile(r"(^|_)(npc|ai|crew_ai)(_|$)", re.IGNORECASE)
 
+# Records that carry an armor attach type but are not wearable: shop displays
+# and the loot containers armor drops into.
+NOT_WEARABLE = re.compile(r"^(lootable_container|shop_|tint_lootcontainer)", re.IGNORECASE)
+PLACEHOLDER_NAME = "<= PLACEHOLDER =>"
+
 
 @dataclass
 class CatalogStats:
@@ -461,15 +466,27 @@ def tag_value(tags: list[str], pattern: re.Pattern[str]) -> str | None:
     return None
 
 
-def flags_for(record: Record, geometry: list[Geometry]) -> list[str]:
+def flags_for(record: Record, geometry: list[Geometry], name: str | None = None) -> list[str]:
+    """Mark records that should not appear in the default listing.
+
+    ``placeholder`` and ``not_wearable`` are hidden by the viewer; ``unnamed``
+    is a real item whose localization key did not resolve, so it stays visible
+    under its class name.
+    """
     flags: list[str] = []
-    name = record.class_name
-    if TEST_PATTERNS.search(name):
+    class_name = record.class_name
+    if TEST_PATTERNS.search(class_name):
         flags.append("test")
-    if NPC_PATTERNS.search(name):
+    if NPC_PATTERNS.search(class_name):
         flags.append("npc")
     if not geometry:
         flags.append("no_geometry")
+    if name == PLACEHOLDER_NAME:
+        flags.append("placeholder")
+    if NOT_WEARABLE.match(name or "") or NOT_WEARABLE.match(class_name):
+        flags.append("not_wearable")
+    if name is not None and name == class_name:
+        flags.append("unnamed")
     return flags
 
 
@@ -574,7 +591,7 @@ def build_item(
     desc_key = _attach(record, F.DESCRIPTION_KEY)
     name = loc.get(name_key) if isinstance(name_key, str) else None
 
-    flags = flags_for(record, geometry)
+    flags = flags_for(record, geometry, name or record.class_name)
     if any(g.source.lower().endswith(".cdf") for g in geometry):
         # The mesh is named indirectly; `scx extract` resolves it.
         flags.append("cdf")

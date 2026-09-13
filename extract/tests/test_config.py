@@ -105,3 +105,30 @@ def test_merged_text_round_trips_through_the_loader(tmp_path: Path) -> None:
 
     settings = load_settings(base, local_path=local, environ={}, root=tmp_path)
     assert settings.sc_root == tmp_path / "LIVE"
+
+
+def test_write_errors_merges_sections(tmp_path: Path) -> None:
+    """Catalog and convert both report here; neither may erase the other."""
+    config = write(tmp_path / "settings.toml", BASE)
+    settings = load_settings(config, local_path=None, environ={}, root=tmp_path)
+
+    settings.write_errors("convert", {"item-1": "blender produced no item.glb"})
+    settings.write_errors("unresolved_localization_keys", ["@item_Name_x"])
+
+    import json
+
+    data = json.loads(settings.errors_path().read_text())
+    assert data["convert"] == {"item-1": "blender produced no item.glb"}
+    assert data["unresolved_localization_keys"] == ["@item_Name_x"]
+
+
+def test_write_errors_survives_a_corrupt_file(tmp_path: Path) -> None:
+    config = write(tmp_path / "settings.toml", BASE)
+    settings = load_settings(config, local_path=None, environ={}, root=tmp_path)
+    settings.errors_path().parent.mkdir(parents=True, exist_ok=True)
+    settings.errors_path().write_text("{ not json")
+
+    settings.write_errors("convert", {})
+    import json
+
+    assert json.loads(settings.errors_path().read_text()) == {"convert": {}}

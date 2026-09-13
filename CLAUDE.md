@@ -78,11 +78,21 @@ Pipeline:
 ```bash
 extract/.venv/bin/scx doctor                 # what this host can run
 extract/.venv/bin/scx catalog                # Data.p4k -> data/out/manifest.json
-extract/.venv/bin/scx extract --slot helmet  # manifest -> data/raw
+extract/.venv/bin/scx sets                   # sets, and how much of each is converted
+extract/.venv/bin/scx sets --pending         # only sets with unconverted items
 extract/.venv/bin/scx rig --skeleton male    # canonical armature -> data/out/base
-extract/.venv/bin/scx convert --slot helmet  # data/raw -> data/out/items/<id>/item.glb
-extract/.venv/bin/scx all                    # everything, in order
+extract/.venv/bin/scx convert --set <key>    # extract + convert + normalize one set
+extract/.venv/bin/scx convert --all          # every canonical item that has geometry
+extract/.venv/bin/scx refresh                # re-point the manifest at GLBs on disk
 ```
+
+`scx convert` runs the whole chain: it extracts any missing raw assets, converts
+meshes to Collada, then normalizes them in Blender. It is incremental, keyed on a
+hash of the inputs plus the normalizer's own mtime, so editing
+`blender/normalize_armor.py` correctly invalidates everything.
+
+Colour variants are skipped by default (`--canonical-only`): they share geometry
+with their canonical item and differ only by tint.
 
 No game data on hand:
 
@@ -330,6 +340,39 @@ converting each one would duplicate geometry for nothing.
 `pipeline.refresh_assets` points a variant at its canonical item's GLB, and the
 viewer re-applies the variant's own palette colour, since the shared mesh carries
 the canonical colour baked into its material.
+
+### Non-wearable records
+
+Some DataCore records carry an armor attach type without being wearable: shop
+displays (`Shop_*`), the loot containers armor drops into
+(`Lootable_Container_*`, `Tint_LootContainer_*`), and outright placeholders
+named `<= PLACEHOLDER =>`. `catalog.flags_for` marks these `not_wearable`,
+`placeholder` or `test`, and the viewer's `HIDDEN_FLAGS` keeps them out of the
+listing. Items flagged `unnamed` are real armor whose localization key did not
+resolve; they stay visible under their class name.
+
+### Undersuits and the base body
+
+The base GLB ships a default undersuit, so there is a body to look at and a
+skinned mesh for the viewer to read the skeleton from. Equipping another
+undersuit would stack two layers, so `BaseCharacter` hides the built-in body
+whenever that slot is filled. It captures the body meshes once at mount, because
+armor pieces are reparented under the same root when they bind and re-traversing
+would hide the armor too.
+
+### Extraction is case-sensitive, and that bit
+
+StarBreaker's `--filter` glob matches case-sensitively, while the DataCore spells
+the same directory both `Objects/...` and `objects/...`. A lowercase prefix
+matched nothing and the extract call still reported success, so four real items
+failed conversion much later with "no converted geometry". `tools.path_regex`
+builds a case-insensitive, separator-tolerant regex and extraction uses
+`--regex` instead. The directory that yielded 0 files by glob yields 182 by
+regex.
+
+`Settings.write_errors` merges one section into `errors.json` rather than
+replacing the file: catalog and convert both report there, and a catalog re-run
+used to erase the convert failures.
 
 ### Still unverified
 

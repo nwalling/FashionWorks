@@ -87,9 +87,19 @@ export async function loadManifest(signal?: AbortSignal): Promise<Manifest> {
   return manifest;
 }
 
+/**
+ * Flags that keep an item out of the default listing. Some DataCore records
+ * carry an armor attach type without being wearable: shop displays, the loot
+ * containers armor drops into, and outright placeholders.
+ */
+const HIDDEN_FLAGS = ['npc', 'placeholder', 'not_wearable', 'test'] as const;
+
 /** Items that are renderable and not hidden behind a flag. */
 export function selectableItems(manifest: Manifest): Item[] {
-  return manifest.items.filter((item) => item.assets.glb !== null && !item.flags.includes('npc'));
+  return manifest.items.filter(
+    (item) =>
+      item.assets.glb !== null && !HIDDEN_FLAGS.some((flag) => item.flags.includes(flag)),
+  );
 }
 
 export function itemsBySlot(items: Item[]): Record<Slot, Item[]> {

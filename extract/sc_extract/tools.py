@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -244,19 +245,24 @@ def starbreaker_p4k_extract(
     settings: Settings,
     *,
     out_dir: Path,
-    filter_glob: str,
+    filter_glob: str | None = None,
+    regex: str | None = None,
     convert: Sequence[str] | str | None = ("cryxml", "dds-png"),
     max_threads: int | None = None,
 ) -> Path:
-    """Extract P4K entries matching ``filter_glob``, converting on the way out.
+    """Extract P4K entries, converting on the way out.
 
-    ``starbreaker p4k extract --p4k P --output D --filter G [--convert C ...]``
-    ``--convert`` is repeatable, so it is passed once per converter.
+    ``starbreaker p4k extract --p4k P --output D (--filter G | --regex R)``
+    The two filters are mutually exclusive. ``--convert`` is repeatable, so it
+    is passed once per converter.
     """
+    if bool(filter_glob) == bool(regex):
+        raise ValueError("pass exactly one of filter_glob or regex")
+
     binary = require("starbreaker", settings)
     out_dir.mkdir(parents=True, exist_ok=True)
-    argv = [str(binary), "p4k", "extract", *_p4k_args(settings),
-            "--output", str(out_dir), "--filter", filter_glob]
+    argv = [str(binary), "p4k", "extract", *_p4k_args(settings), "--output", str(out_dir)]
+    argv += ["--filter", filter_glob] if filter_glob else ["--regex", regex]
 
     converters = [convert] if isinstance(convert, str) else list(convert or [])
     for converter in converters:
@@ -267,6 +273,19 @@ def starbreaker_p4k_extract(
         argv += ["--max-threads", str(max_threads)]
     run(argv)
     return out_dir
+
+
+def path_regex(prefix: str) -> str:
+    """A case-insensitive, separator-tolerant regex for a P4K directory.
+
+    The DataCore spells the same directory both ``Objects/...`` and
+    ``objects/...``, while entries inside the P4K use ``Data\\Objects\\...``.
+    StarBreaker's glob filter is case-sensitive, so a lowercase prefix silently
+    matched nothing and the assets were never extracted. A regex sidesteps both
+    problems.
+    """
+    parts = [re.escape(p) for p in prefix.replace("\\", "/").strip("/").split("/") if p]
+    return "(?i)" + r"[\\/]".join(parts) + r"[\\/]"
 
 
 def starbreaker_p4k_list(settings: Settings, filter_glob: str) -> list[str]:
