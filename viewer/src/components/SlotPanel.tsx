@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 
 import type { Item, Slot } from '../manifest';
-import { SLOTS, selectableItems, variantsOf } from '../manifest';
+import { SLOTS, paletteColor, selectableItems, variantsOf } from '../manifest';
 import { useStore } from '../store';
 
 function uniqueSorted(values: Array<string | null | undefined>): string[] {
@@ -159,11 +159,5 @@ function ItemRow({
 }
 
 function swatchColor(item: Item): string {
-  const colors = item.tint?.colors;
-  if (Array.isArray(colors) && typeof colors[0] === 'number') {
-    const [r, g, b] = colors as number[];
-    const channel = (v: number) => Math.round(Math.min(1, Math.max(0, v)) * 255);
-    return `rgb(${channel(r)}, ${channel(g)}, ${channel(b)})`;
-  }
-  return '#4a5058';
+  return paletteColor(item) ?? '#4a5058';
 }

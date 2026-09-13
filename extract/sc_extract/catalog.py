@@ -387,6 +387,21 @@ def tint_for(nodes: list[GeoNode], index: Index) -> dict[str, Any] | None:
     }
 
 
+# Rigid pieces hang off an attachment bone rather than deforming with the body.
+# These bones are not in the base skeleton: they are grafted onto the canonical
+# armature from a donor mesh by blender/build_base_rig.py. Names verified in
+# build 1.0.191.55227.
+SLOT_SOCKETS = {
+    "backpack": "backpack_attach_1_override",
+    "helmet": "helmethook_attach_override",
+}
+
+
+def socket_for(slot: str, bind_mode: str) -> str | None:
+    """The attachment bone a rigid piece hangs from, or None when skinned."""
+    return SLOT_SOCKETS.get(slot) if bind_mode == "socket" else None
+
+
 def bind_mode_for(geometry: list[Geometry]) -> str:
     """Rigid meshes attach to a socket; skinned ones bind to the skeleton."""
     if geometry and all(g.source.lower().endswith(RIGID_SUFFIXES) for g in geometry):
@@ -503,22 +518,26 @@ def set_key(item: Item) -> str:
     return "|".join(bits).lower()
 
 
+def geometry_key(item: Item) -> tuple[str, ...]:
+    return tuple(sorted(g.source.lower() for g in item.geometry))
+
+
 def link_variants(items: list[Item]) -> None:
     """Group colour variants so the viewer shows one entry with swatches.
 
-    Items in the same set and slot that differ only by their ``Color_<n>`` tag
-    are variants of one another. Items without colour tags fall back to
-    stripping a colour-ish suffix from the class name.
+    Two items are variants of each other when they are the same slot and point
+    at **the same mesh**, differing only in tint. Grouping on the ``Set_<n>``
+    tag alone is too loose: a set can contain several genuinely different
+    backpacks, and merging them hid real items behind one entry and left the
+    survivor borrowing a mesh with the wrong bind mode.
+
+    Items with no geometry fall back to a stripped class name so that
+    placeholder records still collapse instead of flooding the list.
     """
-    groups: dict[tuple[str, str, str], list[Item]] = defaultdict(list)
+    groups: dict[tuple, list[Item]] = defaultdict(list)
     for item in items:
-        set_tag = tag_value(item.tags, _SET_TAG)
-        key = (
-            (item.set or "", item.slot, "tagged")
-            if set_tag
-            else (canonical_key(item.class_name), item.slot, "name")
-        )
-        groups[key].append(item)
+        key = geometry_key(item)
+        groups[(item.slot, key or ("name", canonical_key(item.class_name)))].append(item)
 
     for group in groups.values():
         for member in group:
@@ -577,6 +596,7 @@ def build_item(
         geometry=geometry,
         materials=materials,
         bind_mode=bind_mode_for(geometry),
+        socket=socket_for(slot, bind_mode_for(geometry)),
         assets=Assets(glb=None, thumb=None),
         flags=flags,
     )

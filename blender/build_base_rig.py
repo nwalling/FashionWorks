@@ -23,6 +23,7 @@ Run::
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -66,6 +67,53 @@ def meshes() -> list:
     return [o for o in bpy.context.scene.objects if o.type == "MESH"]
 
 
+ATTACHMENT_PATTERN = re.compile(r"(_attach|_override)", re.IGNORECASE)
+
+
+def graft_attachments(armature, donor) -> list[str]:
+    """Copy equipment attachment bones from ``donor`` onto the canonical rig.
+
+    The base skeleton has no attachment points: bones like
+    ``backpack_attach_1_override`` are introduced by the worn pieces
+    themselves. Verified in build 1.0.191.55227, a CDS undersuit contributes 35
+    such bones and **every one** parents to a bone the base skeleton already
+    has, so they graft on without inventing a hierarchy.
+
+    Without this there is nowhere for a rigid piece to hang, and backpacks end
+    up at the body origin.
+    """
+    existing = {b.name for b in armature.data.bones}
+    wanted = [
+        b
+        for b in donor.data.bones
+        if b.name not in existing
+        and ATTACHMENT_PATTERN.search(b.name)
+        and b.parent
+        and b.parent.name in existing
+    ]
+    if not wanted:
+        return []
+
+    spec = [
+        (b.name, b.parent.name, tuple(b.head_local), tuple(b.tail_local)) for b in wanted
+    ]
+
+    bpy.context.view_layer.objects.active = armature
+    bpy.ops.object.mode_set(mode="EDIT")
+    edit_bones = armature.data.edit_bones
+    added: list[str] = []
+    for name, parent, head, tail in spec:
+        bone = edit_bones.new(name)
+        bone.head = head
+        # A zero-length bone is dropped by Blender, so give it a small tail.
+        bone.tail = tail if tail != head else (head[0], head[1] + 0.02, head[2])
+        bone.parent = edit_bones[parent]
+        bone.use_deform = False
+        added.append(name)
+    bpy.ops.object.mode_set(mode="OBJECT")
+    return added
+
+
 def skeleton_json(armature) -> dict:
     bones = list(armature.data.bones)
     index = {b.name: i for i, b in enumerate(bones)}
@@ -73,7 +121,7 @@ def skeleton_json(armature) -> dict:
         "bones": [b.name for b in bones],
         "parents": [index[b.parent.name] if b.parent else -1 for b in bones],
         "rest": [list(b.head_local) + list(b.tail_local) for b in bones],
-        "sockets": [b.name for b in bones if "attach" in b.name.lower()],
+        "sockets": [b.name for b in bones if ATTACHMENT_PATTERN.search(b.name)],
     }
 
 
@@ -144,9 +192,12 @@ def main() -> None:
                     unknown = rebind_to(obj, armature)
                     if unknown:
                         print(f"[rig] undersuit groups not on the rig: {sorted(unknown)[:6]}")
-            # Drop the armature the undersuit brought with it.
+            # Harvest attachment points before discarding the donor rig.
             for obj in added:
                 if obj.type == "ARMATURE" and obj.name != rig_name:
+                    grafted = graft_attachments(armature, obj)
+                    if grafted:
+                        print(f"[rig] grafted {len(grafted)} attachment bone(s)")
                     bpy.data.objects.remove(obj, do_unlink=True)
 
     for mesh in meshes():

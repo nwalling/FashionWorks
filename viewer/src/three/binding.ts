@@ -138,7 +138,18 @@ export function bindSocket(
     return { meshes, attachedTo: null };
   }
 
+  // Rigid pieces are authored in body space, the same space as the base
+  // character. Parenting to a bone would apply that bone's rest transform on
+  // top, so cancel it first. Doing it here rather than baking it in Blender
+  // avoids having to agree about Z-up versus Y-up with the glTF exporter.
+  bone.updateWorldMatrix(true, false);
+  const cancel = new THREE.Matrix4().copy(bone.matrixWorld).invert();
+
   for (const mesh of candidates) {
+    mesh.position.set(0, 0, 0);
+    mesh.quaternion.identity();
+    mesh.scale.set(1, 1, 1);
+    mesh.applyMatrix4(cancel);
     bone.add(mesh);
     mesh.frustumCulled = false;
     meshes.push(mesh);

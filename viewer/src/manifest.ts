@@ -98,6 +98,21 @@ export function itemsBySlot(items: Item[]): Record<Slot, Item[]> {
   return out;
 }
 
+/**
+ * The item's own tint colour from the game's palette, as #rrggbb.
+ *
+ * Armor ships no albedo texture; colour comes from a tint palette. A colour
+ * variant borrows its canonical item's mesh, whose material carries the
+ * canonical colour, so the variant's own palette colour has to be applied at
+ * render time or every swatch would look identical.
+ */
+export function paletteColor(item: Item): string | undefined {
+  const colors = (item.tint as { colors?: unknown } | null)?.colors;
+  if (!Array.isArray(colors)) return undefined;
+  const first = colors[0];
+  return typeof first === 'string' && /^#[0-9a-f]{6}$/i.test(first) ? first : undefined;
+}
+
 /** Colour variants of an item, canonical first. */
 export function variantsOf(item: Item, byId: Map<string, Item>): Item[] {
   const canonical = item.variant_of ? byId.get(item.variant_of) ?? item : item;

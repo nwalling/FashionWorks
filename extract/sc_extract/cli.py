@@ -281,6 +281,12 @@ def extract(ctx: click.Context, slot: str | None, item_id: str | None) -> None:
 @click.option("--slot", type=click.Choice(SLOTS), default=None)
 @click.option("--item", "item_id", default=None)
 @click.option("--all", "convert_all_items", is_flag=True)
+@click.option("--set", "set_keys", multiple=True, help="convert one or more sets; repeatable")
+@click.option(
+    "--canonical-only/--with-variants",
+    default=True,
+    help="skip colour variants, which share geometry with their canonical item",
+)
 @click.option("--jobs", type=int, default=None, help="override convert.jobs")
 @click.option("--web", is_flag=True, help="enable Draco/KTX2 for a web build")
 @click.pass_context
@@ -289,6 +295,8 @@ def convert(
     slot: str | None,
     item_id: str | None,
     convert_all_items: bool,
+    set_keys: tuple[str, ...],
+    canonical_only: bool,
     jobs: int | None,
     web: bool,
 ) -> None:
@@ -298,13 +306,15 @@ def convert(
     settings = _settings(ctx)
     if not settings.manifest_path().is_file():
         _fail(f"no manifest at {settings.manifest_path()}; run `scx catalog` first")
-    if not (slot or item_id or convert_all_items):
-        _fail("pass one of --item, --slot or --all")
+    if not (slot or item_id or convert_all_items or set_keys):
+        _fail("pass one of --item, --slot, --set or --all")
 
     result = pipeline.convert(
         settings,
         slot=slot,
         item_id=item_id,
+        set_keys=list(set_keys) or None,
+        canonical_only=canonical_only,
         jobs=jobs or settings.jobs,
         draco=web or settings.draco,
     )

@@ -137,11 +137,55 @@ def cleanup(mesh) -> None:
     modifier.quad_method = "SHORTEST_DIAGONAL"
 
 
-def socket_origin(armature, socket: str | None):
-    if not socket or armature is None:
-        return (0.0, 0.0, 0.0)
+def socket_locator(socket: str | None):
+    """The prop's own attachment frame for ``socket``, if it ships one.
+
+    A rigid prop is authored around its own origin, not in body space, and
+    carries empties marking where it mounts. A backpack's
+    ``backpack_attach_1_override`` bone on the skeleton pairs with a
+    ``backpack_attach_1_loc`` empty on the prop.
+    """
+    if not socket:
+        return None
+    candidates = {socket.lower()}
+    if socket.lower().endswith("_override"):
+        candidates.add(socket[: -len("_override")].lower() + "_loc")
+    for obj in bpy.context.scene.objects:
+        if obj.type == "EMPTY" and obj.name.lower() in candidates:
+            return obj
+    return None
+
+
+def place_at_socket(mesh, armature, socket: str | None, *, log: list[str]) -> bool:
+    """Move a rigid mesh into body space, aligned to its socket bone.
+
+    Composes ``bone_rest · locator⁻¹`` so the prop's own attachment frame lands
+    on the skeleton's attachment bone. The result is exported in body space and
+    the viewer cancels the bone's rest matrix when it parents the mesh, so no
+    agreement about Z-up versus Y-up is needed anywhere.
+    """
+    if armature is None or not socket:
+        return False
     bone = armature.data.bones.get(socket)
-    return tuple(bone.head_local) if bone else (0.0, 0.0, 0.0)
+    if bone is None:
+        log.append(f"socket {socket!r} is not on the canonical rig")
+        return False
+
+    bone_rest = armature.matrix_world @ bone.matrix_local
+    locator = socket_locator(socket)
+    if locator is None:
+        log.append(f"no {socket!r} locator on the prop; using the bone rest position")
+        placement = bone_rest
+    else:
+        placement = bone_rest @ locator.matrix_world.inverted()
+
+    mesh.parent = None
+    mesh.matrix_world = placement @ mesh.matrix_world
+    bpy.context.view_layer.objects.active = mesh
+    bpy.ops.object.select_all(action="DESELECT")
+    mesh.select_set(True)
+    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+    return True
 
 
 # Collada first, deliberately. VERIFIED (build 1.0.191.55227): cgf-converter's
@@ -222,13 +266,7 @@ def process_item(item: dict, spec: dict, *, errors: dict[str, str]) -> None:
         if bind_mode == "skinned":
             rebind(mesh, armature, log=notes)
         else:
-            origin = socket_origin(armature, item.get("socket"))
-            mesh.parent = None
-            mesh.location = (-origin[0], -origin[1], -origin[2])
-            bpy.context.view_layer.objects.active = mesh
-            bpy.ops.object.select_all(action="DESELECT")
-            mesh.select_set(True)
-            bpy.ops.object.transform_apply(location=True, rotation=False, scale=False)
+            place_at_socket(mesh, armature, item.get("socket"), log=notes)
 
         cleanup(mesh)
 

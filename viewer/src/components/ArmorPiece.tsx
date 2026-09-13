@@ -47,6 +47,22 @@ export function ArmorPiece({ item, tint }: { item: Item; tint?: string }) {
       if (result.report.skipped > 0) {
         console.warn(`[armor] ${item.class_name}: ${result.report.skipped} mesh(es) skipped`, result.report);
       }
+
+      if (meshes.length === 0) {
+        // The manifest called this skinned but the GLB has no SkinnedMesh.
+        // Rendering nothing at all is the worst outcome, so fall back to the
+        // socket, then to the scene root, and say so.
+        console.warn(
+          `[armor] ${item.class_name}: no skinned mesh in ${item.assets.glb}; falling back to rigid`,
+        );
+        meshes = item.socket
+          ? bindSocket(instance, skeleton, item.socket).meshes
+          : [];
+        if (meshes.length === 0) {
+          root.add(instance);
+          meshes = [instance];
+        }
+      }
     }
 
     setAttached(meshes);

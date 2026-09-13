@@ -292,6 +292,45 @@ three layers through the blend mask is not done.
 **Meshes carry several material slots** (shell, interior, metal, bones, props),
 matching the `.mtl` submaterial order.
 
+### Attachment points and sockets
+
+The base skeleton has **no attachment bones**. Names like
+`backpack_attach_1_override` are introduced by the worn pieces themselves, which
+is why a backpack initially rendered at the body origin.
+
+A CDS undersuit contributes 35 such bones, and **every one parents to a bone the
+base skeleton already has** (`Spine3`, `RightHand`, `LeftUpLeg_Start_sIk1`, ...).
+So `build_base_rig.graft_attachments` copies them onto the canonical armature,
+taking it from 220 to 255 bones with 36 attachment points. Verified positions:
+
+| Bone | Parent | Head |
+| --- | --- | --- |
+| `backpack_attach_1_override` | `Spine3` | (0.000, -0.130, 1.440) |
+| `helmethook_attach_override` | `Spine` | (-0.098, -0.101, 1.055) |
+
+**A rigid prop is authored around its own origin, not in body space**, and
+carries empties marking where it mounts: a backpack ships a
+`backpack_attach_1_loc` empty that pairs with the skeleton's
+`backpack_attach_1_override` bone. `normalize_armor.place_at_socket` composes
+`bone_rest · locator⁻¹` so the prop's frame lands on the bone, then exports the
+result **in body space**. The viewer cancels the bone's rest matrix when it
+parents the mesh.
+
+Two earlier attempts were wrong and are worth not repeating. Baking the mesh
+into the bone's local space in Blender fought the exporter's Z-up to Y-up
+conversion of the bone's own rest rotation and put backpacks 1.3 m off the body.
+Skipping the locator and using the bone position alone left the pack floating at
+head height, because the prop's origin is not its mount point.
+
+`catalog.SLOT_SOCKETS` maps a rigid slot to its bone. Grafted bones are marked
+`use_deform = False` so they never pick up weight.
+
+**Colour variants reuse the canonical mesh.** They differ only by tint, so
+converting each one would duplicate geometry for nothing.
+`pipeline.refresh_assets` points a variant at its canonical item's GLB, and the
+viewer re-applies the variant's own palette colour, since the shared mesh carries
+the canonical colour baked into its material.
+
 ### Still unverified
 
 - Compositing the three tint layers through the blend and wear masks. v1 uses
@@ -299,9 +338,11 @@ matching the `.mtl` submaterial order.
 - Whether female meshes bind to the same bone names as male ones.
 - Only one set has been converted end to end. `scx convert` has not been run
   across the full catalog, so per-item failure rates are unknown.
-- Backpack sockets: the rigid piece exports with its origin baked, but the
-  socket bone it should hang from is not yet read from the CDF's `CA_BONE`
-  entry, so backpacks sit at the body origin.
+- The socket bone is chosen from a per-slot table rather than read from the
+  CDF's `CA_BONE` entry, which carries the real `BoneName` and relative
+  transform. Fine for backpacks; other rigid pieces may need the CDF.
+- 12 of 41 complete sets are converted. Running the full catalog through
+  conversion has not been attempted, and Collada intermediates are large.
 - 93 items with unresolved localization keys, and some placeholder junk in the
   catalog (`<= PLACEHOLDER =>`, `Body`) that should be flagged and hidden.
 - 331 items have no manufacturer code.

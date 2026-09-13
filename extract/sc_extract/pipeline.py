@@ -11,10 +11,11 @@ import json
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from .config import REPO_ROOT, Settings
 from .manifest import Item, Manifest
-from .tools import ToolError, blender_run
+from .tools import ToolError, blender_run, cgf_convert, starbreaker_p4k_extract
 
 log = logging.getLogger(__name__)
 
@@ -54,6 +55,88 @@ def is_current(settings: Settings, item: Item) -> bool:
     if not (glb.is_file() and sidecar.is_file()):
         return False
     return sidecar.read_text().strip() == input_hash(settings, item)
+
+
+def raw_path(settings: Settings, source: str) -> Path | None:
+    """Resolve a P4K source path to the extracted file on disk.
+
+    The DataCore spells paths without the leading ``Data/`` and with
+    inconsistent case, while extraction writes ``data/raw/Data/Objects/...``.
+    macOS is case-insensitive so the direct join usually hits; the glob is the
+    fallback for case-sensitive filesystems.
+    """
+    base = settings.raw_dir / "Data"
+    direct = base / source
+    if direct.is_file():
+        return direct
+    stem = Path(source).name
+    for candidate in base.rglob(stem):
+        if candidate.is_file():
+            return candidate
+    lowered = stem.lower()
+    for candidate in base.rglob("*"):
+        if candidate.is_file() and candidate.name.lower() == lowered:
+            return candidate
+    return None
+
+
+def ensure_extracted(settings: Settings, items: list[Item], *, textures: bool = True) -> int:
+    """Extract every raw asset the given items need, in one pass per prefix."""
+    from . import geometry as geometry_mod
+
+    wanted: list[str] = []
+    for item in items:
+        for source in geometry_mod.asset_sources(item):
+            if raw_path(settings, source) is None and source not in wanted:
+                wanted.append(source)
+    if not wanted:
+        return 0
+
+    # One extraction call per directory beats one per file: the P4K is scanned
+    # once per call, and on an SD card that dominates.
+    prefixes = sorted({str(Path(s).parent) for s in wanted})
+    converters = ["cryxml", "dds-png"] if textures else ["cryxml"]
+    for prefix in prefixes:
+        try:
+            starbreaker_p4k_extract(
+                settings, out_dir=settings.raw_dir, filter_glob=f"**/{prefix}/**",
+                convert=converters,
+            )
+        except ToolError as exc:
+            log.warning("extraction failed for %s: %s", prefix, exc)
+    return len(wanted)
+
+
+def ensure_converted(settings: Settings, item: Item, *, fmt: str = "dae") -> list[Path]:
+    """Convert an item's meshes to Collada, skipping ones already converted.
+
+    Collada, not glTF: Blender ignores cgf-converter's glTF inverse bind
+    matrices and the mesh lands off the body. See blender/normalize_armor.py.
+    """
+    out: list[Path] = []
+    for geo in item.geometry:
+        stem = Path(geo.source).stem
+        target = settings.interim_dir / f"{stem}.{fmt}"
+        if target.is_file():
+            out.append(target)
+            continue
+        source = raw_path(settings, geo.source)
+        if source is None:
+            log.warning("no extracted mesh for %s", geo.source)
+            continue
+        try:
+            out.append(
+                cgf_convert(
+                    settings,
+                    source,
+                    out_dir=settings.interim_dir,
+                    fmt=fmt,
+                    data_dir=settings.raw_dir / "Data",
+                )
+            )
+        except ToolError as exc:
+            log.warning("conversion failed for %s: %s", source.name, exc)
+    return out
 
 
 def _batches(items: list[Item], size: int) -> list[list[Item]]:
@@ -105,25 +188,35 @@ def _run_batch(settings: Settings, batch: list[Item], *, draco: bool) -> dict[st
 def refresh_assets(settings: Settings, manifest: Manifest | None = None) -> int:
     """Point manifest ``assets.glb`` at the item GLBs that exist on disk.
 
-    Returns how many items are renderable. Also fills in each skeleton's base
-    GLB, so a manifest built before the rig existed picks it up.
+    Colour variants share their canonical item's geometry and differ only by
+    tint, so a variant with no GLB of its own borrows the canonical one. That
+    is what makes the swatch row in the viewer work without converting the same
+    mesh a dozen times.
+
+    Returns how many items are renderable, and fills in each skeleton's base GLB.
     """
     manifest = manifest or Manifest.read(settings.manifest_path())
-    ready = 0
+
     for item in manifest.items:
         glb = settings.item_dir(item.id) / "item.glb"
-        if glb.is_file():
-            item.assets.glb = f"items/{item.id}/item.glb"
-            ready += 1
-        else:
-            item.assets.glb = None
+        item.assets.glb = f"items/{item.id}/item.glb" if glb.is_file() else None
+
+    by_id = manifest.by_id()
+    for item in manifest.items:
+        if item.assets.glb is None and item.variant_of:
+            canonical = by_id.get(item.variant_of)
+            if canonical is not None and canonical.assets.glb:
+                item.assets.glb = canonical.assets.glb
+                # The mesh decides how it attaches, so inherit that too.
+                item.bind_mode = canonical.bind_mode
+                item.socket = canonical.socket
 
     for name, skeleton in manifest.skeletons.items():
         base = settings.base_dir() / f"{name}.glb"
         skeleton.glb = f"base/{name}.glb" if base.is_file() else None
 
     manifest.write(settings.manifest_path())
-    return ready
+    return sum(1 for item in manifest.items if item.assets.glb)
 
 
 def convert(
@@ -131,6 +224,8 @@ def convert(
     *,
     slot: str | None = None,
     item_id: str | None = None,
+    set_keys: list[str] | None = None,
+    canonical_only: bool = True,
     jobs: int = 4,
     draco: bool = False,
 ) -> ConvertResult:
@@ -139,8 +234,17 @@ def convert(
     items = manifest.items
     if item_id:
         items = [i for i in items if i.id == item_id]
-    elif slot:
-        items = [i for i in items if i.slot == slot]
+    else:
+        if set_keys:
+            wanted = set(set_keys)
+            items = [i for i in items if i.set in wanted]
+        if slot:
+            items = [i for i in items if i.slot == slot]
+        if canonical_only:
+            # Variants share geometry with their canonical item and differ only
+            # by tint, so converting them duplicates meshes for nothing.
+            items = [i for i in items if i.variant_of is None]
+        items = [i for i in items if i.geometry]
 
     result = ConvertResult()
     pending: list[Item] = []
@@ -151,6 +255,11 @@ def convert(
             pending.append(item)
 
     log.info("%d items pending, %d already current", len(pending), result.skipped)
+
+    if pending:
+        ensure_extracted(settings, pending)
+        for item in pending:
+            ensure_converted(settings, item)
 
     batches = _batches(pending, max(1, settings.blender_batch_size))
     if batches:

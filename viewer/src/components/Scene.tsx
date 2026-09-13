@@ -4,7 +4,7 @@ import { Environment, Grid, OrbitControls, PerspectiveCamera } from '@react-thre
 import * as THREE from 'three';
 
 import { useStore } from '../store';
-import { SLOTS } from '../manifest';
+import { SLOTS, paletteColor } from '../manifest';
 import { ArmorPiece } from './ArmorPiece';
 import { BaseCharacter } from './BaseCharacter';
 
@@ -62,7 +62,12 @@ export function Scene({
               const id = loadout.slots[slot];
               const item = id ? byId.get(id) : undefined;
               if (!item || !item.assets.glb) return null;
-              return <ArmorPiece key={item.id} item={item} tint={loadout.tints[item.id]} />;
+              // A variant reuses the canonical mesh, so its own palette colour
+              // has to be re-applied unless the user has chosen a tint.
+              const borrowed = item.variant_of !== null;
+              const tint =
+                loadout.tints[item.id] ?? (borrowed ? paletteColor(item) : undefined);
+              return <ArmorPiece key={item.id} item={item} tint={tint} />;
             })}
           </BaseCharacter>
         ) : null}
