@@ -100,7 +100,7 @@ export function SlotPanel() {
             equippedId={equippedId}
             variants={variantsOf(item, byId)}
             onEquip={(id) => equip(activeSlot, id)}
-            onEquipSet={() => (item.set ? equipSet(item.set) : undefined)}
+            onEquipSet={(anchorId) => (item.set ? equipSet(item.set, anchorId) : undefined)}
           />
         ))}
         {items.length === 0 ? <li className="empty">No items match these filters.</li> : null}
@@ -120,7 +120,7 @@ function ItemRow({
   equippedId: string | null;
   variants: Item[];
   onEquip: (id: string) => void;
-  onEquipSet: () => void;
+  onEquipSet: (anchorId: string) => void;
 }) {
   const activeVariant = variants.find((v) => v.id === equippedId) ?? item;
   const isEquipped = variants.some((v) => v.id === equippedId);
@@ -150,7 +150,7 @@ function ItemRow({
         </div>
       ) : null}
       {item.set ? (
-        <button className="link" onClick={onEquipSet}>
+        <button className="link" onClick={() => onEquipSet(activeVariant.id)}>
           equip full set
         </button>
       ) : null}

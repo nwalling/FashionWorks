@@ -4,16 +4,26 @@ import * as THREE from 'three';
 import { shareUrl } from '../loadout';
 import { useStore } from '../store';
 import { exportCombinedGlb, exportLoadoutJson, exportScreenshot } from '../exporters';
+import { BACKDROPS, type BackdropName } from './Backdrop';
+import { POSES, type PoseName } from '../three/poses';
 import { HDR_PRESETS, type HdrPreset } from './Scene';
 
 export function LoadoutBar({
   capture,
   preset,
   onPreset,
+  backdrop,
+  onBackdrop,
+  pose,
+  onPose,
 }: {
   capture: { gl: THREE.WebGLRenderer; scene: THREE.Scene; camera: THREE.Camera } | null;
   preset: HdrPreset;
   onPreset: (preset: HdrPreset) => void;
+  backdrop: BackdropName;
+  onBackdrop: (backdrop: BackdropName) => void;
+  pose: PoseName;
+  onPose: (pose: PoseName) => void;
 }) {
   const manifest = useStore((state) => state.manifest);
   const loadout = useStore((state) => state.loadout);
@@ -53,7 +63,33 @@ export function LoadoutBar({
       <button onClick={save}>Save</button>
       <button onClick={restore}>Restore</button>
       <span className="spacer" />
-      <select value={preset} onChange={(event) => onPreset(event.target.value as HdrPreset)}>
+      <select
+        value={pose}
+        title="Pose"
+        onChange={(event) => onPose(event.target.value as PoseName)}
+      >
+        {Object.entries(POSES).map(([value, entry]) => (
+          <option key={value} value={value}>
+            {entry.label}
+          </option>
+        ))}
+      </select>
+      <select
+        value={backdrop}
+        title="Backdrop behind the character"
+        onChange={(event) => onBackdrop(event.target.value as BackdropName)}
+      >
+        {Object.keys(BACKDROPS).map((value) => (
+          <option key={value} value={value}>
+            {value === 'none' ? 'no backdrop' : value}
+          </option>
+        ))}
+      </select>
+      <select
+        value={preset}
+        title="Lighting environment"
+        onChange={(event) => onPreset(event.target.value as HdrPreset)}
+      >
         {HDR_PRESETS.map((value) => (
           <option key={value} value={value}>
             {value}

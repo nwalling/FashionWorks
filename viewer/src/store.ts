@@ -31,7 +31,7 @@ interface State {
   setLoading: () => void;
 
   equip: (slot: Slot, itemId: string | null) => void;
-  equipSet: (setKey: string) => void;
+  equipSet: (setKey: string, anchorId?: string) => void;
   clear: () => void;
   randomize: () => void;
   setSkeleton: (skeleton: SkeletonName) => void;
@@ -85,14 +85,47 @@ export const useStore = create<State>((set, get) => ({
     set(withHistory(state, next));
   },
 
-  equipSet: (setKey) => {
+  equipSet: (setKey, anchorId) => {
     const state = get();
     const manifest = state.manifest;
     if (!manifest) return;
+
+    // A set key can cover several distinct product families: the game tags
+    // "cds_heavy_set01" onto ADP, ADP-mk4, DCP, Defiance, Balor and more. Just
+    // equipping everything with that key meant the last item written to each
+    // slot won, so every set produced the same outfit. Anchor on the item the
+    // user clicked and prefer its family and, importantly, its colour.
+    //
+    // Colour variants are candidates here rather than being skipped: picking
+    // the matching colour per slot is the whole point of equipping a set from
+    // a chosen swatch.
+    const all = selectableItems(manifest).filter((item) => item.set === setKey);
+    const anchor = anchorId ? all.find((item) => item.id === anchorId) : undefined;
+
+    const family = (item: Item) => item.name.split(/[\s(]/)[0].toLowerCase();
+    const palette = (item: Item) => JSON.stringify(item.tint?.colors ?? null);
+
+    const score = (item: Item): number => {
+      if (!anchor) return item.variant_of === null ? 1 : 0;
+      let value = 0;
+      if (palette(item) === palette(anchor)) value += 4;
+      if (family(item) === family(anchor)) value += 3;
+      // Break ties towards the canonical item so a set without colour data
+      // still lands on one obvious choice.
+      if (item.variant_of === null) value += 1;
+      return value;
+    };
+
     const next: Loadout = { ...state.loadout, slots: { ...state.loadout.slots } };
-    for (const item of selectableItems(manifest)) {
-      if (item.set === setKey) next.slots[item.slot] = item.id;
+    const best = new Map<Slot, { item: Item; score: number }>();
+    for (const item of all) {
+      const current = best.get(item.slot);
+      const value = score(item);
+      if (!current || value > current.score) best.set(item.slot, { item, score: value });
     }
+    for (const [slot, { item }] of best) next.slots[slot] = item.id;
+    if (anchor) next.slots[anchor.slot] = anchor.id;
+
     set(withHistory(state, next));
   },
 

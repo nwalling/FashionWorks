@@ -400,6 +400,46 @@ What separates them is whether the piece reaches the feet: measured on real
 items, full suits start at y=0.00 while a torso wrap starts at y=0.65. The
 viewer hides the base only for a piece that reaches both the feet and the chest.
 
+### Poses
+
+`viewer/src/three/poses.ts` puts the shared skeleton into T-pose, idle or
+crouch. Because armor binds to these same bones, posing the skeleton moves every
+equipped piece with it.
+
+Poses are **world-space aim directions**, not per-bone Euler angles. Two things
+forced that:
+
+* Mirroring hand-authored Eulers across the body does not work. The left arm
+  went down correctly and the right went out sideways, because the limbs do not
+  share a local axis convention.
+* "First child bone" is not the anatomical child. The rig interleaves
+  deformation and IK helpers and their order differs per side: `LeftArm` lists
+  `LeftForeArm` first, while `RightArm` lists `RightDelt_def` first and
+  `RightForeArm` fifth. `CHAIN` names the real child for every posed bone.
+
+With both fixed, hands land at exactly mirrored positions.
+
+Crouch does not hard-code how far the hips drop. Folding the legs lifts the
+feet, so the pose measures the lowest foot before and after and moves the hips
+to put them back on the ground. The correction is converted into the hips'
+parent space rather than applied as raw world Y.
+
+These are authored by eye. The game's own animations live in CryEngine
+animation files the pipeline does not read; StarBreaker ships research notes on
+those formats under `tools/src/StarBreaker/docs/`.
+
+### Backdrops
+
+`viewer/src/components/Backdrop.tsx` puts a photographic plate behind the
+character, cropped to cover rather than stretched. Lighting still comes from the
+HDR environment: a screenshot is a perspective image, not an equirectangular
+map, so using it to light the scene would be wrong. The reference grid is hidden
+whenever a backdrop is active, since it reads as floating debris over a photo.
+
+Backdrop images live in `data/out/backgrounds/` and are served through the same
+`/assets` mount as everything else, which also means they are gitignored like
+any other extracted asset.
+
 ### Still unverified
 
 - Compositing the three tint layers through the blend and wear masks. v1 uses

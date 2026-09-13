@@ -111,3 +111,13 @@ def test_compose_without_a_blend_map_is_flat(tmp_path: Path) -> None:
 
 def test_compose_without_layers_writes_nothing(tmp_path: Path) -> None:
     assert compose(None, [], tmp_path / "out", "none") == {}
+
+
+def test_neutral_layers_are_not_white() -> None:
+    """268 of 491 items carry no palette; white would blow them out."""
+    from sc_extract.tint import NEUTRAL_LAYERS
+
+    assert len(NEUTRAL_LAYERS) == 3
+    for layer in NEUTRAL_LAYERS:
+        assert max(layer.color) < 0.7, "a stand-in must read as unpainted, not white"
+    assert len({layer.color for layer in NEUTRAL_LAYERS}) == 3, "keep panel variation"

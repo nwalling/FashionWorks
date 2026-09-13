@@ -116,6 +116,14 @@ button:disabled { opacity: 0.4; cursor: default; }
 footer { border-top: 1px solid var(--line); background: var(--panel); }
 .loadout-bar { display: flex; gap: 6px; align-items: center; padding: 8px 12px; flex-wrap: wrap; }
 .loadout-bar .spacer { flex: 0 0 12px; }
+/* Enough controls now that the row wraps on a narrow window; keep it tidy
+   rather than letting one button drop onto a line of its own. */
+.loadout-bar button, .loadout-bar select { white-space: nowrap; }
+.loadout-bar select { max-width: 130px; }
+@media (max-width: 1100px) {
+  .loadout-bar { gap: 4px; padding: 6px 8px; font-size: 12px; }
+  .loadout-bar .spacer { flex: 0 0 4px; }
+}
 
 .fatal { max-width: 620px; margin: 12vh auto; padding: 24px; }
 .fatal h1 { font-size: 18px; }

@@ -26,6 +26,7 @@ Run::
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -141,6 +142,39 @@ def cleanup(mesh, *, smooth_angle: float = 40.0) -> None:
         modifier.keep_custom_normals = True
 
 
+ATTACHMENT_RE = re.compile(r"(_attach|_override)", re.IGNORECASE)
+
+
+def socket_offsets(donor, canonical) -> dict[str, list[float]]:
+    """How far this piece moves each attachment point from the canonical rig.
+
+    Every worn piece carries its own copy of the equipment attachment bones,
+    positioned for that piece's own bulk. A heavy torso puts
+    ``backpack_attach_1_override`` at y=-0.233 where the undersuit puts it at
+    -0.130, so a backpack hung off the canonical bone sinks 10 cm into heavy
+    armor.
+
+    The delta is returned in glTF axes (Blender x,y,z -> x,z,-y) so the viewer
+    can apply it without knowing anything about Blender's conventions.
+    """
+    if donor is None or canonical is None:
+        return {}
+    out: dict[str, list[float]] = {}
+    for bone in donor.data.bones:
+        if not ATTACHMENT_RE.search(bone.name):
+            continue
+        target = canonical.data.bones.get(bone.name)
+        if target is None:
+            continue
+        dx = bone.head_local[0] - target.head_local[0]
+        dy = bone.head_local[1] - target.head_local[1]
+        dz = bone.head_local[2] - target.head_local[2]
+        if abs(dx) < 1e-4 and abs(dy) < 1e-4 and abs(dz) < 1e-4:
+            continue
+        out[bone.name] = [round(dx, 5), round(dz, 5), round(-dy, 5)]
+    return out
+
+
 def socket_locator(socket: str | None):
     """The prop's own attachment frame for ``socket``, if it ships one.
 
@@ -247,9 +281,12 @@ def process_item(item: dict, spec: dict, *, errors: dict[str, str]) -> None:
 
     apply_scale_fix(float(spec.get("scale", 1.0)), spec.get("up_axis", "z"))
 
-    # Drop any armature the converter brought along; only the canonical one stays.
+    # Read the piece's own attachment points before discarding its rig; only
+    # the canonical armature stays.
+    offsets: dict[str, list[float]] = {}
     for obj in list(bpy.context.scene.objects):
         if obj.type == "ARMATURE" and obj.name != rig_name:
+            offsets.update(socket_offsets(obj, armature))
             bpy.data.objects.remove(obj, do_unlink=True)
 
     mesh_objects = meshes()
@@ -276,7 +313,12 @@ def process_item(item: dict, spec: dict, *, errors: dict[str, str]) -> None:
     C.export_glb(out_dir / "item.glb", draco=bool(spec.get("draco")))
     C.write_json(
         out_dir / "materials.json",
-        {"slots": material_meta, "notes": notes, "bind_mode": bind_mode},
+        {
+            "slots": material_meta,
+            "notes": notes,
+            "bind_mode": bind_mode,
+            "socket_offsets": offsets,
+        },
     )
     print(f"[normalize] {item_id}: {len(mesh_objects)} mesh(es), {len(material_meta)} material(s)")
     for note in notes:

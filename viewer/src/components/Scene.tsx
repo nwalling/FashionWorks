@@ -6,6 +6,8 @@ import * as THREE from 'three';
 import { useStore } from '../store';
 import { SLOTS, paletteColor } from '../manifest';
 import { ArmorPiece } from './ArmorPiece';
+import { BACKDROPS, Backdrop, type BackdropName } from './Backdrop';
+import { type PoseName } from '../three/poses';
 import { BaseCharacter } from './BaseCharacter';
 
 export const HDR_PRESETS = ['warehouse', 'city', 'sunset'] as const;
@@ -27,9 +29,13 @@ function CaptureBridge({ onReady }: { onReady: (state: { gl: THREE.WebGLRenderer
 
 export function Scene({
   preset,
+  backdrop,
+  pose,
   onReady,
 }: {
   preset: HdrPreset;
+  backdrop: BackdropName;
+  pose: PoseName;
   onReady: (state: { gl: THREE.WebGLRenderer; scene: THREE.Scene; camera: THREE.Camera }) => void;
 }) {
   const manifest = useStore((state) => state.manifest);
@@ -38,6 +44,12 @@ export function Scene({
   const skeletonEntry = manifest?.skeletons[loadout.skeleton] ?? Object.values(manifest?.skeletons ?? {})[0];
   const baseGlb = skeletonEntry?.glb ?? null;
   const byId = new Map((manifest?.items ?? []).map((item) => [item.id, item]));
+
+  // A rigid piece mounts where the worn torso says, not where the bare rig
+  // does. The torso is the piece whose bulk the mount has to clear; the
+  // undersuit is a fallback for when no torso is equipped.
+  const torsoId = loadout.slots.torso ?? loadout.slots.undersuit;
+  const mountOffsets = (torsoId ? byId.get(torsoId)?.socket_offsets : undefined) ?? {};
 
   return (
     <Canvas
@@ -56,8 +68,9 @@ export function Scene({
 
       <Suspense fallback={null}>
         <Environment preset={preset} />
+        {BACKDROPS[backdrop] ? <Backdrop file={BACKDROPS[backdrop]} /> : null}
         {baseGlb ? (
-          <BaseCharacter glb={baseGlb}>
+          <BaseCharacter glb={baseGlb} pose={pose}>
             {SLOTS.map((slot) => {
               const id = loadout.slots[slot];
               const item = id ? byId.get(id) : undefined;
@@ -67,20 +80,36 @@ export function Scene({
               const borrowed = item.variant_of !== null;
               const tint =
                 loadout.tints[item.id] ?? (borrowed ? paletteColor(item) : undefined);
-              return <ArmorPiece key={item.id} item={item} tint={tint} />;
+              const offset = item.socket ? mountOffsets[item.socket] : undefined;
+              return (
+                <ArmorPiece
+                  key={item.id}
+                  item={item}
+                  tint={tint}
+                  socketOffset={
+                    offset && offset.length === 3
+                      ? [offset[0], offset[1], offset[2]]
+                      : undefined
+                  }
+                />
+              );
             })}
           </BaseCharacter>
         ) : null}
       </Suspense>
 
-      <Grid
-        args={[12, 12]}
-        cellColor="#1d2228"
-        sectionColor="#2b333c"
-        infiniteGrid
-        fadeDistance={16}
-        position={[0, 0, 0]}
-      />
+      {/* The reference grid reads as floating debris once there is a photo
+          behind the character, so it only shows on the plain background. */}
+      {BACKDROPS[backdrop] ? null : (
+        <Grid
+          args={[12, 12]}
+          cellColor="#1d2228"
+          sectionColor="#2b333c"
+          infiniteGrid
+          fadeDistance={16}
+          position={[0, 0, 0]}
+        />
+      )}
       <directionalLight position={[3, 5, 2]} intensity={1.1} castShadow />
       <ambientLight intensity={0.25} />
     </Canvas>

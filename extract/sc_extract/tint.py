@@ -57,6 +57,17 @@ def hex_to_rgb(
         return default
 
 
+# Used when a LayerBlend_V2 material has no palette to composite. 268 of 491
+# canonical items carry no palette reference at all, and that shader supplies no
+# albedo, so without a stand-in they render blown-out white. Three near-greys
+# keep the blend mask's panel variation visible and read as unpainted metal.
+NEUTRAL_LAYERS = [
+    Layer(color=(0.42, 0.43, 0.45), spec=(0.23, 0.23, 0.23), glossiness=0.55),
+    Layer(color=(0.30, 0.31, 0.33), spec=(0.23, 0.23, 0.23), glossiness=0.65),
+    Layer(color=(0.55, 0.56, 0.58), spec=(0.28, 0.28, 0.28), glossiness=0.45),
+]
+
+
 def layers_from_tint(tint: dict | None) -> list[Layer]:
     """Turn a manifest ``tint`` block into up to three layers."""
     entries = (tint or {}).get("layers") or []

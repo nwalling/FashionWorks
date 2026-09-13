@@ -31,6 +31,12 @@ log = logging.getLogger(__name__)
 BLENDER_DIR = REPO_ROOT / "blender"
 NORMALIZE_SCRIPT = BLENDER_DIR / "normalize_armor.py"
 
+# Bump when the material or tint logic changes in a way that alters output but
+# leaves inputs untouched. The hash watches file mtimes and record contents, so
+# a change to how a palette is composited is otherwise invisible and stale GLBs
+# are silently kept.
+MATERIAL_PIPELINE_VERSION = 2
+
 
 @dataclass
 class ConvertResult:
@@ -45,6 +51,7 @@ def input_hash(settings: Settings, item: Item) -> str:
     digest.update(item.class_name.encode())
     digest.update(str(settings.draco).encode())
     digest.update(str(settings.smooth_angle).encode())
+    digest.update(str(MATERIAL_PIPELINE_VERSION).encode())
     digest.update(json.dumps(item.tint, sort_keys=True, default=str).encode())
     for mtl in discover_materials(settings, item):
         digest.update(mtl.name.encode())
@@ -237,6 +244,14 @@ def discover_materials(settings: Settings, item: Item) -> list[Path]:
             continue
         # "<mesh stem>_NN.mtl" beside the mesh, lowest suffix first.
         candidates = sorted(mesh.parent.glob(f"{mesh.stem}_*.mtl"))
+        if not candidates:
+            # Many meshes name the part but their material does not:
+            # m_cds_heavy_armor_01_arms.skin pairs with
+            # m_cds_heavy_armor_01_01.mtl. Drop trailing tokens and retry.
+            parts = mesh.stem.split("_")
+            while len(parts) > 2 and not candidates:
+                parts.pop()
+                candidates = sorted(mesh.parent.glob("_".join(parts) + "_*.mtl"))
         if candidates:
             found.append(candidates[0])
         else:
@@ -264,10 +279,13 @@ def material_descriptors(settings: Settings, item: Item) -> list[dict]:
                     resolved[role] = str(path)
             descriptor["resolved"] = resolved
 
-            if sub.tintable and layers:
+            # A layer-blend material with no palette still has a blend mask;
+            # compositing neutral greys beats leaving it white.
+            palette = layers or tint.NEUTRAL_LAYERS
+            if sub.tintable:
                 composed = tint.compose(
                     Path(resolved["blend"]) if "blend" in resolved else None,
-                    layers,
+                    palette,
                     settings.interim_dir / "tint",
                     Path(resolved.get("blend", sub.name)).stem or sub.name,
                     wear_path=Path(resolved["wear"]) if "wear" in resolved else None,
@@ -340,8 +358,25 @@ def refresh_assets(settings: Settings, manifest: Manifest | None = None) -> int:
     manifest = manifest or Manifest.read(settings.manifest_path())
 
     for item in manifest.items:
-        glb = settings.item_dir(item.id) / "item.glb"
+        item_dir = settings.item_dir(item.id)
+        glb = item_dir / "item.glb"
         item.assets.glb = f"items/{item.id}/item.glb" if glb.is_file() else None
+
+        # Blender records each piece's own attachment points while it still has
+        # the donor rig; carry them into the manifest for the viewer.
+        meta = item_dir / "materials.json"
+        if meta.is_file():
+            try:
+                loaded = json.loads(meta.read_text())
+            except json.JSONDecodeError:
+                loaded = {}
+            offsets = loaded.get("socket_offsets")
+            if isinstance(offsets, dict):
+                item.socket_offsets = {
+                    str(k): [float(x) for x in v]
+                    for k, v in offsets.items()
+                    if isinstance(v, list) and len(v) == 3
+                }
 
     by_id = manifest.by_id()
     for item in manifest.items:
@@ -352,6 +387,7 @@ def refresh_assets(settings: Settings, manifest: Manifest | None = None) -> int:
                 # The mesh decides how it attaches, so inherit that too.
                 item.bind_mode = canonical.bind_mode
                 item.socket = canonical.socket
+                item.socket_offsets = dict(canonical.socket_offsets)
 
     for name, skeleton in manifest.skeletons.items():
         base = settings.base_dir() / f"{name}.glb"

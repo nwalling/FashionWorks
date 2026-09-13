@@ -42,6 +42,8 @@ export const itemSchema = z.object({
   stats: z.record(z.unknown()).default({}),
   bind_mode: z.enum(['skinned', 'socket']).default('skinned'),
   socket: z.string().nullable().default(null),
+  // How far this piece shifts each attachment point from the canonical rig.
+  socket_offsets: z.record(z.array(z.number())).default({}),
   geometry: z.array(geometrySchema).default([]),
   materials: z.array(z.string()).default([]),
   assets: assetsSchema.default({ glb: null, thumb: null }),

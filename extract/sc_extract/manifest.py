@@ -57,6 +57,10 @@ class Item:
     stats: dict[str, Any] = field(default_factory=dict)
     bind_mode: str = "skinned"
     socket: str | None = None
+    # How far this piece shifts each attachment point from the canonical rig,
+    # in glTF axes. A heavy torso mounts a backpack further out than a thin
+    # undersuit does, so a rigid piece has to follow whatever is worn.
+    socket_offsets: dict[str, list[float]] = field(default_factory=dict)
     geometry: list[Geometry] = field(default_factory=list)
     materials: list[str] = field(default_factory=list)
     assets: Assets = field(default_factory=Assets)

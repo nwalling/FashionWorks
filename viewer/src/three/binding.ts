@@ -123,6 +123,7 @@ export function bindSocket(
   source: THREE.Object3D,
   skeleton: THREE.Skeleton,
   socket: string,
+  offset?: THREE.Vector3,
 ): { meshes: THREE.Object3D[]; attachedTo: THREE.Bone | null } {
   const bone = skeleton.getBoneByName(socket) ?? null;
   const meshes: THREE.Object3D[] = [];
@@ -144,6 +145,14 @@ export function bindSocket(
   // avoids having to agree about Z-up versus Y-up with the glTF exporter.
   bone.updateWorldMatrix(true, false);
   const cancel = new THREE.Matrix4().copy(bone.matrixWorld).invert();
+  if (offset && offset.lengthSq() > 0) {
+    // Parenting reapplies the bone's world matrix B, so the mesh ends up at
+    // B * cancel. For a plain world-space shift T the cancel term has to be
+    // B⁻¹ * T, giving B * B⁻¹ * T = T. Pre-multiplying instead yields
+    // B * T * B⁻¹, which rotates the offset by the bone and moved a backpack
+    // sideways and forwards rather than back.
+    cancel.multiply(new THREE.Matrix4().makeTranslation(offset.x, offset.y, offset.z));
+  }
 
   for (const mesh of candidates) {
     mesh.position.set(0, 0, 0);

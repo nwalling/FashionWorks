@@ -17,12 +17,31 @@ import { useBaseSkeleton } from './BaseCharacter';
  * character, so anything that needs to touch them afterwards — tinting — must
  * work from the list the bind step returns, not by traversing the clone.
  */
-export function ArmorPiece({ item, tint }: { item: Item; tint?: string }) {
+export function ArmorPiece({
+  item,
+  tint,
+  socketOffset,
+}: {
+  item: Item;
+  tint?: string;
+  /**
+   * Shift for a rigid piece's mount point, supplied by whatever torso is worn.
+   * Every piece carries its own copy of the attachment bones, positioned for
+   * its own bulk, so a backpack hung off the canonical bone sinks into heavy
+   * armor.
+   */
+  socketOffset?: [number, number, number];
+}) {
   const url = assetUrl(item.assets.glb ?? '');
   const { scene } = useGLTF(url);
   const { skeleton, root, bodyBox, setBodyCover } = useBaseSkeleton();
 
   const instance = useMemo(() => cloneSkinned(scene) as THREE.Object3D, [scene]);
+
+  // The offset arrives as a fresh array on every render. Depending on its
+  // identity made the bind effect tear down and rebuild continuously, which
+  // left socket pieces missing from the scene entirely.
+  const offsetKey = socketOffset ? socketOffset.join(',') : '';
   const [attached, setAttached] = useState<THREE.Object3D[]>([]);
 
   useEffect(() => {
@@ -31,7 +50,10 @@ export function ArmorPiece({ item, tint }: { item: Item; tint?: string }) {
     let meshes: THREE.Object3D[] = [];
 
     if (item.bind_mode === 'socket' && item.socket) {
-      meshes = bindSocket(instance, skeleton, item.socket).meshes;
+      const offset = offsetKey
+        ? new THREE.Vector3(...(offsetKey.split(',').map(Number) as [number, number, number]))
+        : undefined;
+      meshes = bindSocket(instance, skeleton, item.socket, offset).meshes;
     } else {
       const before = new Set<THREE.BufferGeometry>();
       instance.traverse((object) => {
@@ -85,7 +107,7 @@ export function ArmorPiece({ item, tint }: { item: Item; tint?: string }) {
       setBodyCover(item.id, false);
       detach(meshes, clonedGeometries);
     };
-  }, [instance, skeleton, root, item, bodyBox, setBodyCover]);
+  }, [instance, skeleton, root, item, bodyBox, setBodyCover, offsetKey]);
 
   // Tinting clones the material so the shared cache entry keeps its own colour.
   useEffect(() => {
