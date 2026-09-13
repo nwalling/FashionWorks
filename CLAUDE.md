@@ -59,18 +59,15 @@ reports ready.
 
 ## Commands
 
-Setup:
+`./starfashion` wraps all of this; the raw commands are below it for when you
+need a single stage.
 
 ```bash
-python3.11 -m venv extract/.venv && extract/.venv/bin/pip install -e "extract[dev]"
-npm --prefix viewer install
-tools/build.sh                               # StarBreaker + Cgf-Converter from source
-```
-
-Point at game data:
-
-```bash
-extract/.venv/bin/scx use-p4k /Volumes/<card>/StarCitizen/LIVE
+./starfashion setup                          # deps + build the extraction tools
+./starfashion use-p4k /Volumes/<card>/LIVE   # point at an install
+./starfashion build                          # catalog + rig + convert
+./starfashion run                            # viewer
+./starfashion check                          # tests, lint, typecheck, build
 ```
 
 Pipeline:

@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# StarFashion — one entry point for the whole project.
+#
+#   ./starfashion setup     install dependencies and build the extraction tools
+#   ./starfashion doctor    report what this machine can run
+#   ./starfashion use-p4k   point the pipeline at a Star Citizen install
+#   ./starfashion build     catalog + rig + convert everything
+#   ./starfashion demo      generate placeholder assets, no game data needed
+#   ./starfashion run       start the viewer
+#   ./starfashion check     tests, lint and a production build
+#   ./starfashion scx ...   pass anything through to the pipeline CLI
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT"
+
+VENV="$ROOT/extract/.venv"
+PY="$VENV/bin/python"
+SCX="$VENV/bin/scx"
+PORT="${PORT:-5173}"
+
+bold() { printf '\033[1m%s\033[0m\n' "$*"; }
+warn() { printf '\033[33m%s\033[0m\n' "$*" >&2; }
+die()  { printf '\033[31merror: %s\033[0m\n' "$*" >&2; exit 1; }
+
+find_python() {
+  for candidate in python3.13 python3.12 python3.11 python3; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      if "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 1)'; then
+        echo "$candidate"; return 0
+      fi
+    fi
+  done
+  return 1
+}
+
+cmd_setup() {
+  bold "Python environment"
+  if [[ ! -x "$PY" ]]; then
+    local python
+    python="$(find_python)" || die "Python 3.11+ is required and was not found on PATH"
+    "$python" -m venv "$VENV"
+  fi
+  "$PY" -m pip install --quiet --upgrade pip
+  "$PY" -m pip install --quiet -e "$ROOT/extract[dev]"
+  echo "  $("$SCX" --version)"
+
+  bold "Viewer dependencies"
+  command -v npm >/dev/null 2>&1 || die "npm is required and was not found on PATH"
+  npm --prefix viewer install --no-audit --no-fund --silent
+  echo "  installed"
+
+  bold "Extraction tools"
+  if [[ -x "$ROOT/tools/bin/starbreaker" ]]; then
+    echo "  already built"
+  else
+    warn "  StarBreaker and Cgf-Converter ship no macOS binaries, so they are built"
+    warn "  from source. This needs cargo (rustup) and, optionally, dotnet."
+    "$ROOT/tools/build.sh" || warn "  tool build did not finish; run tools/build.sh for detail"
+  fi
+
+  echo
+  cmd_doctor
+}
+
+need_venv() { [[ -x "$SCX" ]] || die "not set up yet — run: ./starfashion setup"; }
+
+cmd_doctor()  { need_venv; "$SCX" doctor; }
+cmd_use_p4k() { need_venv; "$SCX" use-p4k "$@"; }
+cmd_scx()     { need_venv; "$SCX" "$@"; }
+
+cmd_demo() {
+  need_venv
+  bold "Generating placeholder assets"
+  "$SCX" synth
+  npm --prefix viewer run --silent link-assets
+}
+
+cmd_build() {
+  need_venv
+  "$SCX" doctor | grep -q 'Data.p4k.*\[found\]' \
+    || die "no Data.p4k configured — run: ./starfashion use-p4k <path to the install>"
+  bold "Catalog"; "$SCX" catalog
+  bold "Base rig"; "$SCX" rig
+  bold "Converting armor (this takes a while)"; "$SCX" convert --all
+  "$SCX" refresh
+  npm --prefix viewer run --silent link-assets
+}
+
+cmd_run() {
+  need_venv
+  [[ -f "$ROOT/data/out/manifest.json" ]] \
+    || die "nothing to show yet — run ./starfashion demo, or build against a real install"
+  [[ -e "$ROOT/viewer/public/assets" ]] || npm --prefix viewer run --silent link-assets
+  bold "Viewer on http://localhost:$PORT"
+  npm --prefix viewer run dev -- --port "$PORT"
+}
+
+cmd_check() {
+  need_venv
+  bold "Tests";     ( cd "$ROOT/extract" && "$PY" -m pytest -q )
+  bold "Lint";      "$VENV/bin/ruff" check extract
+  bold "Typecheck"; npm --prefix viewer run --silent typecheck
+  bold "Build";     npm --prefix viewer run --silent build
+}
+
+# Print the header comment block, stopping at the first line that is not one.
+usage() { awk 'NR>1 && /^#/ { sub(/^# ?/, ""); print; next } NR>1 { exit }' "$0"; }
+
+case "${1:-help}" in
+  setup)   shift; cmd_setup "$@" ;;
+  doctor)  shift; cmd_doctor "$@" ;;
+  use-p4k) shift; cmd_use_p4k "$@" ;;
+  build)   shift; cmd_build "$@" ;;
+  demo)    shift; cmd_demo "$@" ;;
+  run)     shift; cmd_run "$@" ;;
+  check)   shift; cmd_check "$@" ;;
+  scx)     shift; cmd_scx "$@" ;;
+  help|-h|--help) usage ;;
+  *) die "unknown command: $1 (try ./starfashion help)" ;;
+esac

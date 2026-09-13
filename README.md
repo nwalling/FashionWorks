@@ -1,94 +1,111 @@
-# SC Armor Kitbasher
+# StarFashion
 
-Extract Star Citizen FPS armor from `Data.p4k`, normalize it onto one canonical
-skeleton, and mix and match pieces in a browser.
+A Star Citizen armor kitbasher. It reads the game's own data, converts every
+wearable piece onto one shared skeleton, and lets you mix and match them in the
+browser.
 
 ```
-Data.p4k -> catalog -> geometry/textures -> Blender -> .glb + manifest.json -> React/Three.js viewer
+Data.p4k → catalog → geometry + textures → Blender → .glb + manifest.json → viewer
 ```
 
-`PLAN.md` is the design. `CLAUDE.md` is the operational reference: decisions,
-verified facts, and the commands for each stage.
+## What works
 
-## Status
+Verified against build **1.0.191.55227** (`sc-alpha-4.10.0-hotfix`):
 
-**Real Star Citizen armor renders in the viewer.** Build 1.0.191.55227
-(`sc-alpha-4.10.0-hotfix`) catalogs **2615 armor items**, of which **2431 are
-selectable and rendering** across all six slots, on the shared 255-bone skeleton
-with their real tint colours and normal maps.
-
-Every canonical mesh in the catalog is converted: 491 items, two failures.
-
-| Stage | State |
+| | |
 | --- | --- |
-| Scaffold, config, `scx` CLI | done |
-| Extraction tools built from source | done, `starbreaker` and `cgf-converter` resolve |
-| Catalog (`scx catalog`) | **done, 2615 items from real game data** |
-| Extract / convert | **whole catalog converted**, 491 meshes, 2 failures |
-| Base rig + normalization | done, verified |
-| Viewer core, tints, export, share links | done, verified |
-| Thumbnails, web build | not started |
+| Items catalogued | 2615 |
+| Selectable in the viewer | 2431 |
+| Meshes converted | 491 |
+| Catalog run | ~17 seconds |
 
-Run `scx doctor` to see which stages the current host can execute.
+Every piece binds to a single 255-bone skeleton, so armor deforms with the body
+and you can pose the whole outfit at once. Colours come from the game's tint
+palettes, surface detail from its normal maps.
 
-## Try it without game data
+Slots: helmet, torso, arms, legs, backpack, undersuit. Filter by weight class,
+manufacturer or set, swap colour variants from a swatch row, equip a whole set
+in one click, tint individual pieces, and export the result as JSON, a combined
+`.glb`, a screenshot, or a shareable URL that needs no backend.
+
+## Quick start
 
 ```bash
-python3.11 -m venv extract/.venv
-extract/.venv/bin/pip install -e "extract[dev]"
-npm --prefix viewer install
-
-extract/.venv/bin/scx synth --items 30      # placeholder rig, items, manifest
-npm --prefix viewer run link-assets
-npm --prefix viewer run dev                 # http://localhost:5173
+./starfashion setup     # dependencies, and build the extraction tools
+./starfashion demo      # placeholder assets — no game install needed
+./starfashion run       # http://localhost:5173
 ```
 
-The generated meshes are primitives, not game assets. They exercise the real
-manifest schema, joint ordering, skinned and socket binding, and the viewer's
-rebinding path, so pipeline and UI work is not blocked on having the game.
+`demo` generates a synthetic rig and armor set so the viewer is usable
+immediately. The meshes are primitives, not game assets, but they exercise the
+same manifest, skeleton and binding path as the real thing.
 
-## Run it against a real install
+## With a real install
 
-1. Build the extraction tools. Neither ships a macOS binary, so this clones
-   and compiles both:
+```bash
+./starfashion use-p4k /path/to/StarCitizen/LIVE   # or the Data.p4k itself
+./starfashion doctor                              # what this machine can run
+./starfashion build                               # catalog, rig, convert
+./starfashion run
+```
 
-   ```bash
-   tools/build.sh
-   ```
+`use-p4k` accepts any volume, including an external drive or SD card, and writes
+the path to `config/settings.local.toml`. The archive is read in place and never
+copied.
 
-   It needs `cargo` (via rustup) and, for the optional cross-check tool,
-   `dotnet`.
+Conversion is incremental and keyed on a hash of the inputs, so re-running only
+redoes what changed. A full first pass takes a while: the archive is around
+158 GB and every mesh goes through Blender.
 
-2. Point the pipeline at a `Data.p4k`. Any volume works, including an SD card:
+## Commands
 
-   ```bash
-   extract/.venv/bin/scx use-p4k /Volumes/<card>/StarCitizen/LIVE
-   extract/.venv/bin/scx doctor
-   ```
+| | |
+| --- | --- |
+| `./starfashion setup` | install dependencies, build the extraction tools |
+| `./starfashion doctor` | report what this machine can run, and what is blocking |
+| `./starfashion use-p4k <path>` | point the pipeline at a Star Citizen install |
+| `./starfashion demo` | generate placeholder assets, no game data needed |
+| `./starfashion build` | catalog + base rig + convert everything |
+| `./starfashion run` | start the viewer |
+| `./starfashion check` | tests, lint, typecheck and a production build |
+| `./starfashion scx …` | pass anything through to the pipeline CLI |
 
-3. Work through the spike before trusting anything general:
+Useful pipeline commands: `scx sets` lists armor sets and how much of each is
+converted, `scx convert --set <key>` does one set, `scx refresh` re-points the
+manifest at whatever is on disk.
 
-   ```bash
-   scripts/spike.sh pathfinder
-   ```
+## Requirements
 
-   It prints what the DataCore actually contained. Record the answers in
-   `CLAUDE.md` under "Verified facts", correct
-   `extract/sc_extract/fields.py`, then run `scx all`.
+Python 3.11+, Node, and Blender 3.3 or newer. The two extraction tools,
+[StarBreaker](https://github.com/diogotr7/StarBreaker) and
+[Cryengine-Converter](https://github.com/Markemp/Cryengine-Converter), ship no
+macOS binaries, so `tools/build.sh` compiles them from source; that needs
+`cargo` via rustup, and `dotnet` for the optional second one. `doctor` tells you
+exactly what is missing.
 
 ## Layout
 
 ```
-config/     settings.toml — every path in the project
-extract/    Python pipeline and the scx CLI
-blender/    headless normalization and export scripts
-viewer/     Vite + React + react-three-fiber
-data/       generated, gitignored
-scripts/    spike.sh
+starfashion         one entry point for everything below
+config/             settings.toml — every path in the project
+extract/            Python pipeline and the scx CLI
+blender/            headless normalization and export scripts
+viewer/             Vite + React + react-three-fiber
+tools/build.sh      builds the extraction tools from source
+data/               generated, gitignored
 ```
+
+`CLAUDE.md` is the working reference: tool decisions, verified facts about the
+game data, and the traps found along the way. `PLAN.md` is the original design,
+annotated where reality disagreed with it.
 
 ## Legal
 
-Extracted geometry and textures are CIG copyright and are never committed.
-Local use has no distribution component. Publishing asset URLs is gated on a
-review of CIG's fan content policy and has not been done.
+Extracted geometry, textures and screenshots are CIG copyright. **None of it is
+in this repository** — everything under `data/` is gitignored, and only code,
+configuration and documentation are tracked. Local use has no distribution
+component. Publishing asset URLs would depend on CIG's fan content policy and
+has not been done.
+
+This is an unofficial fan project, not affiliated with or endorsed by Cloud
+Imperium Games.
