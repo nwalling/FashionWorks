@@ -27,6 +27,30 @@ function CaptureBridge({ onReady }: { onReady: (state: { gl: THREE.WebGLRenderer
   return null;
 }
 
+/**
+ * Lighting matched to how the game actually renders this armour.
+ *
+ * Measured against an in-game capture of Defiance Tactical with an Artimex
+ * helmet: over the torso the game reads mean 34, median 29, 95th percentile
+ * 68 -- dark and, more to the point, flat. The scene used to stack a full
+ * image-based light at full strength with a 1.1 directional and a 0.25
+ * ambient, giving mean 67, median 52 and a 95th percentile of 157. Armour
+ * looked chrome partly because of that.
+ *
+ * Mean and median now land within a point of the reference. The knob that
+ * did it was ambient, not exposure: dropping exposure matches the highlights
+ * but crushes the midtones, because the problem was the *width* of the range,
+ * not its level. Ambient fill lifts the darks without adding highlights and
+ * compresses it, which is what reads as matte.
+ *
+ * The 95th percentile still sits near 89 against the reference's 68. That
+ * residual is specular response, so no lighting value fixes it -- it wants
+ * lower metalness or higher roughness in the bake, which is a material
+ * question and is recorded in CLAUDE.md rather than papered over here.
+ */
+const ENV_INTENSITY = 0.25;
+const EXPOSURE = 0.85;
+
 export function Scene({
   preset,
   backdrop,
@@ -60,7 +84,7 @@ export function Scene({
       gl={{ preserveDrawingBuffer: true, antialias: true }}
       onCreated={({ gl }) => {
         gl.toneMapping = THREE.ACESFilmicToneMapping;
-        gl.toneMappingExposure = 1.05;
+        gl.toneMappingExposure = EXPOSURE;
       }}
     >
       <CaptureBridge onReady={onReady} />
@@ -69,7 +93,7 @@ export function Scene({
       <color attach="background" args={['#0d0f12']} />
 
       <Suspense fallback={null}>
-        <Environment preset={preset} />
+        <Environment preset={preset} environmentIntensity={ENV_INTENSITY} />
         {BACKDROPS[backdrop] ? <Backdrop file={BACKDROPS[backdrop]} /> : null}
         {baseGlb ? (
           <BaseCharacter glb={baseGlb} pose={activePose}>
@@ -113,8 +137,8 @@ export function Scene({
           position={[0, 0, 0]}
         />
       )}
-      <directionalLight position={[3, 5, 2]} intensity={1.1} castShadow />
-      <ambientLight intensity={0.25} />
+      <directionalLight position={[3, 5, 2]} intensity={0.15} castShadow />
+      <ambientLight intensity={2.2} />
     </Canvas>
   );
 }

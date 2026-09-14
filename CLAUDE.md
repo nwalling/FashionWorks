@@ -693,6 +693,38 @@ the rest from a genuinely unposed skeleton. The viewer applies a pose on load,
 so a first attempt captured the posed state as "rest" and reported zero
 difference everywhere, which looked like a parsing failure and was not.
 
+### Lighting is matched to an in-game capture (2026-09-14)
+
+Measured against a capture of Defiance Tactical with an Artimex helmet. Over
+the torso the game reads **mean 34, median 29, 95th percentile 68**: dark, and
+more to the point flat.
+
+The scene used to stack a full image-based light at full strength with a 1.1
+directional and a 0.25 ambient, giving mean 67, median 52, p95 157. Now
+`Scene.ENV_INTENSITY` 0.25, `EXPOSURE` 0.85, directional 0.15, ambient 2.2,
+which lands mean 33.6 and median 28.1.
+
+**Ambient was the knob, not exposure.** The problem was the width of the tonal
+range, not its level: lowering exposure matches the highlights but crushes the
+midtones, and lowering the environment does both at once. Ambient fill lifts
+the darks without adding highlights, which is what reads as matte. A sweep over
+environment, directional, ambient and exposure confirmed no combination of the
+first and last alone gets there.
+
+**p95 still sits near 89 against 68, and no lighting value fixes it.** That
+residual is specular response and wants lower metalness or higher roughness in
+the bake. Left alone deliberately rather than compensated for in the lighting.
+
+### Still open: some palette entries are lighter than the game shows
+
+`Defiance Legs Tactical` bakes several layers to `#5e5e5c`, which is exactly
+its palette's third entry, while the game renders that piece near black. The
+palette resolves as `entryA`/`entryB`/`entryC` mapped to `PaletteTint` 1/2/3;
+whether that index order is right has not been proven against ground truth, and
+it is the obvious suspect. Note the canonical item's own bake of the same
+material is dark (`#1e1e1e`-`#30302a`), so the difference comes from the
+palette, not the layer stack.
+
 ### Backdrops
 
 `viewer/src/components/Backdrop.tsx` puts a photographic plate behind the
