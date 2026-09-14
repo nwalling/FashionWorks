@@ -157,6 +157,29 @@ class SubMaterial:
         return [layer for layer in self.layers if layer.is_wear]
 
     @property
+    def wear_pairs(self) -> list[MatLayer | None]:
+        """The wear layer for each base layer, aligned with :attr:`base_layers`.
+
+        ``WearLayerN`` is what ``BaseLayerN`` looks like once it has worn
+        through, matched on the trailing slot number. The RSI utility suit
+        states it plainly: its four base layers are ``painted_metal_04/07/10/11``
+        and its four wear layers are ``aluminum_scratched_02``,
+        ``anodized_metal_01``, ``steel_dark_01`` and ``iron_scratched_dark`` --
+        paint over the bare metal underneath, index for index.
+
+        An entry is ``None`` where the material opts out. Artists disable wear
+        for a layer by pointing its wear entry at the same material as the
+        base, which is 29% of all pairs (2744 of 9436); the cloth body of that
+        same suit sets all four that way.
+        """
+        wear = {layer.name[-1:]: layer for layer in self.wear_layers}
+        out: list[MatLayer | None] = []
+        for layer in self.base_layers:
+            match = wear.get(layer.name[-1:])
+            out.append(None if match is None or match.path == layer.path else match)
+        return out
+
+    @property
     def tintable(self) -> bool:
         """LayerBlend_V2 has no albedo; its colour comes from the tint palette."""
         return self.shader == LAYER_BLEND_SHADER or "tint" in self.name.lower()

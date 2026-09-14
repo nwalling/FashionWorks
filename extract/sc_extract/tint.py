@@ -263,6 +263,20 @@ def compose(
 
 MIN_TILE_PX = 4  # below this a tiled detail texture aliases into mush
 
+# Remapping the wear mask to a wear amount: wear = (THRESHOLD - mask) / FALLOFF,
+# clamped. LayerBlend_V2 exposes no wear parameters of its own -- of 2741 armour
+# submaterials only 8 carry any Wear* PublicParam, and those 8 are an unrelated
+# stencil-edge feature (the 192 that looked like wear tuning are GlassPBR canopy
+# scratches). So the curve is chosen, not read.
+#
+# These values were calibrated over 30 real wear maps: the median map ends up
+# with 13.5% of its texels more than a quarter worn, the cleanest with none and
+# the grubbiest with half. That reads as scuffed edges and rubbed patches rather
+# than stripped armour, which is the right side to err on given the curve is
+# inferred.
+WEAR_THRESHOLD = 0.5
+WEAR_FALLOFF = 0.5
+
 
 def srgb_to_linear(a):
     return np.where(a <= 0.04045, a / 12.92, ((a + 0.055) / 1.055) ** 2.4)
@@ -348,6 +362,7 @@ def layered_key(sub, palette: list[Layer]) -> str:
             f"{entry.name}|{entry.path}|{entry.tint_color}|{entry.palette_tint}"
             f"|{round(entry.gloss_mult, 4)}|{round(entry.uv_tiling, 3)}"
         )
+    parts.append(f"wear:{WEAR_THRESHOLD}:{WEAR_FALLOFF}")
     return hashlib.sha1(";".join(parts).encode()).hexdigest()[:10]
 
 
@@ -405,12 +420,31 @@ def compose_layered(
     metal = np.zeros((size, size, 1), dtype=np.float32)
     have_base = False
 
-    for index, entry in enumerate(base_layers):
+    # How much of each base layer has worn through to its wear layer. The
+    # mask is a single BC4 channel -- one scalar, so it cannot choose between
+    # four layers, only say how much. Dark is worn: hard-surface masks average
+    # 0.72-0.90, and armour is mostly intact paint with scuffed patches, not
+    # mostly bare metal. See WEAR_THRESHOLD for the remap.
+    worn = None
+    if "wear" in resolved:
+        sample = _resample(resolved["wear"], size, "L")
+        if sample is not None:
+            worn = np.clip((WEAR_THRESHOLD - sample) / WEAR_FALLOFF, 0.0, 1.0)
+            # A mask with nothing below the threshold means nothing is worn, and
+            # blending by zero is identity. Dropping it here skips a second full
+            # layer evaluation per base layer, which is the whole cost of wear.
+            if not worn.any():
+                worn = None
+
+    wear_pairs = sub.wear_pairs
+
+    def evaluate(entry):
+        """One layer's linear colour, roughness and metallic, at bake size."""
         detail = layer_lib.load(raw_root, entry.path)
 
         # Where the colour comes from: PaletteTint 0 means the artist already
         # chose it and baked it into the .mtl in linear space.
-        if entry.palette_tint > 0 and entry.palette_tint <= len(palette):
+        if 0 < entry.palette_tint <= len(palette):
             chosen = palette[entry.palette_tint - 1]
             tint = srgb_to_linear(np.array(chosen.color, dtype=np.float32))
             gloss_scale = max(0.05, min(1.0, chosen.glossiness))
@@ -443,8 +477,23 @@ def compose_layered(
                     gloss_map = (
                         sample.astype(np.float32) / 255.0
                     ) * entry.gloss_mult * gloss_scale
-        layer_rough = np.clip(1.0 - gloss_map, 0.04, 1.0)
-        layer_metal = np.full((size, size, 1), metallic, dtype=np.float32)
+        return (
+            colour,
+            np.clip(1.0 - gloss_map, 0.04, 1.0),
+            np.full((size, size, 1), metallic, dtype=np.float32),
+        )
+
+    for index, entry in enumerate(base_layers):
+        colour, layer_rough, layer_metal = evaluate(entry)
+
+        # Wear it through to the paired layer before the blend mask picks
+        # between layers: wear happens within a layer, not between them.
+        pair = wear_pairs[index] if index < len(wear_pairs) else None
+        if pair is not None and worn is not None:
+            wcolour, wrough, wmetal = evaluate(pair)
+            colour = colour + (wcolour - colour) * worn
+            layer_rough = layer_rough + (wrough - layer_rough) * worn
+            layer_metal = layer_metal + (wmetal - layer_metal) * worn
 
         if not have_base:
             rgb, rough, metal, have_base = colour, layer_rough, layer_metal, True

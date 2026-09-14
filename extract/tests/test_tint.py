@@ -274,3 +274,116 @@ def test_submaterial_names_that_are_paths_do_not_break_the_cache(tmp_path) -> No
     for path in written.values():
         assert path.parent == tmp_path / "out"
         assert path.is_file()
+
+
+def _wear_sub(wear_path: str) -> SubMaterial:
+    """Two-layer stack: base layer 1 wears through to `wear_path`."""
+    return SubMaterial(
+        name="wear_m",
+        shader="LayerBlend_V2",
+        layers=[
+            MatLayer(
+                name="BaseLayer1",
+                path="materials/layers/none/base.mtl",
+                tint_color=(0.8, 0.1, 0.1),
+                gloss_mult=1.0,
+                uv_tiling=1.0,
+            ),
+            MatLayer(
+                name="WearLayer1",
+                path=wear_path,
+                tint_color=(0.1, 0.1, 0.8),
+                gloss_mult=1.0,
+                uv_tiling=1.0,
+            ),
+        ],
+    )
+
+
+def _grey(path, value: int, width: int = 2) -> None:
+    image = Image.new("L", (width, 1), value)
+    image.save(path)
+
+
+def test_a_dark_wear_mask_wears_through_to_the_wear_layer(tmp_path) -> None:
+    """Dark is worn.
+
+    The mask is a single BC4 channel, so it is an amount rather than a
+    selector. Hard-surface masks average 0.72-0.90 and armour is mostly intact
+    paint, so the bright majority has to be the unworn side.
+    """
+    mask = tmp_path / "x_wear.png"
+    _grey(mask, 0)  # fully worn
+
+    written = compose_layered(
+        _wear_sub("materials/layers/none/worn.mtl"),
+        [],
+        tmp_path / "out",
+        "worn",
+        resolved={"wear": str(mask)},
+        raw_root=tmp_path / "raw",
+        size=2,
+    )
+    got = np.array(
+        Image.open(written["base_color"]).convert("RGB").load()[0, 0], dtype=np.float32
+    ) / 255.0
+    want = linear_to_srgb(np.array([0.1, 0.1, 0.8], dtype=np.float32))
+    assert np.allclose(got, want, atol=0.01), "a black wear mask must expose the wear layer"
+
+
+def test_a_bright_wear_mask_keeps_the_base_layer(tmp_path) -> None:
+    mask = tmp_path / "x_wear.png"
+    _grey(mask, 255)  # pristine
+
+    written = compose_layered(
+        _wear_sub("materials/layers/none/worn.mtl"),
+        [],
+        tmp_path / "out",
+        "pristine",
+        resolved={"wear": str(mask)},
+        raw_root=tmp_path / "raw",
+        size=2,
+    )
+    got = np.array(
+        Image.open(written["base_color"]).convert("RGB").load()[0, 0], dtype=np.float32
+    ) / 255.0
+    want = linear_to_srgb(np.array([0.8, 0.1, 0.1], dtype=np.float32))
+    assert np.allclose(got, want, atol=0.01)
+
+
+def test_wear_is_skipped_when_the_wear_layer_repeats_the_base(tmp_path) -> None:
+    """The no-op case must not blend, even under a fully dark mask."""
+    mask = tmp_path / "x_wear.png"
+    _grey(mask, 0)
+
+    written = compose_layered(
+        _wear_sub("materials/layers/none/base.mtl"),  # same path as the base
+        [],
+        tmp_path / "out",
+        "noop",
+        resolved={"wear": str(mask)},
+        raw_root=tmp_path / "raw",
+        size=2,
+    )
+    got = np.array(
+        Image.open(written["base_color"]).convert("RGB").load()[0, 0], dtype=np.float32
+    ) / 255.0
+    want = linear_to_srgb(np.array([0.8, 0.1, 0.1], dtype=np.float32))
+    assert np.allclose(got, want, atol=0.01)
+
+
+def test_no_wear_mask_leaves_the_base_layer_alone(tmp_path) -> None:
+    written = compose_layered(
+        _wear_sub("materials/layers/none/worn.mtl"),
+        [],
+        tmp_path / "out",
+        "nomask",
+        resolved={},
+        raw_root=tmp_path / "raw",
+        size=2,
+    )
+    got = np.array(
+        Image.open(written["base_color"]).convert("RGB").load()[0, 0], dtype=np.float32
+    ) / 255.0
+    want = linear_to_srgb(np.array([0.8, 0.1, 0.1], dtype=np.float32))
+    assert np.allclose(got, want, atol=0.01)

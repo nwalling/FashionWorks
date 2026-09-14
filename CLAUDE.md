@@ -356,12 +356,59 @@ exporter only writes occlusion when a group node named exactly
 `glTF Material Output` with an `Occlusion` input is present, which
 `mtl_to_pbr._wire_occlusion` creates.
 
-**The four `WearLayer` entries are still unused.** The `_wear` mask (TexSlot11)
-is genuinely greyscale (R=G=B on every sample) but its mean swings from 80 to
-229 across pieces, so which end means "worn" is not established, and it is not
-known whether `WearLayerN` pairs with `BaseLayerN` or whether one layer is
-selected for the whole submaterial. Guessing here would make armour look worse,
-not better. Scuffed edges and worn paint are therefore still missing.
+### Wear layers (2026-09-14)
+
+**`WearLayerN` is what `BaseLayerN` looks like worn through, paired on the slot
+number.** The RSI utility heavy suit settles it: `hardsurf_m` has base layers
+`painted_metal_11/10/07_chipped/04` and wear layers `aluminum_scratched_02`,
+`anodized_metal_01`, `steel_dark_01`, `iron_scratched_dark`. Paint over the bare
+metal underneath, index for index. Across the whole male set base layers skew
+synthetic (6108 vs 2722 metal) while wear layers skew metal (4567 vs 3144), and
+the commonest wear materials are `iron_polished`, `iron_scratched_01`,
+`aluminum_polished` and `rusted_metal_01`. 2044 of 2737 submaterials are 4 base
+plus 4 wear.
+
+**Artists disable wear by pointing the wear entry at the base material.** 2744
+of 9436 pairs (29%) do this, and the cloth submaterials of that same RSI suit
+set all four that way. `SubMaterial.wear_pairs` returns `None` for those, so the
+composite skips the blend instead of lerping a material with itself.
+
+**The mask is one channel, so it is an amount, not a selector.** `_wear` is
+`BC4_UNORM` — genuinely single-channel, which is why R=G=B on every sample. One
+scalar cannot choose between four layers; the layer comes from the pairing and
+the scalar says how much.
+
+**Dark is worn.** Hard-surface masks average 0.72 to 0.90, and armour is mostly
+intact paint with scuffed patches rather than mostly bare metal, so the bright
+majority is the unworn side. The one sample that looked inverted (an RSI
+jumpsuit at 0.32) belongs to `body_cloth_m`, whose wear layers are all no-ops,
+so its direction never mattered. `test_tint.py` fails if the direction is
+flipped.
+
+**The wear mask is not aligned with geometry.** Correlation against the `_hal`
+occlusion channel is -0.04 and against normal-map edge strength -0.02, measured
+at native 2048 with `corr(AO, edge) = -0.32` as a working control. It is a
+hand-painted grunge pattern, only mildly darker at blend-region boundaries
+(-0.11, about the same as occlusion is). So do not try to derive it from edges.
+
+**LayerBlend_V2 exposes no wear parameters, so the curve is chosen.** Of 2741
+armour submaterials only 8 carry any `Wear*` PublicParam and those 8 are
+`StencilEdgeWear*`, an unrelated stencil feature. The 192 materials that look
+like wear tuning (`WearBlendBase` 0.1, `WearBlendFalloff` 0.75) are **GlassPBR**
+canopy scratches, not this shader — an easy misread, since they sit in the same
+files. `WearTint` is `1,1,1` and `WearGloss` is `1` on all 19981 layers, so
+neither carries anything. `tint.WEAR_THRESHOLD`/`WEAR_FALLOFF` are calibrated so
+the median of 30 real maps ends up 13.5% more than a quarter worn.
+
+**`_hal` is Hue / AO / Luminance, now confirmed.** The shader flag
+`%HUE_AO_LUMINANCE_MAP` appears on 11 submaterials, and the engine ships
+`Engine/EngineAssets/Textures/layerblendHueLUT.dds`. Green is the occlusion
+channel, which is the one carrying data; red and blue sit at a neutral 126.
+
+**Texture formats, read off the DDS headers.** `_blend` is DXT1, three real RGB
+channels. `_wear` is BC4_UNORM, one channel. `_ddn` is BC5_SNORM, a two-channel
+normal with Z reconstructed. `_hal` is DXT1. None of the three control maps has
+a `.dds.Na` alpha stream; only `_ddna` layer textures do.
 
 **Meshes have exactly one UV set.** Checked on the imported Collada: one UV
 layer and one colour attribute. `normalize_armor.cleanup` trimming extra UV
@@ -540,8 +587,6 @@ any other extracted asset.
 
 ### Still unverified
 
-- Compositing the three tint layers through the blend and wear masks. v1 uses
-  layer A only, so a two-tone piece renders single-tone.
 - Whether female meshes bind to the same bone names as male ones.
 - Only one set has been converted end to end. `scx convert` has not been run
   across the full catalog, so per-item failure rates are unknown.

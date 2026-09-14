@@ -130,3 +130,45 @@ def test_layer_tiling_and_gloss_survive_parsing(tmp_path: Path) -> None:
     base = _layered(tmp_path).base_layers
     assert [layer.uv_tiling for layer in base] == [20.0, 20.0, 90.0, 137.0]
     assert base[0].gloss_mult == 0.44
+
+
+WEAR_MTL = """<Material MtlFlags="256">
+  <SubMaterials>
+    <Material Name="hardsurf_m" Shader="LayerBlend_V2" Shininess="255">
+      <MatLayers>
+        <Layer Name="BaseLayer1" Path="materials/layers/synthetic/painted_metal_11.mtl" />
+        <Layer Name="BaseLayer2" Path="materials/layers/fabric/jersey_04.mtl" />
+        <Layer Name="WearLayer1" Path="materials/layers/metal/aluminum_scratched_02.mtl" />
+        <Layer Name="WearLayer2" Path="materials/layers/fabric/jersey_04.mtl" />
+      </MatLayers>
+    </Material>
+  </SubMaterials>
+</Material>
+"""
+
+
+def test_wear_pairs_match_on_slot_number(tmp_path: Path) -> None:
+    """WearLayerN is what BaseLayerN looks like worn through.
+
+    The RSI utility suit is unambiguous: painted metal over bare metal, index
+    for index.
+    """
+    path = tmp_path / "wear.mtl"
+    path.write_text(WEAR_MTL)
+    sub = parse(path)[0]
+    pairs = sub.wear_pairs
+    assert len(pairs) == 2
+    assert pairs[0] is not None
+    assert pairs[0].path.endswith("aluminum_scratched_02.mtl")
+
+
+def test_a_wear_layer_equal_to_its_base_is_a_no_op(tmp_path: Path) -> None:
+    """Artists disable wear by pointing the wear entry at the base material.
+
+    29% of all pairs do this, and the cloth body of the RSI suit sets all four
+    that way. Treating those as real wear would blend a material with itself
+    and waste the work.
+    """
+    path = tmp_path / "wear.mtl"
+    path.write_text(WEAR_MTL)
+    assert parse(path)[0].wear_pairs[1] is None
