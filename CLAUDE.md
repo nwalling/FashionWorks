@@ -507,26 +507,29 @@ nothing in `LeftWrist_CuffTwist` matches `LeftForeArm`. Tokenising has to split
 camelCase as well as separators, or `LeftWrist` stays welded together and
 matches nothing.
 
-### Sunchaser, measured after the slot and palette fixes
+### Sunchaser, measured on screen against the in-game reference
 
-Gold coverage in the bake, against a reference where gold is a clear accent on
-all four pieces:
+Both figures measured the same way, as a percentage of lit body pixels:
 
-| piece  | before | after |
-| ------ | ------ | ----- |
-| core   | 24.9%  | 24.9% |
-| legs   | 0%     | 11.8% |
-| arms   | 7.7%   | 7.7%  |
-| helmet | 6.8%   | 6.8%  |
+| region | in-game | viewer |
+| ------ | ------- | ------ |
+| core / torso | 24.5% | 25.5% |
+| helmet | 50.1% | 52.9% |
+| arms | 8.9-11.8% | 2.9-3.3% |
+| legs | 5.3% | 14.2% |
 
-The legs moved because of the slot fix. **The arms did not, and are still
-wrong.** The reason is specific and worth recording: their material carries
-only 1 of 12 base layers on the gold index, and the blend mask gives that
-layer about 7% of the surface. Reaching the reference's proportion would need
-gold on layers that currently take palette entries B or C, which for this
-colourway are both near-identical greys. So either the index those layers
-carry is not the one it appears to be, or the arms take their gold from
-something other than the palette. Coverage alone cannot tell which.
+**Core and helmet are right, so the palette index mapping is not globally
+wrong.** If `PaletteTint 1 -> entryA` were off by one, every piece would be
+wrong together, and two of the four match to within a point.
+
+What is wrong is per material: the arms carry about a third of the gold they
+should, and the legs nearly three times too much. The legs were 0% before the
+slot-matching fix, so that fix moved them in the right direction and overshot.
+
+Measure this on screen, not on the texture atlas. An atlas fraction counts
+unused UV space and is not comparable to what the eye sees: the arms read 7.7%
+of their atlas but only 3% of their silhouette, which is the difference
+between "slightly low" and "clearly wrong".
 
 ### A record name is not unique across types
 
