@@ -6,6 +6,7 @@ import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js
 import type { Item } from '../manifest';
 import { assetUrl } from '../manifest';
 import { bindSkinned, bindSocket, detach, emptyReport } from '../three/binding';
+import { retain } from '../three/gltfCache';
 import { useBaseSkeleton } from './BaseCharacter';
 
 /**
@@ -109,34 +110,121 @@ export function ArmorPiece({
     };
   }, [instance, skeleton, root, item, bodyBox, setBodyCover, offsetKey]);
 
-  // Tinting clones the material so the shared cache entry keeps its own colour.
+  // A colour variant reuses the canonical mesh but not its surface, so it
+  // carries its own composited textures and they are swapped in here. Both
+  // this and an explicit user tint clone the material first, so the shared
+  // useGLTF cache entry keeps its own.
   useEffect(() => {
-    if (!tint || attached.length === 0) return undefined;
-    const color = new THREE.Color(tint);
+    const overrides = item.material_overrides ?? [];
+    if (attached.length === 0 || (overrides.length === 0 && !tint)) return undefined;
+
+    // Blender appends ".001" when two slots share a name.
+    const key = (value: string) => value.replace(/\.\d{3}$/, '').toLowerCase();
+    const bySlot = new Map(overrides.map((entry) => [key(entry.name), entry]));
+
+    const loader = new THREE.TextureLoader();
+    const created: THREE.Texture[] = [];
     const restore: Array<[THREE.Mesh, THREE.Material | THREE.Material[]]> = [];
+    let cancelled = false;
 
-    for (const object of attached) {
-      const mesh = object as THREE.Mesh;
-      if (!mesh.isMesh || !mesh.material) continue;
-      restore.push([mesh, mesh.material]);
-
-      const source = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-      const tinted = source.map((material) => {
-        const copy = material.clone() as THREE.MeshStandardMaterial;
-        if (copy.color) copy.color.copy(color);
-        return copy;
+    // Match the glTF loader's conventions, and inherit whatever the texture we
+    // are replacing already had: aoMap in particular reads its UV set from the
+    // texture, not the material.
+    const load = (url: string, template: THREE.Texture | null, srgb: boolean) =>
+      new Promise<THREE.Texture | null>((resolve) => {
+        loader.load(
+          assetUrl(url),
+          (texture) => {
+            texture.flipY = template ? template.flipY : false;
+            texture.channel = template ? template.channel : 0;
+            texture.wrapS = template ? template.wrapS : THREE.RepeatWrapping;
+            texture.wrapT = template ? template.wrapT : THREE.RepeatWrapping;
+            texture.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+            texture.needsUpdate = true;
+            created.push(texture);
+            resolve(texture);
+          },
+          undefined,
+          () => resolve(null),
+        );
       });
-      mesh.material = Array.isArray(mesh.material) ? tinted : tinted[0];
-    }
+
+    const color = tint ? new THREE.Color(tint) : null;
+
+    void (async () => {
+      for (const object of attached) {
+        const mesh = object as THREE.Mesh;
+        if (!mesh.isMesh || !mesh.material) continue;
+
+        const source = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        const replaced: THREE.Material[] = [];
+        let changed = false;
+
+        for (const material of source) {
+          const copy = material.clone() as THREE.MeshStandardMaterial;
+          const entry = bySlot.get(key(copy.name ?? ''));
+
+          if (entry?.base_color) {
+            const texture = await load(entry.base_color, copy.map, true);
+            if (texture) {
+              copy.map = texture;
+              // The composited albedo is the colour; a leftover multiply from
+              // the canonical material would double-tint it.
+              if (copy.color && !color) copy.color.setRGB(1, 1, 1);
+              changed = true;
+            }
+          }
+          if (entry?.orm) {
+            const template = copy.roughnessMap ?? copy.metalnessMap ?? copy.aoMap;
+            const texture = await load(entry.orm, template, false);
+            if (texture) {
+              // One packed image: occlusion in red, roughness green, metallic blue.
+              copy.aoMap = texture;
+              copy.roughnessMap = texture;
+              copy.metalnessMap = texture;
+              copy.roughness = 1;
+              copy.metalness = 1;
+              changed = true;
+            }
+          }
+          if (color && copy.color) {
+            copy.color.copy(color);
+            changed = true;
+          }
+          copy.needsUpdate = true;
+          replaced.push(changed ? copy : material);
+          if (!changed) copy.dispose();
+        }
+
+        if (cancelled) break;
+        if (replaced.some((material, index) => material !== source[index])) {
+          restore.push([mesh, mesh.material]);
+          mesh.material = Array.isArray(mesh.material) ? replaced : replaced[0];
+        }
+      }
+    })();
 
     return () => {
+      cancelled = true;
       for (const [mesh, original] of restore) {
         const current = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-        for (const material of current) material.dispose();
+        for (const material of current) {
+          if (!(Array.isArray(original) ? original : [original]).includes(material)) {
+            material.dispose();
+          }
+        }
         mesh.material = original;
       }
+      for (const texture of created) texture.dispose();
     };
-  }, [attached, tint]);
+  }, [attached, tint, item.material_overrides]);
+
+  // Hold this GLB in the cache for as long as the piece is mounted, and let the
+  // byte budget evict it once it is not. Declared last on purpose: React runs
+  // cleanups in declaration order, so this release happens *after* the bind
+  // effect's `detach` and after the tint effect restores the shared materials,
+  // and eviction can never dispose objects still parented into the scene.
+  useEffect(() => retain(url, scene), [url, scene]);
 
   return null;
 }

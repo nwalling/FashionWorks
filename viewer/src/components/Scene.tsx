@@ -4,7 +4,7 @@ import { Environment, Grid, OrbitControls, PerspectiveCamera } from '@react-thre
 import * as THREE from 'three';
 
 import { useStore } from '../store';
-import { SLOTS, paletteColor } from '../manifest';
+import { SLOTS } from '../manifest';
 import { ArmorPiece } from './ArmorPiece';
 import { BACKDROPS, Backdrop, type BackdropName } from './Backdrop';
 import { REST_POSE, type Pose } from '../three/poses';
@@ -77,11 +77,12 @@ export function Scene({
               const id = loadout.slots[slot];
               const item = id ? byId.get(id) : undefined;
               if (!item || !item.assets.glb) return null;
-              // A variant reuses the canonical mesh, so its own palette colour
-              // has to be re-applied unless the user has chosen a tint.
-              const borrowed = item.variant_of !== null;
-              const tint =
-                loadout.tints[item.id] ?? (borrowed ? paletteColor(item) : undefined);
+              // A variant reuses the canonical mesh but carries its own
+              // composited textures, which ArmorPiece swaps in. Multiplying a
+              // flat palette colour over the albedo, as this used to, repainted
+              // the whole piece including the parts the artist never tinted.
+              // Only an explicit user choice is a flat tint now.
+              const tint = loadout.tints[item.id];
               const offset = item.socket ? mountOffsets[item.socket] : undefined;
               return (
                 <ArmorPiece

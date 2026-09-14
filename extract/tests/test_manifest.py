@@ -9,6 +9,7 @@ from sc_extract.manifest import (
     Item,
     Manifest,
     Manufacturer,
+    MaterialOverride,
     Skeleton,
 )
 
@@ -58,3 +59,50 @@ def test_counts_cover_every_slot() -> None:
 
 def test_generated_at_is_filled() -> None:
     assert Manifest().generated_at
+
+
+def test_material_overrides_survive_a_round_trip(tmp_path: Path) -> None:
+    """A colour variant's textures must reach the viewer through the manifest.
+
+    Variants reuse their canonical item's GLB, so this list is the only place
+    their own surface is recorded.
+    """
+    item = Item(
+        id="v1",
+        class_name="variant",
+        name="Odyssey II Undersuit Autumn",
+        slot="undersuit",
+        variant_of="c1",
+        swatch="#786c5e",
+        material_overrides=[
+            MaterialOverride(name="cloth_m", base_color="tint/a_albedo.png", orm="tint/a_orm.png")
+        ],
+    )
+    path = Manifest(items=[item]).write(tmp_path / "manifest.json")
+    back = Manifest.read(path).items[0]
+    assert back.swatch == "#786c5e"
+    assert len(back.material_overrides) == 1
+    assert back.material_overrides[0].name == "cloth_m"
+    assert back.material_overrides[0].base_color == "tint/a_albedo.png"
+
+
+def test_schema_version_is_two() -> None:
+    """Bumped when material_overrides and swatch were added.
+
+    viewer/src/manifest.ts must carry the same number or the viewer refuses
+    the manifest.
+    """
+    assert SCHEMA_VERSION == 2
+
+
+def test_write_restamps_the_schema_version(tmp_path: Path) -> None:
+    """Writing an old manifest back must not keep its old version number.
+
+    A stage that adds fields would otherwise ship them under the previous
+    version, and the viewer refuses a mismatch.
+    """
+    path = tmp_path / "manifest.json"
+    stale = Manifest(items=[])
+    stale.schema_version = 1
+    stale.write(path)
+    assert Manifest.read(path).schema_version == SCHEMA_VERSION

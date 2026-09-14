@@ -4,7 +4,7 @@ import { z } from 'zod';
  * Mirror of `extract/sc_extract/manifest.py`. Bump SCHEMA_VERSION on both
  * sides together; the loader refuses a manifest it was not written for.
  */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export const SLOTS = ['helmet', 'torso', 'arms', 'legs', 'backpack', 'undersuit'] as const;
 export type Slot = (typeof SLOTS)[number];
@@ -17,6 +17,18 @@ const manufacturerSchema = z.object({
 const geometrySchema = z.object({
   source: z.string(),
   side: z.string().nullable().default(null),
+});
+
+/**
+ * Textures a colour variant swaps onto the shared canonical mesh. Variants
+ * reuse their canonical item's GLB, which is right for the geometry and wrong
+ * for the surface: most name their own .mtl and many carry no tint palette at
+ * all, so there was nothing to re-apply and every colourway rendered alike.
+ */
+const materialOverrideSchema = z.object({
+  name: z.string(),
+  base_color: z.string().nullable().default(null),
+  orm: z.string().nullable().default(null),
 });
 
 const assetsSchema = z.object({
@@ -46,6 +58,10 @@ export const itemSchema = z.object({
   socket_offsets: z.record(z.array(z.number())).default({}),
   geometry: z.array(geometrySchema).default([]),
   materials: z.array(z.string()).default([]),
+  material_overrides: z.array(materialOverrideSchema).default([]),
+  // Representative colour for the picker swatch, computed from the layers the
+  // shader actually shows. The palette's first entry is not it.
+  swatch: z.string().nullable().default(null),
   assets: assetsSchema.default({ glb: null, thumb: null }),
   flags: z.array(z.string()).default([]),
   tags: z.array(z.string()).default([]),
@@ -119,6 +135,10 @@ export function itemsBySlot(items: Item[]): Record<Slot, Item[]> {
  * render time or every swatch would look identical.
  */
 export function paletteColor(item: Item): string | undefined {
+  // The baked swatch first: it is derived from the layers the shader shows,
+  // so it is right for the 876 variants that have no palette and for those
+  // whose material tints from palette entry B or C rather than A.
+  if (item.swatch && /^#[0-9a-f]{6}$/i.test(item.swatch)) return item.swatch;
   const colors = (item.tint as { colors?: unknown } | null)?.colors;
   if (!Array.isArray(colors)) return undefined;
   const first = colors[0];

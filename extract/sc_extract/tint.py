@@ -308,7 +308,7 @@ def linear_to_srgb(a):
     return _to_srgb_lut()[idx.astype(np.uint16)]
 
 
-@lru_cache(maxsize=192)
+@lru_cache(maxsize=768)
 def _tiled_cached(path: str, size: int, tile_px: int, mode: str):
     try:
         im = Image.open(path).convert(mode)
@@ -335,7 +335,7 @@ def _tiled(path, size: int, repeat: float, mode: str = "RGB"):
     return _tiled_cached(str(path), size, tile_px, mode)
 
 
-@lru_cache(maxsize=48)
+@lru_cache(maxsize=128)
 def _resample(path, size: int, mode: str = "RGB"):
     """Load a per-mesh map (blend, hal) at the bake resolution, as float 0-1.
 

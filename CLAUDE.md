@@ -417,6 +417,59 @@ maps is therefore a no-op, not a cause of lost decals.
 **Meshes carry several material slots** (shell, interior, metal, bones, props),
 matching the `.mtl` submaterial order.
 
+### Colour variants differ by material, not palette (2026-09-14)
+
+Three symptoms, two causes. Every Odyssey II Undersuit showed the same grey
+swatch and rendered identically; the CSP-68H backpack ignored its colourway;
+and equipping a set produced mismatched pieces.
+
+**A variant's colour usually lives in its own `.mtl`, not in a palette.** Of
+2081 colour variants, **1626 name their own material** under a `mtl_var/`
+directory, and **876 of those carry no tint palette at all**. Only 210 differ
+by palette alone. `refresh_assets` points a variant at its canonical item's
+GLB, and the viewer used to re-apply the variant's palette colour on top; with
+no palette there was nothing to apply, so every colourway rendered the
+canonical surface.
+
+**Re-converting the mesh per variant is the wrong fix.** The geometry is
+identical, so that would cost about 12.5 GB and four hours to produce copies of
+meshes that already exist. `scx variants` bakes only the composited textures
+and records them on the item as `material_overrides`; `ArmorPiece` swaps them
+onto the shared mesh by submaterial name, stripping Blender's `.001` suffix.
+1838 variants get their own surface this way in about an hour.
+
+**Textures are served by symlink, not copied.** Bakes are named by a content
+hash of their layer stack and palette, so variants that share a surface share a
+file. `data/out/tint` is a symlink to `data/interim/tint`; Vite serves through
+it, and the 21 GB cache is not duplicated.
+
+**The flat palette-colour multiply is gone.** Tinting the whole albedo by one
+palette entry repainted the 87% of layers the artist never palette-tinted. Only
+an explicit user tint is a flat colour now.
+
+**Swatches come from the baked albedo.** `paletteColor` returned palette entry
+A, which is null for 876 variants (hence the identical `#4a5058` chips) and
+wrong wherever the material tints from entry B or C. `pipeline.dominant_colour`
+averages the item's own baked albedo instead, which is literally what the piece
+looks like. Averaging the `.mtl` layer colours is only the fallback: it
+over-weights layers the blend mask barely shows, and mushed every Odyssey
+variant to the same grey. Two colourways that genuinely look alike now get
+swatches that look alike, which is honest.
+
+**`Manifest.write` restamps `SCHEMA_VERSION`.** Reading an older manifest and
+writing it back preserved its number, so a stage that added fields shipped them
+under the old version and the viewer, which refuses a mismatch, rejected a
+manifest it could read.
+
+**Set matching keys on product line first.** `equipSet` scored palette match
+above family, so equipping from Defiance Core (Modified) put **ADP Arms
+(Modified)** on the arms, a different product line that happened to share a
+colour. Palette cannot be the primary key: `cds_heavy_set01` covers 193 items
+across many lines, and the Defiance Modified pieces do not share one palette
+among themselves, the helmet and arms carrying a different one from the core
+and legs. Order is now family, then edition (the words after the slot, such as
+"(Modified)" or "Tactical"), then palette, then canonical.
+
 ### Attachment points and sockets
 
 The base skeleton has **no attachment bones**. Names like

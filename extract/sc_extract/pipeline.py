@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -17,7 +18,7 @@ from pathlib import Path
 
 from . import material, tint
 from .config import REPO_ROOT, Settings
-from .manifest import Item, Manifest
+from .manifest import Item, Manifest, MaterialOverride
 from .tools import (
     ToolError,
     blender_run,
@@ -314,6 +315,173 @@ def material_descriptors(settings: Settings, item: Item) -> list[dict]:
             descriptor["composed"] = {k: str(v) for k, v in composed.items()}
             out.append(descriptor)
     return out
+
+
+PUBLISHED_TINT_DIR = "tint"
+
+
+@lru_cache(maxsize=4096)
+def _albedo_average(path: str) -> tuple[float, float, float] | None:
+    """Mean sRGB of one baked albedo, cached by path.
+
+    Textures are named by a content hash of their layer stack and palette, so
+    variants that share a surface share this read.
+    """
+    try:
+        from PIL import Image
+    except ImportError:  # pragma: no cover - Pillow is a hard dep of baking
+        return None
+    try:
+        image = Image.open(path).convert("RGB")
+        image.thumbnail((32, 32), Image.BILINEAR)
+    except (OSError, ValueError):
+        return None
+    data = image.tobytes()
+    if not data:
+        return None
+    count = len(data) // 3
+    return tuple(  # type: ignore[return-value]
+        sum(data[i::3]) / count / 255.0 for i in range(3)
+    )
+
+
+def _to_srgb_hex(colour: list[float] | tuple[float, ...], *, linear: bool) -> str:
+    out = []
+    for channel in colour:
+        value = max(0.0, min(1.0, channel))
+        if linear:
+            value = value * 12.92 if value <= 0.0031308 else 1.055 * value ** (1 / 2.4) - 0.055
+        out.append(int(round(max(0.0, min(1.0, value)) * 255)))
+    return "#{:02x}{:02x}{:02x}".format(*out)
+
+
+def dominant_colour(descriptors: list[dict]) -> str | None:
+    """A representative sRGB colour for an item's picker swatch.
+
+    The palette's first entry is the wrong answer. 876 colour variants carry no
+    palette at all -- their colour lives in a per-variant ``.mtl`` -- and where
+    a palette does exist the material may tint from entry B or C rather than A,
+    so the swatch and the render disagreed and every Odyssey undersuit showed
+    the same grey chip.
+
+    Preferred source is the mean of the item's own baked albedo, which is
+    literally what the piece looks like and needs no heuristic. Two colourways
+    that really do look alike then get swatches that look alike, which is
+    honest. Averaging the .mtl layer colours is the fallback for an item whose
+    textures were not composited: it over-weights layers the blend mask barely
+    shows, so it is a poorer guide.
+    """
+    sampled: list[tuple[float, float, float]] = []
+    for descriptor in descriptors:
+        albedo = (descriptor.get("composed") or {}).get("base_color")
+        if albedo:
+            mean = _albedo_average(str(albedo))
+            if mean is not None:
+                sampled.append(mean)
+    if sampled:
+        return _to_srgb_hex(
+            [sum(c[i] for c in sampled) / len(sampled) for i in range(3)], linear=False
+        )
+
+    total = [0.0, 0.0, 0.0]
+    weight = 0.0
+    for descriptor in descriptors:
+        for layer in descriptor.get("layers") or []:
+            if str(layer.get("name", "")).lower().startswith("wear"):
+                continue
+            colour = layer.get("tint_color") or []
+            if len(colour) != 3:
+                continue
+            share = 3.0 if layer.get("palette_tint") else 1.0
+            for channel in range(3):
+                total[channel] += float(colour[channel]) * share
+            weight += share
+    if weight <= 0:
+        return None
+    # .mtl colours are linear; the swatch is CSS, which is sRGB.
+    return _to_srgb_hex([c / weight for c in total], linear=True)
+
+
+def publish_textures(settings: Settings, descriptors: list[dict]) -> list[dict]:
+    """Expose an item's composited textures under the served asset root.
+
+    The bakes live in ``interim/tint`` and are named by a content hash of the
+    layer stack and palette, so variants that share a surface share a file.
+    Rather than copy 11 GB, the served directory is a symlink to that cache.
+    """
+    published = settings.out_dir / PUBLISHED_TINT_DIR
+    if not published.exists():
+        published.parent.mkdir(parents=True, exist_ok=True)
+        source = settings.interim_dir / "tint"
+        source.mkdir(parents=True, exist_ok=True)
+        try:
+            published.symlink_to(os.path.relpath(source, published.parent))
+        except OSError as exc:  # pragma: no cover - filesystem dependent
+            log.warning("could not publish tint textures: %s", exc)
+            return []
+
+    out: list[dict] = []
+    for descriptor in descriptors:
+        composed = descriptor.get("composed") or {}
+        entry = {"name": descriptor.get("name") or ""}
+        for role in ("base_color", "orm"):
+            path = composed.get(role)
+            if path:
+                entry[role] = f"{PUBLISHED_TINT_DIR}/{Path(path).name}"
+        if entry.get("base_color") or entry.get("orm"):
+            out.append(entry)
+    return out
+
+
+def variant_surfaces(settings: Settings, manifest: Manifest) -> int:
+    """Bake the textures colour variants need, without re-converting geometry.
+
+    A variant shares its canonical item's mesh, so the only thing that has to
+    differ is the surface. Baking just the textures takes minutes instead of
+    the hours a full re-conversion of 1626 identical meshes would cost.
+    """
+    by_id = manifest.by_id()
+    pending: list[Item] = []
+    for item in manifest.items:
+        canonical = by_id.get(item.variant_of) if item.variant_of else None
+        differs = canonical is not None and (
+            (bool(item.materials) and item.materials != canonical.materials)
+            or (item.tint or {}).get("colors") != (canonical.tint or {}).get("colors")
+        )
+        if item.variant_of and not differs:
+            # Identical surface to the canonical item; the shared GLB is right.
+            item.material_overrides = []
+            item.swatch = canonical.swatch if canonical else None
+            continue
+        pending.append(item)
+
+    # Make sure the served directory exists before the workers race for it.
+    publish_textures(settings, [])
+
+    def work(item: Item) -> tuple[Item, list[dict] | None]:
+        try:
+            return item, material_descriptors(settings, item)
+        except Exception as exc:  # noqa: BLE001 - one bad item must not stop the run
+            log.warning("variant surface failed for %s: %s", item.id, exc)
+            return item, None
+
+    # Compositing is numpy and Pillow, which release the GIL, so threads help.
+    done = 0
+    workers = max(1, min(8, (os.cpu_count() or 4)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for index, (item, descriptors) in enumerate(pool.map(work, pending)):
+            if descriptors is None:
+                continue
+            item.swatch = dominant_colour(descriptors) or item.swatch
+            if item.variant_of:
+                item.material_overrides = [
+                    MaterialOverride(**entry)
+                    for entry in publish_textures(settings, descriptors)
+                ]
+                done += 1
+            if index and index % 200 == 0:
+                log.info("variant surfaces: %d/%d", index, len(pending))
+    return done
 
 
 def _batches(items: list[Item], size: int) -> list[list[Item]]:

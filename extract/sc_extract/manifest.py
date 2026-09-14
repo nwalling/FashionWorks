@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 Slot = Literal["helmet", "torso", "arms", "legs", "backpack", "undersuit"]
 SLOTS: tuple[str, ...] = ("helmet", "torso", "arms", "legs", "backpack", "undersuit")
@@ -30,6 +30,24 @@ class Manufacturer:
 class Geometry:
     source: str
     side: str | None = None
+
+
+@dataclass
+class MaterialOverride:
+    """Textures a colour variant swaps onto the shared canonical mesh.
+
+    Colour variants reuse their canonical item's GLB, which is right for the
+    geometry and wrong for the surface: 1626 of 2081 variants name their own
+    ``.mtl`` under ``mtl_var/`` and 876 of those carry no tint palette at all,
+    so there was nothing for the viewer to re-apply and every Odyssey undersuit
+    rendered the same colour. Re-converting the mesh per variant would cost
+    hours and 12 GB for geometry that is byte-identical, so only the composited
+    textures are baked and the viewer swaps them by submaterial name.
+    """
+
+    name: str
+    base_color: str | None = None
+    orm: str | None = None
 
 
 @dataclass
@@ -63,6 +81,12 @@ class Item:
     socket_offsets: dict[str, list[float]] = field(default_factory=dict)
     geometry: list[Geometry] = field(default_factory=list)
     materials: list[str] = field(default_factory=list)
+    # Per-variant surface, swapped onto the shared canonical mesh at load.
+    material_overrides: list[MaterialOverride] = field(default_factory=list)
+    # Representative colour for the picker swatch. The palette's first entry is
+    # not it: 876 variants have no palette, and where one exists the material
+    # may tint from entry B or C rather than A.
+    swatch: str | None = None
     assets: Assets = field(default_factory=Assets)
     flags: list[str] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
@@ -109,6 +133,11 @@ class Manifest:
         }
 
     def write(self, path: Path) -> Path:
+        # Always stamp the current version. Reading an older manifest and
+        # writing it back used to preserve its number, so a stage that added
+        # new fields shipped them under the old version and the viewer, which
+        # refuses a mismatch, rejected a manifest it could actually read.
+        self.schema_version = SCHEMA_VERSION
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(self.to_dict(), indent=2) + "\n", encoding="utf-8")
         return path
@@ -125,6 +154,9 @@ class Manifest:
             raw["manufacturer"] = Manufacturer(**(raw.get("manufacturer") or {}))
             raw["assets"] = Assets(**(raw.get("assets") or {}))
             raw["geometry"] = [Geometry(**g) for g in raw.get("geometry", [])]
+            raw["material_overrides"] = [
+                MaterialOverride(**o) for o in raw.get("material_overrides") or []
+            ]
             known = {f for f in Item.__dataclass_fields__}
             items.append(Item(**{k: v for k, v in raw.items() if k in known}))
         return cls(

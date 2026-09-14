@@ -84,6 +84,7 @@ cmd_build() {
   bold "Catalog"; "$SCX" catalog
   bold "Base rig"; "$SCX" rig
   bold "Converting armor (this takes a while)"; "$SCX" convert --all
+  bold "Colour variants"; "$SCX" variants
   "$SCX" refresh
   npm --prefix viewer run --silent link-assets
 }

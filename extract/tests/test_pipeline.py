@@ -59,3 +59,104 @@ def test_is_current_requires_glb_and_matching_hash(tmp_path: Path) -> None:
 
     (out / ".hash").write_text("stale")
     assert pipeline.is_current(settings, item) is False
+
+
+# ---------------------------------------------------------------------------
+# Colour variants: swatch colour and published textures
+# ---------------------------------------------------------------------------
+
+
+def _descriptor(layers: list[dict], name: str = "core_m") -> dict:
+    return {"name": name, "layers": layers}
+
+
+def test_dominant_colour_weights_the_palette_tinted_layer() -> None:
+    """The swatch must read as the colourway, not as the average of the piece.
+
+    Most layers carry a baked colour the artist chose once for every colourway;
+    only the palette-tinted layer changes between them. Weighting them equally
+    made every variant of a set land on nearly the same grey.
+    """
+    baked = {"name": "BaseLayer1", "tint_color": [0.0, 0.0, 0.0], "palette_tint": 0}
+    tinted = {"name": "BaseLayer2", "tint_color": [1.0, 0.0, 0.0], "palette_tint": 1}
+    colour = pipeline.dominant_colour([_descriptor([baked, tinted])])
+    assert colour is not None
+    red, green, blue = (int(colour[i : i + 2], 16) for i in (1, 3, 5))
+    assert red > green and red > blue, colour
+
+
+def test_dominant_colour_ignores_wear_layers() -> None:
+    """Wear layers are the substrate under the paint, not the colourway."""
+    base = {"name": "BaseLayer1", "tint_color": [1.0, 0.0, 0.0], "palette_tint": 0}
+    wear = {"name": "WearLayer1", "tint_color": [0.0, 0.0, 1.0], "palette_tint": 0}
+    with_wear = pipeline.dominant_colour([_descriptor([base, wear])])
+    without = pipeline.dominant_colour([_descriptor([base])])
+    assert with_wear == without
+
+
+def test_dominant_colour_converts_linear_to_srgb() -> None:
+    """.mtl colours are linear; a CSS swatch is sRGB.
+
+    Mid grey 0.5 linear is 0xbc in sRGB, not 0x80. Skipping the conversion made
+    every swatch far darker than the piece it stood for.
+    """
+    layer = {"name": "BaseLayer1", "tint_color": [0.5, 0.5, 0.5], "palette_tint": 0}
+    assert pipeline.dominant_colour([_descriptor([layer])]) == "#bcbcbc"
+
+
+def test_dominant_colour_without_layers_is_none() -> None:
+    assert pipeline.dominant_colour([]) is None
+    assert pipeline.dominant_colour([_descriptor([])]) is None
+
+
+def test_publish_textures_symlinks_the_bake_cache(tmp_path: Path) -> None:
+    """Variant textures are served from the bake cache, not copied.
+
+    Copying them would duplicate about 11 GB for files that are already named
+    by a content hash and shared between variants.
+    """
+    settings = settings_for(tmp_path)
+    (settings.interim_dir / "tint").mkdir(parents=True)
+    albedo = settings.interim_dir / "tint" / "x__abc_albedo.png"
+    albedo.write_bytes(b"")
+
+    entries = pipeline.publish_textures(
+        settings,
+        [{"name": "core_m", "composed": {"base_color": str(albedo), "orm": None}}],
+    )
+    assert entries == [{"name": "core_m", "base_color": "tint/x__abc_albedo.png"}]
+    published = settings.out_dir / "tint"
+    assert published.is_symlink()
+    assert (published / "x__abc_albedo.png").is_file()
+
+
+def test_publish_textures_skips_a_material_with_no_bake(tmp_path: Path) -> None:
+    settings = settings_for(tmp_path)
+    assert pipeline.publish_textures(settings, [{"name": "glass_m", "composed": {}}]) == []
+
+
+def test_dominant_colour_prefers_the_baked_albedo(tmp_path: Path) -> None:
+    """The bake is what the piece looks like; the layer list only approximates it.
+
+    Averaging .mtl layer colours over-weights layers the blend mask barely
+    shows, which is how twenty Odyssey undersuits ended up with the same chip.
+    """
+    from PIL import Image
+
+    albedo = tmp_path / "red_albedo.png"
+    Image.new("RGB", (4, 4), (200, 30, 30)).save(albedo)
+
+    descriptor = {
+        "name": "core_m",
+        "composed": {"base_color": str(albedo)},
+        # A layer list that would average to grey if it were used instead.
+        "layers": [{"name": "BaseLayer1", "tint_color": [0.5, 0.5, 0.5], "palette_tint": 0}],
+    }
+    colour = pipeline.dominant_colour([descriptor])
+    assert colour == "#c81e1e", colour
+
+
+def test_dominant_colour_falls_back_to_layers_without_a_bake() -> None:
+    """Glass and glow submaterials composite nothing, so the layers are all there is."""
+    layer = {"name": "BaseLayer1", "tint_color": [0.5, 0.5, 0.5], "palette_tint": 0}
+    assert pipeline.dominant_colour([{"name": "m", "composed": {}, "layers": [layer]}]) == "#bcbcbc"

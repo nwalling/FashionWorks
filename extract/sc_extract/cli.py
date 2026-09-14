@@ -428,6 +428,29 @@ def refresh(ctx: click.Context) -> None:
     click.secho(f"{ready} item(s) renderable", fg="green")
 
 
+@main.command(name="variants")
+@click.pass_context
+def variants_cmd(ctx: click.Context) -> None:
+    """Bake the textures colour variants need, and pick each item's swatch.
+
+    Variants share their canonical item's mesh but not its surface, so only the
+    composited textures are baked. Re-converting the geometry would cost hours
+    for meshes that are byte-identical.
+    """
+    from .manifest import Manifest
+    from .pipeline import refresh_assets, variant_surfaces
+
+    settings = _settings(ctx)
+    if not settings.manifest_path().is_file():
+        _fail(f"no manifest at {settings.manifest_path()}; run `scx catalog` first")
+    manifest = Manifest.read(settings.manifest_path())
+    done = variant_surfaces(settings, manifest)
+    manifest.write(settings.manifest_path())
+    ready = refresh_assets(settings, manifest)
+    manifest.write(settings.manifest_path())
+    click.secho(f"{done} variant surface(s) baked, {ready} item(s) renderable", fg="green")
+
+
 @main.command(name="poses")
 @click.option("--skeleton", default=None)
 @click.pass_context
