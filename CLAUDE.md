@@ -126,11 +126,14 @@ they are marked as such.
 - **Socket pieces export unskinned.** Backpacks come out with no `skins` array
   and their origin baked to the socket rest transform, so
   `bone.add(mesh)` is all the viewer needs.
-- **Swapping does not leak.** Renderer geometry count rises while the
+- **Swapping does not leak, on repeat.** Renderer geometry count rises while the
   `useGLTF` cache fills, then holds flat across hundreds of swaps, with tint
   changes interleaved. Only the handful of geometries actually in the scene are
   live; the rest is the cache, which is what makes swaps instant. Median swap
   latency is ~17 ms (one frame). Re-measure with `window.__kitbasher.gl.info`.
+  This holds for swapping *between items already loaded*. It says nothing about
+  the cost of each new one, which on real assets is 13.6 MB retained forever --
+  see "The GLB cache needs a byte budget" below.
 - **Tinting has to work from the bound mesh list, not the loaded scene.**
   Binding reparents meshes out of the cloned item scene and under the base
   character, so traversing the clone afterwards finds nothing. This was a real
@@ -776,6 +779,76 @@ Backdrop images live in `data/out/backgrounds/` and are served through the same
 `/assets` mount as everything else, which also means they are gitignored like
 any other extracted asset.
 
+### The GLB cache needs a byte budget (2026-09-14)
+
+Swapping really is free *on repeat*, exactly as the 2026-09-13 note says. What
+that note could not see, because it was measured on 30 synthetic placeholders
+with trivial geometry and no textures, is that the cache never releases
+anything. On real assets the first sight of an item costs **13.6 MB and keeps
+it**.
+
+Measured by equipping 12 different helmets, one slot, one visible mesh at a
+time:
+
+| swaps | geometries | textures | JS heap |
+| --- | --- | --- | --- |
+| 0 | 13 | 9 | 56 MB |
+| 6 | 19 | 26 | 116 MB |
+| 12 | 25 | 44 | 220 MB |
+
+Linear, never plateauing. At that moment the scene held **2 meshes, 1 skeleton,
+3 draw calls** -- so 23 of those 25 geometries belonged to helmets that were no
+longer in the scene at all. The binding is not what grows; the cache is.
+
+The catalog has **471 distinct GLBs** (helmet 138, torso 91, arms 83, legs 81,
+undersuit 47, backpack 31), averaging 7.3 MB on disk and about 1.8x that
+resident once decoded. Browsing all of them wants ~6.4 GB against a 4.19 GB tab
+limit, so the tab dies around **304 distinct items, roughly two thirds of the
+way through**.
+
+`viewer/src/three/gltfCache.ts` puts a ceiling on it: a byte budget over the
+`useGLTF` cache, evicting least-recently-used GLBs. Default **768 MB**, about 25
+items. With it, 30 swaps hold flat at 25 entries, 741-766 MB, 38 geometries and
+77 textures, and repeat swaps stay instant.
+
+Two things make eviction safe, and both are load-bearing:
+
+* **Equipped pieces are pinned.** `ArmorPiece` reparents *clones* that share
+  geometry, materials and textures with the cached original, so a piece on
+  screen still owns its cache entry. A full loadout reports `pinned: 6`.
+* **The `retain` effect is declared last in `ArmorPiece`.** React runs cleanups
+  in declaration order, so release happens *after* the bind effect's `detach`
+  and after the tint effect restores the shared materials. Declared earlier, it
+  would dispose geometry still parented into the scene.
+
+`useGLTF.clear()` only drops the suspense entry and frees no GPU memory, so the
+module disposes textures, materials and geometries itself before clearing.
+Size is measured from the decoded buffers, not the file, because that is what
+stays resident. `window.__gltfCache` exposes `stats()` and `setBudget()` in dev.
+
+### One colour drag was 40 undo steps (2026-09-14)
+
+`setTint` ran through `withHistory` on every `onChange`, and a colour picker
+fires those continuously while dragged. One gesture produced **40 history
+entries** against a `HISTORY_LIMIT` of 50: the whole undo stack gone, and 40
+undos needed to reverse one drag.
+
+The store never sees a `pointerup`, so the gesture boundary is inferred from the
+gap between events (`TINT_COALESCE_MS`, 600 ms). Coalescing on the item key
+alone was not enough -- every drag of one swatch for the rest of the session
+folded into a single undo step, which is worse than the bug. Now 75 tint events
+across three gestures produce three entries.
+
+### Object URLs cannot be revoked on the next line (2026-09-14)
+
+`exporters.download` revoked the blob URL immediately after `anchor.click()`.
+`click()` only queues the navigation; the browser takes its reference after the
+event is dispatched, so the URL could be gone before the download started. The
+combined GLB is the one that loses that race -- a six-piece loadout exports at
+**43.3 MB**. Revocation is deferred by `OBJECT_URL_TTL_MS` (60 s), and the
+anchor is appended to the document first, because Firefox ignores `click()` on a
+detached anchor.
+
 ### Still unverified
 
 - Whether female meshes bind to the same bone names as male ones.
@@ -815,6 +888,7 @@ blender/
 viewer/src/
   manifest.ts               zod schema, mirrors manifest.py
   three/binding.ts          §5.3 Option A + Option B fallback
+  three/gltfCache.ts        byte-budget LRU over the useGLTF cache
   store.ts                  zustand: loadout, history, filters
   loadout.ts                share-URL encode/decode
 ```
@@ -829,7 +903,10 @@ viewer/src/
   `window.__store`. That is how the swap-leak and latency numbers above were
   measured. Both are stripped from production builds.
 - Geometry and materials are shared with the `useGLTF` cache. Only geometry that
-  `binding.ts` cloned for a skin-index remap may be disposed.
+  `binding.ts` cloned for a skin-index remap may be disposed *by the viewer*.
+  Everything else is owned by `three/gltfCache.ts`, which disposes a whole GLB
+  when its byte budget evicts it, and never one that a mounted `ArmorPiece` has
+  pinned.
 
 ## Legal
 
