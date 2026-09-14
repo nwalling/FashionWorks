@@ -531,6 +531,37 @@ unused UV space and is not comparable to what the eye sees: the arms read 7.7%
 of their atlas but only 3% of their silhouette, which is the difference
 between "slightly low" and "clearly wrong".
 
+### Ruled out while chasing the Sunchaser arms
+
+Worth recording so nobody spends the time again.
+
+* **`SwizzleOverride` is null on every armour record** (0 of them set it), so
+  palette channels are not remapped per reference.
+* **`ChildPath` is empty and the palette tree has no children.**
+  `slaver_heavy_01_01_03` is a single root holding
+  `['#f9b541', '#5e5e5c', '#575757']`, so there is no per-submaterial palette
+  variant to look up.
+* **The blend channel order is confirmed.** Summed over the core's
+  submaterials, entryA coverage is 1.152 under the current
+  blue-then-green-then-red order and 0.050 reversed, and the core is the piece
+  that matches the reference.
+* **The `_hal` hue channel is flat neutral**, and only 11 armour submaterials
+  enable the HUE flag at all.
+
+### The arms shortfall, measured
+
+`arm_coated_metal_m` is 56.6% of the arms mesh and carries gold on 8.6% of its
+own UV footprint, contributing 4.9%; the render shows 3.1% and the game 8.9 to
+11.8%. The gap is `biceparmor_m`, 32.5% of the mesh and plainly gold in the
+reference, whose palette-tinted layers sit on `PaletteTint` **2 and 3** -- both
+near-identical greys in this colourway.
+
+So for the arms to look right, index 2 would have to reach the gold entry;
+but the core matches the reference precisely with index 1 reaching it. Both
+cannot hold under one global mapping, and nothing in the record distinguishes
+them. That contradiction is the open question, and it is not answerable from
+coverage measurements alone.
+
 ### A record name is not unique across types
 
 165 items resolved a palette reference to the wrong record. The VGL Warden
