@@ -750,6 +750,20 @@ the olive that reads on the thighs. Whether the blend mask really gives those
 layers as much area as the composite does is the open question, not the
 palette.
 
+### A colour group is not named after one of its members
+
+The twenty-one Odyssey II undersuits used to appear as "Odyssey II Undersuit
+Alpha" with the other twenty as swatches under it. Alpha is a colourway in its
+own right, and the game lists all of them as separate items, so titling the
+group with whichever member happened to be canonical made one stand in for the
+rest. `SlotPanel.sharedName` titles a group with the words its members' names
+actually share, and `colourwayName` shows what distinguishes the selected one.
+
+Checked at the same time, since it was the other suspect: tinting is **not**
+applied twice. Every material on an equipped variant carries `color` at
+`#ffffff` with a single swapped map, so the colour arrives once, from the
+texture. The flat palette multiply that used to sit on top is gone.
+
 ### Backdrops
 
 `viewer/src/components/Backdrop.tsx` puts a photographic plate behind the

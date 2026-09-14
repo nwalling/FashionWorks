@@ -109,6 +109,33 @@ export function SlotPanel() {
   );
 }
 
+
+/**
+ * The name the whole colour group shares, as whole words.
+ *
+ * A group used to be titled with whichever member happened to be canonical, so
+ * the twenty-one Odyssey II undersuits appeared as "Odyssey II Undersuit
+ * Alpha" with the other twenty as swatches beneath it. Alpha is a colourway in
+ * its own right, not the parent of the others, and the game lists all of them
+ * as separate items. Titling the group with what the names actually share, and
+ * naming the selected colourway separately, stops one member standing in for
+ * the rest.
+ */
+function sharedName(items: Item[]): string {
+  const words = items.map((item) => item.name.trim().split(/\s+/));
+  if (words.length === 0) return '';
+  const first = words[0];
+  let shared = 0;
+  while (shared < first.length && words.every((w) => w[shared] === first[shared])) shared += 1;
+  return first.slice(0, shared).join(' ');
+}
+
+/** What distinguishes one colourway from the rest of its group. */
+function colourwayName(item: Item, shared: string): string {
+  if (!shared || item.name.length <= shared.length) return '';
+  return item.name.slice(shared.length).trim();
+}
+
 function ItemRow({
   item,
   equippedId,
@@ -124,6 +151,10 @@ function ItemRow({
 }) {
   const activeVariant = variants.find((v) => v.id === equippedId) ?? item;
   const isEquipped = variants.some((v) => v.id === equippedId);
+  const grouped = variants.length > 1;
+  const shared = grouped ? sharedName(variants) : '';
+  const title = grouped && shared ? shared : item.name;
+  const colourway = grouped ? colourwayName(activeVariant, shared) : '';
 
   return (
     <li>
@@ -131,17 +162,18 @@ function ItemRow({
         className={isEquipped ? 'item active' : 'item'}
         onClick={() => onEquip(activeVariant.id)}
       >
-        <span className="item-name">{item.name}</span>
+        <span className="item-name">{title}</span>
+        {colourway ? <span className="item-colourway">{colourway}</span> : null}
         <span className="item-meta">
           {[item.manufacturer.code, item.weight_class].filter(Boolean).join(' · ')}
         </span>
       </button>
-      {variants.length > 1 ? (
+      {grouped ? (
         <div className="swatches">
           {variants.map((variant) => (
             <button
               key={variant.id}
-              title={variant.class_name}
+              title={colourwayName(variant, shared) || variant.name}
               className={variant.id === equippedId ? 'swatch active' : 'swatch'}
               style={{ background: swatchColor(variant) }}
               onClick={() => onEquip(variant.id)}
