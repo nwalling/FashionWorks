@@ -544,36 +544,25 @@ More decisive: `core_plate_m`, which matches the reference, and
 same `StringGenMask`. Nothing there distinguishes them. The answer is not in
 the shader block.
 
-### Lead: PaletteTint may be a rank within the submaterial, not an index
+### PaletteTint is an absolute index, not a rank -- tested and settled
 
-The only thing that differs between those two is which `PaletteTint` values
-their layers carry. `core_plate_m` has a single tinted layer on index 1;
-`biceparmor_m` has two, on indices 2 and 3, and no index 1 at all. 283 armour
-submaterials use index 2 or 3 without ever using 1.
+The suspicion was that `PaletteTint` might be a rank among the indices a
+submaterial actually uses, rather than an absolute palette entry. 283 armour
+submaterials use index 2 or 3 without ever using 1, and reading those as
+"primary" would have turned the Sunchaser bicep plate gold.
 
-If the value is read as a rank among the indices a submaterial actually uses,
-rather than an absolute entry, then `biceparmor_m`'s index-2 layer becomes the
-primary colour and the bicep plate goes gold, which is what the game shows.
+`Chiron Legs AA Support` discriminates cleanly: its material uses only indices
+2 and 3, and its palette's primary is a bright `#ea2d40` red. UV-weighted
+prediction was **0.0% red as an absolute index, 49.5% as a rank**.
 
-Predicted gold coverage, UV-weighted by each slot's real footprint and share
-of the mesh:
+The in-game set shows the legs **charcoal, with no red at all** -- the red sits
+on the core, arms and helmet. The absolute index is right and the rank reading
+is wrong. Do not revisit it.
 
-| piece | in-game | literal index | relative rank |
-| ----- | ------- | ------------- | ------------- |
-| arms  | 8.9-11.8% | 4.9%  | 12.4% |
-| core  | 24.5%     | 16.9% | 22.0% |
-| legs  | 5.3%      | 9.7%  | 19.8% |
-
-Relative rank fits the two clean pieces much better and would fix the reported
-arms fault. It fits the legs worse -- but the legs are the piece that pairs a
-CDS mesh with a slaver material, the least trustworthy comparison in the set.
-
-**Not adopted.** Two pieces improving and one worsening is not enough to change
-palette semantics across 2615 items. Settling it wants an in-game reference for
-a piece whose material uses index 2 or 3 with no index 1 and whose palette has
-a strongly coloured primary; the prediction table above then discriminates in
-one step. The helmet row is omitted because its on-screen figure was measured
-over the gold crown only, not the whole piece, so it is not comparable.
+This also means the Sunchaser arms shortfall (about 3% gold rendered against
+9-12% in game) is not a palette-index fault. It is smaller than it first
+looked, and the store renders show the arms are mostly dark with gold confined
+to the shoulder pauldron and one forearm plate.
 
 ### Ruled out while chasing the Sunchaser arms
 
