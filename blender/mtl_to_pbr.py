@@ -169,22 +169,41 @@ def apply_materials(obj, descriptors: list[dict]) -> list[dict]:
         return []
 
     existing = len(obj.data.materials)
-    taken: set[int] = set()
-    meta: list[dict] = []
 
-    for position, descriptor in enumerate(descriptors):
-        material = build_material(descriptor)
+    # Name matches first, positional fallback second. Doing it in one pass let
+    # an unmatched descriptor take a slot by position that a later, correctly
+    # named descriptor needed. The Defiance legs are the case: the mesh is CDS
+    # with slots pads_straps_m, clips_m, thighs_m, shoes_m, sole_m,
+    # thigh_panels_m, glows_m, while the .mtl the record names is a whole-body
+    # slaver material listing shoulderpads_m, arm_base_m and the rest in
+    # between. shoulderpads_m grabbed the clips_m slot, arm_base_m grabbed
+    # thighs_m, and by the time the real thighs_m descriptor came round its
+    # slot was gone -- so the gold accent layers were painted onto the wrong
+    # parts, or onto no part at all.
+    assigned: dict[int, dict] = {}
+    leftover: list[dict] = []
+    for descriptor in descriptors:
         index = _slot_for(obj, descriptor.get("name", ""))
-        if index is None or index in taken:
-            # No name match: fall back to slot order, which is the common case
-            # for a mesh whose slots the importer did not name after the .mtl.
-            index = position if position < existing else None
-        if index is not None and index < len(obj.data.materials):
+        if index is None or index in assigned:
+            leftover.append(descriptor)
+        else:
+            assigned[index] = descriptor
+
+    free = [i for i in range(existing) if i not in assigned]
+    for descriptor in leftover:
+        if free:
+            assigned[free.pop(0)] = descriptor
+        else:
+            assigned[len(assigned) + existing] = descriptor
+
+    meta: list[dict] = []
+    for index in sorted(assigned):
+        descriptor = assigned[index]
+        material = build_material(descriptor)
+        if index < len(obj.data.materials):
             obj.data.materials[index] = material
-            taken.add(index)
         else:
             obj.data.materials.append(material)
-            taken.add(len(obj.data.materials) - 1)
         meta.append(
             {
                 "name": descriptor.get("name"),

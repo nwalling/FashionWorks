@@ -553,6 +553,29 @@ parent and local matrix at bind time and put it back on detach.
 The same fault was latent for skinned pieces; their effect just did not re-run,
 because only `offsetKey` was changing.
 
+### Match material slots by name before falling back to position
+
+`apply_materials` assigned descriptors in one pass, taking a name match when
+there was one and the descriptor's ordinal otherwise. That let an unmatched
+descriptor take, by position, a slot that a later correctly-named descriptor
+needed.
+
+The Defiance legs are the case. The mesh is CDS, with slots `pads_straps_m`,
+`clips_m`, `thighs_m`, `shoes_m`, `sole_m`, `thigh_panels_m`, `glows_m`. The
+.mtl the record names is a whole-body **slaver** material that lists
+`shoulderpads_m`, `arm_base_m`, `arm_exo_m`, `gloves_m`, `collar_m` and
+`torso_base_m` in between the leg entries. So `shoulderpads_m` took the
+`clips_m` slot, `arm_base_m` took `thighs_m`, and by the time the real
+`thighs_m` descriptor came round its slot was gone. Arm and collar materials
+were painted onto leg geometry, and the leg materials -- including the
+palette-tinted gold accents -- landed on nothing.
+
+Name matches are now assigned first and leftovers fill whatever slots remain.
+
+Reusing one whole-body .mtl across separate meshes is normal here, so the
+descriptor list routinely contains submaterials a given mesh does not use.
+Positional assignment is only ever a guess; names are the real key.
+
 ### Open: the backpack shell takes the wrong palette entry
 
 With the palette now resolving, the CSP-68H Red Alert renders red on its trim
