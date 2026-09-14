@@ -429,3 +429,56 @@ def test_metalness_comes_from_reflectance_not_the_directory(tmp_path, monkeypatc
     )
     _ao, _rough, metal = Image.open(written["orm"]).convert("RGB").load()[0, 0]
     assert metal == 0, f"reflectance {0.04} is below {METAL_F0_THRESHOLD}, so not metal"
+
+
+def test_a_dielectric_takes_its_colour_from_diffuse(tmp_path, monkeypatch) -> None:
+    """168 of 317 dielectric layers set a non-white Diffuse.
+
+    Ignoring it rendered them at full brightness, which is part of why armour
+    came out far lighter than the game shows it.
+    """
+    from sc_extract import layers as layer_lib
+
+    dark = layer_lib.LayerMaterial(
+        path="materials/layers/synthetic/dark_paint.mtl",
+        specular=(0.04, 0.04, 0.04),
+        diffuse=(0.1, 0.1, 0.1),
+        shininess=200.0,
+    )
+    monkeypatch.setattr(layer_lib, "load", lambda *a, **k: dark)
+
+    sub = SubMaterial(
+        name="m",
+        shader="LayerBlend_V2",
+        layers=[
+            MatLayer(
+                name="BaseLayer1",
+                path="materials/layers/synthetic/dark_paint.mtl",
+                tint_color=(1.0, 1.0, 1.0),
+                gloss_mult=1.0,
+                uv_tiling=1.0,
+            )
+        ],
+    )
+    written = compose_layered(
+        sub, [], tmp_path / "out", "diff", resolved={}, raw_root=tmp_path / "raw", size=2
+    )
+    got = np.array(
+        Image.open(written["base_color"]).convert("RGB").load()[0, 0], dtype=np.float32
+    ) / 255.0
+    want = linear_to_srgb(np.array([0.1, 0.1, 0.1], dtype=np.float32))
+    assert np.allclose(got, want, atol=0.02), f"{got} should follow Diffuse, not white"
+
+
+def test_black_diffuse_with_reflectance_is_metal() -> None:
+    """CryEngine's signature for bare metal, and it catches near-metals.
+
+    weapon_bare_120 sits at specular 0.188, just under the threshold, with a
+    black diffuse. A dielectric gets its colour from diffuse, so black diffuse
+    plus real reflectance can only be metal.
+    """
+    from sc_extract.layers import LayerMaterial
+
+    assert LayerMaterial(path="x", specular=(0.188,) * 3, diffuse=(0.0, 0.0, 0.0)).is_metal
+    assert LayerMaterial(path="x", specular=(1.0,) * 3, diffuse=(0.0, 0.0, 0.0)).is_metal
+    assert not LayerMaterial(path="x", specular=(0.045,) * 3, diffuse=(1.0, 1.0, 1.0)).is_metal

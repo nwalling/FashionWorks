@@ -58,6 +58,24 @@ class LayerMaterial:
     tile_v: float = 1.0
     shininess: float = 255.0
     specular: tuple[float, float, float] = (0.04, 0.04, 0.04)
+    # The layer's own diffuse colour. 168 of 317 dielectric layers set this to
+    # something other than white and 46 set it below 0.5, so ignoring it made
+    # them render at full brightness. A black diffuse with real specular is
+    # CryEngine's signature for bare metal.
+    diffuse: tuple[float, float, float] = (1.0, 1.0, 1.0)
+
+    @property
+    def is_metal(self) -> bool:
+        """Whether this layer is bare metal, from its own reflectance.
+
+        Two signatures, both CryEngine's own. A high specular is the obvious
+        one. The second catches near-metals whose specular sits just under the
+        threshold: a black diffuse with any real reflectance can only be metal,
+        since a dielectric gets its colour from diffuse.
+        """
+        spec = 0.2126 * self.specular[0] + 0.7152 * self.specular[1] + 0.0722 * self.specular[2]
+        diff = 0.2126 * self.diffuse[0] + 0.7152 * self.diffuse[1] + 0.0722 * self.diffuse[2]
+        return spec > 0.2 or (diff < 0.05 and spec > 0.02)
 
     @property
     def glossiness(self) -> float:
@@ -138,12 +156,15 @@ def _load_cached(raw_root: str, reference: str) -> LayerMaterial | None:
         elif slot == "texslot2":
             ddna = found
 
-    spec = (0.04, 0.04, 0.04)
-    raw_spec = node.get("Specular")
-    if raw_spec:
-        parts = tuple(_scalar(p, 0.04) for p in raw_spec.split(","))
-        if len(parts) == 3:
-            spec = parts  # type: ignore[assignment]
+    def _colour(attr: str, default: tuple[float, float, float]):
+        raw = node.get(attr)
+        if not raw:
+            return default
+        parts = tuple(_scalar(p, default[0]) for p in raw.split(","))
+        return parts if len(parts) == 3 else default
+
+    spec = _colour("Specular", (0.04, 0.04, 0.04))
+    diffuse = _colour("Diffuse", (1.0, 1.0, 1.0))
 
     return LayerMaterial(
         path=reference,
@@ -152,7 +173,8 @@ def _load_cached(raw_root: str, reference: str) -> LayerMaterial | None:
         tile_u=tile_u,
         tile_v=tile_v,
         shininess=_scalar(node.get("Shininess"), 255.0),
-        specular=spec,
+        specular=spec,  # type: ignore[arg-type]
+        diffuse=diffuse,  # type: ignore[arg-type]
     )
 
 

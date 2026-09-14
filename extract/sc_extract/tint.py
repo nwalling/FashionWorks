@@ -277,7 +277,9 @@ MIN_TILE_PX = 4  # below this a tiled detail texture aliases into mush
 WEAR_THRESHOLD = 0.5
 WEAR_FALLOFF = 0.5
 
-# Reflectance above which a detail layer is treated as bare metal. CryEngine's
+# Reflectance above which a detail layer is treated as bare metal, used by
+# layers.LayerMaterial.is_metal. Kept here because it belongs to the texture
+# cache key. CryEngine's
 # Layer shader states this directly: a metal carries Specular near its F0 with
 # Diffuse at black, a dielectric sits near 0.04. Measured across the 495-entry
 # layer library the two populations separate cleanly -- the `dielectric`
@@ -375,7 +377,7 @@ def layered_key(sub, palette: list[Layer]) -> str:
             f"{entry.name}|{entry.path}|{entry.tint_color}|{entry.palette_tint}"
             f"|{round(entry.gloss_mult, 4)}|{round(entry.uv_tiling, 3)}"
         )
-    parts.append(f"wear:{WEAR_THRESHOLD}:{WEAR_FALLOFF}:metal:{METAL_F0_THRESHOLD}")
+    parts.append(f"wear:{WEAR_THRESHOLD}:{WEAR_FALLOFF}:metal:{METAL_F0_THRESHOLD}:diffuse")
     return hashlib.sha1(";".join(parts).encode()).hexdigest()[:10]
 
 
@@ -466,14 +468,17 @@ def compose_layered(
             gloss_scale = 1.0
 
         if detail is not None:
-            spec = np.array(detail.specular, dtype=np.float32)
-            reflectance = float(0.2126 * spec[0] + 0.7152 * spec[1] + 0.0722 * spec[2])
-            metallic = 1.0 if reflectance > METAL_F0_THRESHOLD else 0.0
+            metallic = 1.0 if detail.is_metal else 0.0
+            if metallic:
+                # Metal has no diffuse; its base colour is its reflectance.
+                tint = tint * np.array(detail.specular, dtype=np.float32)
+            else:
+                # A dielectric's colour is its diffuse. 168 of 317 dielectric
+                # layers set this to something other than white, so skipping it
+                # rendered them at full brightness.
+                tint = tint * np.array(detail.diffuse, dtype=np.float32)
         else:
             metallic = 1.0 if entry.metallic else 0.0
-        if metallic and detail is not None:
-            # Metal has no diffuse; its base colour is its reflectance.
-            tint = tint * np.array(detail.specular, dtype=np.float32)
 
         repeat = entry.uv_tiling * (detail.tile_u if detail else 1.0)
 

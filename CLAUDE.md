@@ -449,6 +449,41 @@ is small -- blend-weighted metalness over 31 armour submaterials moves from
 0.25 to 0.23, with only 2 changing materially -- so this was not the cause of
 the chrome look, just a correctness fix found while chasing it.
 
+### Layer colour comes from Diffuse and Specular, not the folder (2026-09-14)
+
+Chasing why armour rendered lighter than the game shows it turned up two
+errors in how a detail layer's colour was read. Neither was the cause -- that
+was the material-slot bug above -- but both are wrong on their own terms.
+
+**A dielectric's colour is its `Diffuse`.** 168 of 317 dielectric layers set it
+to something other than white and 46 set it below 0.5, and it was being ignored
+entirely, so those rendered at full brightness.
+
+**A layer is metal by its own reflectance.** `LayerMaterial.is_metal` takes
+`Specular` above 0.2, or a black `Diffuse` with any real reflectance, which is
+CryEngine's signature for bare metal and catches near-metals like
+`weapon_bare_120` sitting at 0.188. The old rule keyed on the layer living
+under `Materials/Layers/metal`, which misses the whole `metallic/` category
+(that path does not contain `/metal/`) and promotes the 24% of `/metal/`
+entries that are dielectric by their own numbers.
+
+Measured on the Defiance torso both rules produce **identical** output, because
+its metal layers qualify under either test. They matter elsewhere in the
+catalog, not there.
+
+**What is left is lighting, not materials.** Sweeping the environment showed
+the armour reading close to the in-game reference at `scene.environmentIntensity`
+around 0.25 with the lights at 40%, and unchanged in hue throughout. The scene
+stacks a full IBL, a directional light at 1.1 and an ambient at 0.25, which is
+considerably brighter than the game's dim hangar. This has not been changed;
+it is a viewer default, not a data problem.
+
+**Defiance legs really do use a CDS mesh.** `Defiance Legs Tactical` pairs
+`m_cds_heavy_armor_01_legs.skin` with `m_slaver_heavy_armor_legs_01_01_01.mtl`,
+and no slaver legs mesh exists in the archive. Only 27 of 2103 items pair a
+mesh and material from different family folders, and they are genuine reuse.
+Do not "fix" this.
+
 ### Colour variants differ by material, not palette (2026-09-14)
 
 Three symptoms, two causes. Every Odyssey II Undersuit showed the same grey
