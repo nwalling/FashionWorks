@@ -715,15 +715,40 @@ first and last alone gets there.
 residual is specular response and wants lower metalness or higher roughness in
 the bake. Left alone deliberately rather than compensated for in the lighting.
 
-### Still open: some palette entries are lighter than the game shows
+### Palette index ordering is correct: PaletteTint 1/2/3 -> entryA/B/C
 
-`Defiance Legs Tactical` bakes several layers to `#5e5e5c`, which is exactly
-its palette's third entry, while the game renders that piece near black. The
-palette resolves as `entryA`/`entryB`/`entryC` mapped to `PaletteTint` 1/2/3;
-whether that index order is right has not been proven against ground truth, and
-it is the obvious suspect. Note the canonical item's own bake of the same
-material is dark (`#1e1e1e`-`#30302a`), so the difference comes from the
-palette, not the layer stack.
+Tested, because the legs rendering lighter than the game made the mapping a
+suspect. It is not the cause.
+
+**entryA is the primary colour.** Across 48 colour variants whose palette
+genuinely differs from their canonical sibling's and whose name states a colour
+that is really present in the palette, the named colour sits in **entryA 81% of
+the time, entryB 18%, entryC never**. A colourway is named for its primary, and
+primary is index 1, so 1 maps to A.
+
+Two traps in running that test. Sampling every item whose name states a colour
+gives a meaningless 49/28/22 split, because families like ADP ship Blue, Red,
+Green and Purple variants that all carry the *same* palette -- their colour
+comes from a `mtl_var` material, not the palette. And the named colour has to
+actually be in the palette, not merely the closest of three greys.
+
+**Surface coverage does not discriminate.** Across 969 submaterials the
+palette-tinted area splits 31% / 30% / 38% between indices 1, 2 and 3, which is
+too even to argue either way.
+
+**Permuting the mapping changes nothing measurable** on the piece that prompted
+the question: baking the Defiance legs with 1->A and again with 1->C gives a
+mean albedo of 69.9 both times, because only **3 of that material's 52 base
+layers are palette-tinted at all**.
+
+### Why the Defiance legs are lighter than the game shows
+
+Not the palette. The material's own baked `TintColor` values decide it, and
+they are light: untinted layers run from 0.032 to 0.468 linear with a median
+around 0.069, and three submaterials carry `(0.376, 0.376, 0.246)`, which is
+the olive that reads on the thighs. Whether the blend mask really gives those
+layers as much area as the composite does is the open question, not the
+palette.
 
 ### Backdrops
 
