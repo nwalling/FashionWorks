@@ -26,6 +26,7 @@ Run::
 from __future__ import annotations
 
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -33,6 +34,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import bpy  # type: ignore[import-not-found]
+from mathutils import Matrix  # type: ignore[import-not-found]
 
 import _common as C
 import mtl_to_pbr
@@ -175,6 +177,14 @@ def socket_offsets(donor, canonical) -> dict[str, list[float]]:
     return out
 
 
+# The prop's attachment locator faces into the body, not away from it, so
+# composing it against the skeleton's bone directly leaves the prop turned
+# around. Verified with the props' own grip locators: without this yaw a
+# backpack's grip_left_1 lands on the character's right at x=+0.190, and with
+# it at x=-0.190 where it belongs. Every backpack was affected.
+SOCKET_YAW = Matrix.Rotation(math.pi, 4, "Z")
+
+
 def socket_locator(socket: str | None):
     """The prop's own attachment frame for ``socket``, if it ships one.
 
@@ -213,9 +223,9 @@ def place_at_socket(mesh, armature, socket: str | None, *, log: list[str]) -> bo
     locator = socket_locator(socket)
     if locator is None:
         log.append(f"no {socket!r} locator on the prop; using the bone rest position")
-        placement = bone_rest
+        placement = bone_rest @ SOCKET_YAW
     else:
-        placement = bone_rest @ locator.matrix_world.inverted()
+        placement = bone_rest @ SOCKET_YAW @ locator.matrix_world.inverted()
 
     mesh.parent = None
     mesh.matrix_world = placement @ mesh.matrix_world

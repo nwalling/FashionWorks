@@ -315,6 +315,13 @@ taking it from 220 to 255 bones with 36 attachment points. Verified positions:
 | `backpack_attach_1_override` | `Spine3` | (0.000, -0.130, 1.440) |
 | `helmethook_attach_override` | `Spine` | (-0.098, -0.101, 1.055) |
 
+**The prop's locator faces into the body, so the placement needs a 180 degree
+yaw.** Without it every backpack is mounted backwards. A bounding box will not
+catch this, since a pack's extents look much the same either way; the props'
+own `grip_left_1` / `grip_right_1` locators will. Composed directly, a pack's
+left grip lands on the character's right at x=+0.190; with the yaw it lands at
+x=-0.190 where it belongs. `normalize_armor.SOCKET_YAW`.
+
 **A rigid prop is authored around its own origin, not in body space**, and
 carries empties marking where it mounts: a backpack ships a
 `backpack_attach_1_loc` empty that pairs with the skeleton's
