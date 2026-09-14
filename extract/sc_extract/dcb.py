@@ -36,6 +36,25 @@ class Record:
     def get(self, paths: list[str], default: Any = None) -> Any:
         return F.first(self.data, paths, default)
 
+    @property
+    def record_type(self) -> str:
+        """The record's own type, e.g. ``TintPaletteTree``.
+
+        Taken from ``_RecordName_``, which is ``<type>.<name>``. Needed because
+        a name is not unique across types: the VGL Warden backpack ships an
+        entity and a tint palette both called
+        ``vgl_combat_heavy_backpack_01_03_01``.
+        """
+        name = self.data.get("_RecordName_")
+        if isinstance(name, str) and "." in name:
+            return name.split(".", 1)[0]
+        body = self.data.get("_RecordValue_")
+        if isinstance(body, dict):
+            kind = body.get("_Type_")
+            if isinstance(kind, str):
+                return kind
+        return ""
+
 
 def _cache_key(p4k: Path) -> str:
     stat = p4k.stat()
@@ -133,6 +152,8 @@ class Index:
     def __init__(self) -> None:
         self.by_id: dict[str, Record] = {}
         self.by_class: dict[str, Record] = {}
+        # Keyed by (type, name), because a name alone is ambiguous.
+        self.by_type: dict[tuple[str, str], Record] = {}
         self.records: list[Record] = []
 
     def __len__(self) -> int:
@@ -142,8 +163,11 @@ class Index:
         self.records.append(record)
         self.by_id.setdefault(record.id, record)
         self.by_class.setdefault(record.class_name.lower(), record)
+        self.by_type.setdefault(
+            (record.record_type.lower(), record.class_name.lower()), record
+        )
 
-    def resolve_ref(self, ref: Any) -> Record | None:
+    def resolve_ref(self, ref: Any, *, record_type: str | None = None) -> Record | None:
         """Resolve a record reference.
 
         References in this build are relative ``file://`` URLs into the foundry
@@ -162,6 +186,10 @@ class Index:
         name = self.ref_name(ref)
         if name is None:
             return None
+        if record_type:
+            hit = self.by_type.get((record_type.lower(), name.lower()))
+            if hit is not None:
+                return hit
         return self.by_id.get(name) or self.by_class.get(name.lower())
 
     @staticmethod

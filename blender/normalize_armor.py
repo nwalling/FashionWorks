@@ -63,6 +63,33 @@ def load_canonical_rig(base_dir: Path, skeleton: str):
     return find_armature()
 
 
+CAMEL_RE = re.compile(r"[A-Z]+(?![a-z])|[A-Z][a-z]*|[a-z]+|[0-9]+")
+NOISE_TOKENS = {"sim", "skel", "test", "cc", "start", "end", "twist", "01", "02", "1", "2"}
+
+
+def _tokens(name: str) -> set[str]:
+    """Lowercase word tokens, splitting separators and camelCase alike.
+
+    ``LeftWrist_CuffTwist`` has to become {left, wrist, cuff, twist}; splitting
+    on separators alone leaves ``LeftWrist`` welded together and nothing
+    matches ``LeftForeArm``.
+    """
+    out: set[str] = set()
+    for part in re.split(r"[^A-Za-z0-9]+", name or ""):
+        out.update(t.lower() for t in CAMEL_RE.findall(part))
+    return out
+
+
+def _side_of_bone(name: str) -> str | None:
+    """"left", "right" or None."""
+    tokens = _tokens(name)
+    if "left" in tokens:
+        return "left"
+    if "right" in tokens:
+        return "right"
+    return None
+
+
 def rebind(mesh, armature, *, log: list[str]) -> None:
     """Parent a mesh to the canonical armature, matching vertex groups by name.
 
@@ -74,8 +101,19 @@ def rebind(mesh, armature, *, log: list[str]) -> None:
     Dropping the second kind outright leaves those vertices unweighted, and
     Blender's exporter then invents a ``neutral_bone`` for them, pinning that
     part of the mesh to the origin. On one torso that was 1080 of 30901
-    vertices. So stray weight is moved onto the piece's dominant bone first,
-    which keeps the cloth travelling with the body instead of being left behind.
+    vertices.
+
+    So stray weight is redistributed instead. It used to all go to one bone --
+    whichever the *whole mesh* leaned on most -- which flung mirrored geometry
+    across the body: the Defiance arms sent 1828 vertices to ``LeftForeArm``,
+    including the right wrist cuff, and the Antium arms sent 8037 to
+    ``RightArm``, including the left shoulder. Both showed up as a piece
+    floating off the body.
+
+    Now each vertex keeps its own remaining bones, renormalised, which is
+    right for the common case where a wrist cuff is also weighted to the
+    forearm. Only a vertex with no surviving bone at all needs a guess, and
+    that one is name-matched with the left/right side enforced.
     """
     bone_names = {b.name for b in armature.data.bones}
     groups = mesh.vertex_groups
@@ -90,14 +128,64 @@ def rebind(mesh, armature, *, log: list[str]) -> None:
 
         if totals:
             fallback = groups[max(totals, key=lambda k: totals[k])]
-            moved = 0
+
+            # The dominant bone on each side. Anatomy words rarely overlap --
+            # nothing in "LeftWrist_CuffTwist" matches "LeftForeArm" -- so the
+            # side is the reliable signal, and sending a left-side orphan to
+            # the mesh's busiest left bone keeps it on the correct arm.
+            per_side: dict[str, tuple[int, float]] = {}
+            for index, weight in totals.items():
+                side = _side_of_bone(groups[index].name)
+                if side is None:
+                    continue
+                if side not in per_side or weight > per_side[side][1]:
+                    per_side[side] = (index, weight)
+
+            def target_for(stray_name: str):
+                side = _side_of_bone(stray_name)
+                # Prefer a same-side bone that shares a word, then the
+                # busiest bone on that side, then the mesh's dominant bone.
+                best, score = None, 0
+                wanted = _tokens(stray_name) - NOISE_TOKENS - {"left", "right"}
+                for index in totals:
+                    name = groups[index].name
+                    if side and _side_of_bone(name) != side:
+                        continue
+                    shared = len(wanted & (_tokens(name) - {"left", "right"}))
+                    if shared > score:
+                        best, score = groups[index], shared
+                if best is not None:
+                    return best
+                if side and side in per_side:
+                    return groups[per_side[side][0]]
+                return fallback
+
+            guesses = {index: target_for(name) for index, name in unknown.items()}
+
+            spread = orphan = 0
             for vertex in mesh.data.vertices:
                 stray = sum(e.weight for e in vertex.groups if e.group in unknown)
-                if stray > 0.0:
-                    fallback.add([vertex.index], stray, "ADD")
-                    moved += 1
-            if moved:
-                log.append(f"moved stray weight on {moved} vertices to {fallback.name}")
+                if stray <= 0.0:
+                    continue
+                kept = [(e.group, e.weight) for e in vertex.groups if e.group not in unknown]
+                total_kept = sum(w for _, w in kept)
+                if kept and total_kept > 0.0:
+                    for index, weight in kept:
+                        groups[index].add([vertex.index], stray * (weight / total_kept), "ADD")
+                    spread += 1
+                else:
+                    heaviest = max(
+                        (e for e in vertex.groups if e.group in unknown),
+                        key=lambda e: e.weight,
+                    )
+                    target = guesses.get(heaviest.group, fallback)
+                    target.add([vertex.index], stray, "ADD")
+                    orphan += 1
+            if spread or orphan:
+                log.append(
+                    f"redistributed stray weight: {spread} vertices onto their own bones, "
+                    f"{orphan} orphans name-matched"
+                )
         else:
             log.append("no valid vertex groups; mesh will export unweighted")
 

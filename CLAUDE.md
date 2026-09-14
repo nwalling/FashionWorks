@@ -487,6 +487,36 @@ and no slaver legs mesh exists in the archive. Only 27 of 2103 items pair a
 mesh and material from different family folders, and they are genuine reuse.
 Do not "fix" this.
 
+### Stray weight goes to the vertex's own bones, not one bone per mesh
+
+Pieces floated off the body: a bracelet on the Defiance arms, a left
+shoulderpad on the Antium set. `rebind` moved *all* stray weight to a single
+dominant bone chosen for the whole mesh, so mirrored geometry was flung across
+the body. The Defiance arms sent 1828 vertices to `LeftForeArm`, the right
+wrist cuff among them; the Antium arms sent 8037 to `RightArm`, including the
+left shoulder.
+
+Stray weight is now redistributed to each vertex's own surviving bones,
+renormalised, which is right whenever a cuff is also weighted to the forearm.
+Only a vertex with no surviving bone needs a guess, and that one prefers a
+same-side bone sharing a word, then the busiest bone on that side, then the
+mesh's dominant bone.
+
+**Side is the reliable signal, not the words.** Anatomy names barely overlap:
+nothing in `LeftWrist_CuffTwist` matches `LeftForeArm`. Tokenising has to split
+camelCase as well as separators, or `LeftWrist` stays welded together and
+matches nothing.
+
+### A record name is not unique across types
+
+165 items resolved a palette reference to the wrong record. The VGL Warden
+backpack ships an entity and a tint palette both named
+`vgl_combat_heavy_backpack_01_03_01`, and `Index.by_class` kept whichever
+loaded first, so `tint_for` got an entity, found no `root`, and returned a
+palette ref with no colours. `Index.resolve_ref` now takes `record_type`, and
+`tint_for` asks for `TintPaletteTree`. Palettes resolving went from 1237 items
+to 1402, and backpacks without one from 85 to 52.
+
 ### Colour variants differ by material, not palette (2026-09-14)
 
 Three symptoms, two causes. Every Odyssey II Undersuit showed the same grey

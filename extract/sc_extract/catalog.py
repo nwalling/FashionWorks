@@ -401,7 +401,7 @@ def tint_for(
         ref = override
     if not ref:
         return None
-    record = index.resolve_ref(ref)
+    record = index.resolve_ref(ref, record_type="TintPaletteTree")
     if record is None:
         return {"palette_ref": Index.ref_name(ref)}
 

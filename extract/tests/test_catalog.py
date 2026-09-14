@@ -222,7 +222,7 @@ class _EmptyIndex:
     """Enough of Index for tint_for: a ref that resolves to nothing."""
 
     @staticmethod
-    def resolve_ref(_ref):
+    def resolve_ref(_ref, *, record_type=None):
         return None
 
     @staticmethod
@@ -230,3 +230,37 @@ class _EmptyIndex:
         from sc_extract.dcb import Index
 
         return Index.ref_name(ref)
+
+
+def test_a_reference_resolves_to_the_right_record_type() -> None:
+    """A record name is not unique across types.
+
+    The VGL Warden backpack ships an entity and a tint palette both named
+    vgl_combat_heavy_backpack_01_03_01. Whichever loaded first used to win the
+    name, so 165 items resolved their palette reference to an entity record and
+    came out with no colours.
+    """
+    from pathlib import Path
+
+    from sc_extract.dcb import Index, Record
+
+    entity = Record(
+        id="e1",
+        class_name="shared_name",
+        path=Path("entity.json"),
+        data={"_RecordName_": "EntityClassDefinition.shared_name"},
+    )
+    palette = Record(
+        id="p1",
+        class_name="shared_name",
+        path=Path("palette.json"),
+        data={"_RecordName_": "TintPaletteTree.shared_name"},
+    )
+    index = Index()
+    index.add(entity)
+    index.add(palette)
+
+    assert index.resolve_ref("file://./shared_name.json") is entity
+    assert index.resolve_ref("file://./shared_name.json", record_type="TintPaletteTree") is palette
+    assert entity.record_type == "EntityClassDefinition"
+    assert palette.record_type == "TintPaletteTree"
