@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import type { Item, Manifest, Slot } from './manifest';
 import { itemsBySlot, selectableItems } from './manifest';
 import type { Loadout, SkeletonName } from './loadout';
+import type { PoseLibrary } from './three/poses';
 import { emptyLoadout, loadoutFromLocation } from './loadout';
 
 const HISTORY_LIMIT = 50;
@@ -17,6 +18,7 @@ export interface Filters {
 
 interface State {
   manifest: Manifest | null;
+  poses: PoseLibrary;
   status: 'idle' | 'loading' | 'ready' | 'error';
   error: string | null;
 
@@ -27,6 +29,7 @@ interface State {
   filters: Filters;
 
   setManifest: (manifest: Manifest) => void;
+  setPoses: (poses: PoseLibrary) => void;
   setError: (message: string) => void;
   setLoading: () => void;
 
@@ -63,6 +66,7 @@ function initialLoadout(): Loadout {
 
 export const useStore = create<State>((set, get) => ({
   manifest: null,
+  poses: {},
   status: 'idle',
   error: null,
 
@@ -73,6 +77,7 @@ export const useStore = create<State>((set, get) => ({
   filters: { search: '', weightClass: null, manufacturer: null, set: null },
 
   setManifest: (manifest) => set({ manifest, status: 'ready', error: null }),
+  setPoses: (poses) => set({ poses }),
   setError: (message) => set({ status: 'error', error: message }),
   setLoading: () => set({ status: 'loading', error: null }),
 

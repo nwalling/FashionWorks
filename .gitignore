@@ -22,6 +22,8 @@ node_modules/
 # The script itself is tracked; nothing it produces is.
 /tools/src/
 /tools/bin/
+# Rust build output for the anim-dump shim; the source and lockfile are tracked.
+/tools/anim-dump/target/
 
 # OS
 .DS_Store

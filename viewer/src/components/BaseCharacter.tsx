@@ -4,6 +4,7 @@ import * as THREE from 'three';
 
 import { assetUrl } from '../manifest';
 import { findSkeleton } from '../three/binding';
+import { applyPose, type Pose } from '../three/poses';
 
 interface SkeletonContextValue {
   skeleton: THREE.Skeleton | null;
@@ -27,9 +28,12 @@ export function useBaseSkeleton(): SkeletonContextValue {
 
 export function BaseCharacter({
   glb,
+  pose = null,
   children,
 }: {
   glb: string;
+  /** Pose for the shared skeleton, or null for the rest T-pose. */
+  pose?: Pose | null;
   children?: React.ReactNode;
 }) {
   const { scene } = useGLTF(assetUrl(glb));
@@ -93,6 +97,13 @@ export function BaseCharacter({
     }
     setValue({ skeleton, root, bodyBox, setBodyCover });
   }, [root, bodyBox, setBodyCover]);
+
+  // Armor binds to these same bones, so posing the skeleton moves every
+  // equipped piece with it.
+  useEffect(() => {
+    if (!value.skeleton) return;
+    applyPose(value.skeleton, pose);
+  }, [value.skeleton, pose]);
 
 
   return (

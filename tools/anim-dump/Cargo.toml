@@ -1,0 +1,11 @@
+[package]
+name = "anim-dump"
+version = "0.1.0"
+edition = "2021"
+
+# Depends on the StarBreaker clone that tools/build.sh puts in tools/src.
+# StarBreaker parses .chr skeletons and .dba/.caf animation but exposes
+# neither on its CLI, so this is the smallest shim that gets both out.
+[dependencies]
+starbreaker-3d = { path = "../src/StarBreaker/crates/starbreaker-3d" }
+serde_json = "1"

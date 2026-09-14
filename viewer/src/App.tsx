@@ -5,6 +5,7 @@ import { ManifestVersionError, loadManifest, selectableItems } from './manifest'
 import { useStore } from './store';
 import { LoadoutBar } from './components/LoadoutBar';
 import { type BackdropName } from './components/Backdrop';
+import { REST_POSE, loadPoses } from './three/poses';
 import { Scene, type HdrPreset } from './components/Scene';
 import { SlotPanel } from './components/SlotPanel';
 import { TintPanel } from './components/TintPanel';
@@ -18,16 +19,25 @@ export function App() {
   const setManifest = useStore((state) => state.setManifest);
   const setError = useStore((state) => state.setError);
   const setLoading = useStore((state) => state.setLoading);
+  const setPoses = useStore((state) => state.setPoses);
 
   const [capture, setCapture] = useState<Capture | null>(null);
   const [preset, setPreset] = useState<HdrPreset>('warehouse');
   const [backdrop, setBackdrop] = useState<BackdropName>('hangar');
+  const [pose, setPose] = useState<string>('idle');
 
   const onReady = useCallback((state: Capture) => setCapture(state), []);
 
   useEffect(() => {
     const controller = new AbortController();
     setLoading();
+    loadPoses(controller.signal).then((library) => {
+      // Effects run twice in development; the aborted pass resolves empty and
+      // must not clobber the real library.
+      if (controller.signal.aborted) return;
+      setPoses(library);
+      if (!library.idle) setPose(REST_POSE);
+    });
     loadManifest(controller.signal)
       .then(setManifest)
       .catch((cause: unknown) => {
@@ -39,7 +49,7 @@ export function App() {
         setError(message);
       });
     return () => controller.abort();
-  }, [setManifest, setError, setLoading]);
+  }, [setManifest, setError, setLoading, setPoses]);
 
   if (status === 'error') {
     return (
@@ -71,7 +81,7 @@ export function App() {
 
       <main>
         <div className="stage">
-          <Scene preset={preset} backdrop={backdrop} onReady={onReady} />
+          <Scene preset={preset} backdrop={backdrop} pose={pose} onReady={onReady} />
         </div>
         <aside>
           <SlotPanel />
@@ -86,6 +96,8 @@ export function App() {
           onPreset={setPreset}
           backdrop={backdrop}
           onBackdrop={setBackdrop}
+          pose={pose}
+          onPose={setPose}
         />
       </footer>
     </div>

@@ -397,50 +397,56 @@ What separates them is whether the piece reaches the feet: measured on real
 items, full suits start at y=0.00 while a torso wrap starts at y=0.65. The
 viewer hides the base only for a piece that reaches both the feet and the chest.
 
-### Poses: why there are none
+### Poses
 
-The viewer shows the T-pose only. An earlier attempt added hand-authored idle
-and crouch poses; those were removed, because inventing poses is worse than
-showing none.
+`scx poses` retargets standing and crouching poses out of the game's own
+animation data. Nothing is hand-authored.
 
-The real ones **are** in the archive, and this is how far the investigation got,
-so nobody repeats it:
+**Where the data is.** The skeleton's `.chrparams` names the animation
+databases; for a bare-handed human they are under
+`Animations/Characters/Human/male_v7/weapons/no_weapon/locomotion/`:
+`stand.dba` with 189 clips, `crouch.dba` with 43, plus `hunch` and `prone`.
+Useful frames come from `nw_stand_idle_turn360_planted` and
+`nw_neutral_crouch_idle`. Clips suffixed `_add` are additive deltas layered at
+runtime and are no use alone.
 
-* `bhm_skeleton_v7.chrparams` names the animation databases. For a bare-handed
-  human they are under
-  `Animations/Characters/Human/male_v7/weapons/no_weapon/locomotion/`:
-  `stand.dba` (9.2 MB), `crouch.dba` (2.9 MB), plus `hunch` and `prone`.
-* `stand.dba` holds 189 clips and `crouch.dba` 43. The useful ones are
-  `nw_neutral_crouch_idle.caf` and, for standing, a clip whose final frame
-  settles into idle such as `nw_stand_idle_turn360_planted`. Clips suffixed
-  `_add` are additive deltas layered at runtime and are no use alone.
-* StarBreaker parses both formats (`crates/starbreaker-3d/src/animation/`,
-  `parse_dba`, `clip_final_pose`, `bone_name_hash`) but **does not expose
-  animation on its CLI**. A ~150-line shim over the crate dumped a clip's
-  final-frame local pose: 145 bones, every name resolved against our skeleton.
+**Getting it out.** StarBreaker parses `.chr` skeletons and `.dba`/`.caf`
+animation but exposes neither on its CLI, so `tools/anim-dump` is a small shim
+over its `starbreaker-3d` crate with two commands: `bind` dumps a skeleton's
+bind pose, `pose` dumps a clip's final frame. 145 animated bones, every name
+resolved by CRC32 against our skeleton.
 
-**What blocks it.** Those rotations are absolute local rotations in the
-CryEngine rig's own bone frames. Our skeleton reached glTF through
-cgf-converter, Collada, Blender and the glTF exporter, and its local bone
-frames no longer match. Applying the rotations directly lays the character on
-its back. Seven axis conventions were tried, including the documented
-Blender-Z-up-wxyz to glTF-Y-up mapping and every plausible permutation; none
-produce a standing figure, because this is not an axis problem.
+**Why it is a retarget.** Three approaches, two of which fail:
 
-Making it work needs proper retargeting: read the animation rig's bind pose out
-of the `.chr` in the same space as the clips, express each clip frame as a delta
-from that bind pose, and rebase those deltas onto our bone frames. StarBreaker
-has the pieces for the first half (`find_block_for_skeleton`,
-`apply_pose_to_skeleton`). The whitepaper under
-`tools/src/StarBreaker/docs/star-citizen-animation-formats-whitepaper.md` is the
-reference, and it explicitly excludes the Mannequin layer that composes poses at
-runtime.
+1. *Copy the local rotations.* Fails. A clip stores absolute local rotations in
+   the animation rig's bone frames; ours no longer match after Collada, Blender
+   and the glTF exporter. The character ends up on its back. No axis permutation
+   fixes this, and seven were tried.
+2. *Copy the world orientations*, obtained by running forward kinematics over
+   the `.chr` hierarchy. Closer, and the spine and legs land correctly, but the
+   arms point at the ceiling: absolute orientation only transfers where the two
+   rigs' bone axes agree, and for arms they do not.
+3. *Transfer the delta from each rig's own bind pose*, `world_clip *
+   inverse(world_bind)`, applied to our rest orientation. This works, because
+   "rotate this bone by however far the animation moves it" needs no agreement
+   about axes at all. Bone lengths stay ours, so the pose adapts to our
+   proportions.
 
-One trap worth recording: when measuring whether a pose differs from the rest
-pose, capture the rest from a genuinely unposed skeleton. The viewer applied a
-pose on load, so the first comparison captured the posed state as "rest" and
-reported zero difference everywhere, which looked like a parsing failure and was
-not.
+Two details the data dictates. The clip's world space has up along -Y and
+forward along +Z, reaching glTF through a 180 degree rotation about X; that was
+read off a standing clip putting the head 1.70 above the floor and a crouch
+putting the knee forward. And the armature **root is skipped**: it carries the
+clip's own world placement, which otherwise drags the whole body a metre
+sideways. Feet are then seated on the ground, since the clip is authored against
+the game's floor.
+
+Measured result: idle puts the hands at ±0.31 either side at hip height, crouch
+drops the head from 1.70 to 0.99 with the knee forward and the foot planted.
+
+One measurement trap: when checking whether a pose differs from rest, capture
+the rest from a genuinely unposed skeleton. The viewer applies a pose on load,
+so a first attempt captured the posed state as "rest" and reported zero
+difference everywhere, which looked like a parsing failure and was not.
 
 ### Backdrops
 

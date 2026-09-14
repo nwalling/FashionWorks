@@ -13,6 +13,7 @@ Stages, in pipeline order::
 
 from __future__ import annotations
 
+import json
 import logging
 import sys
 from pathlib import Path
@@ -425,6 +426,25 @@ def refresh(ctx: click.Context) -> None:
         _fail(f"no manifest at {settings.manifest_path()}; run `scx catalog` first")
     ready = refresh_assets(settings)
     click.secho(f"{ready} item(s) renderable", fg="green")
+
+
+@main.command(name="poses")
+@click.option("--skeleton", default=None)
+@click.pass_context
+def poses_cmd(ctx: click.Context, skeleton: str | None) -> None:
+    """Retarget standing and crouching poses from the game's animation data."""
+    from . import poses as poses_mod
+
+    settings = _settings(ctx)
+    try:
+        target = poses_mod.build(settings, skeleton=skeleton)
+    except Exception as exc:  # noqa: BLE001 - the message is the useful part
+        _fail(str(exc))
+        return
+    data = json.loads(target.read_text())
+    click.secho(f"wrote {target}", fg="green")
+    for name, entry in data.items():
+        click.echo(f"  {name:<8} {len(entry['bones'])} bones  ({entry['clip']})")
 
 
 @main.command(name="sets")
