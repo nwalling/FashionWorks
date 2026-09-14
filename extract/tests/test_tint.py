@@ -387,3 +387,45 @@ def test_no_wear_mask_leaves_the_base_layer_alone(tmp_path) -> None:
     ) / 255.0
     want = linear_to_srgb(np.array([0.8, 0.1, 0.1], dtype=np.float32))
     assert np.allclose(got, want, atol=0.01)
+
+
+def test_metalness_comes_from_reflectance_not_the_directory(tmp_path, monkeypatch) -> None:
+    """A layer is metal when its own Specular says so.
+
+    The first rule keyed on the layer living under Materials/Layers/metal. That
+    misses the whole `metallic/` category and wrongly promotes the 24% of
+    `/metal/` entries whose reflectance is dielectric.
+    """
+    from sc_extract import layers as layer_lib
+    from sc_extract.tint import METAL_F0_THRESHOLD
+
+    # A dielectric sitting in the metal directory must not render as metal.
+    fake = layer_lib.LayerMaterial(
+        path="materials/layers/metal/painted_thing.mtl",
+        diff=None,
+        ddna=None,
+        specular=(0.04, 0.04, 0.04),
+        shininess=200.0,
+    )
+    monkeypatch.setattr(layer_lib, "load", lambda *a, **k: fake)
+
+    sub = SubMaterial(
+        name="m",
+        shader="LayerBlend_V2",
+        layers=[
+            MatLayer(
+                name="BaseLayer1",
+                path="materials/layers/metal/painted_thing.mtl",
+                tint_color=(0.5, 0.5, 0.5),
+                gloss_mult=1.0,
+                uv_tiling=1.0,
+            )
+        ],
+    )
+    assert sub.layers[0].metallic, "the path rule would call this metal"
+
+    written = compose_layered(
+        sub, [], tmp_path / "out", "diel", resolved={}, raw_root=tmp_path / "raw", size=2
+    )
+    _ao, _rough, metal = Image.open(written["orm"]).convert("RGB").load()[0, 0]
+    assert metal == 0, f"reflectance {0.04} is below {METAL_F0_THRESHOLD}, so not metal"

@@ -129,14 +129,62 @@ def _wire_occlusion(tree, socket) -> None:
     tree.links.new(socket, node.inputs["Occlusion"])
 
 
+def _slot_for(obj, name: str) -> int | None:
+    """Index of the imported material slot a submaterial belongs to.
+
+    Collada names each slot ``<mtl stem>_mtl_<submaterial>``, so the
+    submaterial name is a suffix. Matching on it survives any difference
+    between the order the .mtl lists submaterials in and the order the
+    exporter wrote the triangle groups.
+    """
+    wanted = (name or "").strip().lower()
+    if not wanted:
+        return None
+    slots = [(m.name or "").strip().lower() for m in obj.data.materials]
+    for index, slot in enumerate(slots):
+        if slot.endswith("_mtl_" + wanted) or slot == wanted:
+            return index
+    for index, slot in enumerate(slots):
+        if wanted and wanted in slot:
+            return index
+    return None
+
+
 def apply_materials(obj, descriptors: list[dict]) -> list[dict]:
-    """Replace an object's material slots. Submaterial order is slot order."""
+    """Replace an object's material slots, keeping each face on its own slot.
+
+    This used to call ``obj.data.materials.clear()`` and append. That silently
+    reset every polygon's ``material_index`` to 0 -- Blender clears the
+    assignment along with the slots -- so a mesh imported with ten correctly
+    assigned material groups exported as **one** material and the whole piece
+    rendered with whatever the first submaterial happened to be. On the Artimex
+    arms that was ``fingerarmor_m``, whose base layer is polished anodized
+    metal, which is why armour came out chrome instead of matte black. 195 of
+    200 sampled items were affected.
+
+    Slots are replaced in place instead, matched by name so a mismatch between
+    .mtl order and Collada order cannot mis-assign them.
+    """
     if not descriptors:
         return []
-    obj.data.materials.clear()
+
+    existing = len(obj.data.materials)
+    taken: set[int] = set()
     meta: list[dict] = []
-    for descriptor in descriptors:
-        obj.data.materials.append(build_material(descriptor))
+
+    for position, descriptor in enumerate(descriptors):
+        material = build_material(descriptor)
+        index = _slot_for(obj, descriptor.get("name", ""))
+        if index is None or index in taken:
+            # No name match: fall back to slot order, which is the common case
+            # for a mesh whose slots the importer did not name after the .mtl.
+            index = position if position < existing else None
+        if index is not None and index < len(obj.data.materials):
+            obj.data.materials[index] = material
+            taken.add(index)
+        else:
+            obj.data.materials.append(material)
+            taken.add(len(obj.data.materials) - 1)
         meta.append(
             {
                 "name": descriptor.get("name"),

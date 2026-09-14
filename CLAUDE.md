@@ -417,6 +417,38 @@ maps is therefore a no-op, not a cause of lost decals.
 **Meshes carry several material slots** (shell, interior, metal, bones, props),
 matching the `.mtl` submaterial order.
 
+### Every piece rendered with one submaterial (2026-09-14)
+
+Armour came out chrome instead of matte black because **the whole mesh was
+being painted with its first submaterial's texture**. On the Artimex arms that
+is `fingerarmor_m`, whose base layer is polished anodized metal at 89% coverage.
+195 of 200 sampled items exported exactly **one** material no matter how many
+their `.mtl` declared.
+
+**`obj.data.materials.clear()` resets every polygon's `material_index` to 0.**
+Blender clears the face assignment along with the slots. `apply_materials`
+cleared and appended, so a mesh the Collada importer had loaded with ten
+correctly assigned material groups came out with all 39546 polygons pointing at
+slot 0. Slots are now replaced in place, matched by name (Collada names them
+`<mtl stem>_mtl_<submaterial>`) so a mismatch between .mtl order and Collada
+order cannot mis-assign them.
+
+Worth knowing that nothing upstream was wrong: the `.dae` carries all ten
+`<triangles>` groups, and Blender imports ten slots with indices 0-9 spread
+correctly across the polygons. The damage happened in one line.
+
+**Metalness comes from the layer's own reflectance, not its directory.**
+CryEngine's Layer shader says it plainly: a metal carries `Specular` near its
+F0 with `Diffuse` at black, a dielectric sits near 0.04. Across the 495-entry
+layer library the populations separate cleanly, the `dielectric` category
+topping out at 0.156, so `tint.METAL_F0_THRESHOLD` splits at 0.2. The old
+directory rule missed the whole `metallic/` category (34 materials, 85% metal
+by reflectance, and `/metallic/` does not contain `/metal/`) and promoted the
+24% of `/metal/` entries whose own reflectance is dielectric. Measured impact
+is small -- blend-weighted metalness over 31 armour submaterials moves from
+0.25 to 0.23, with only 2 changing materially -- so this was not the cause of
+the chrome look, just a correctness fix found while chasing it.
+
 ### Colour variants differ by material, not palette (2026-09-14)
 
 Three symptoms, two causes. Every Odyssey II Undersuit showed the same grey

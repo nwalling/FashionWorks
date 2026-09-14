@@ -277,6 +277,19 @@ MIN_TILE_PX = 4  # below this a tiled detail texture aliases into mush
 WEAR_THRESHOLD = 0.5
 WEAR_FALLOFF = 0.5
 
+# Reflectance above which a detail layer is treated as bare metal. CryEngine's
+# Layer shader states this directly: a metal carries Specular near its F0 with
+# Diffuse at black, a dielectric sits near 0.04. Measured across the 495-entry
+# layer library the two populations separate cleanly -- the `dielectric`
+# category tops out at 0.156 and the `metal` and `metallic` categories run to
+# 1.0 -- so 0.2 splits them with room to spare.
+#
+# The directory the layer lives in is the wrong signal and was the first rule
+# here: it misses the whole `metallic/` category (34 materials, 85% metal by
+# reflectance) because that path does not contain "/metal/", and it calls 24%
+# of `/metal/` metal when their own reflectance says otherwise.
+METAL_F0_THRESHOLD = 0.2
+
 
 def srgb_to_linear(a):
     return np.where(a <= 0.04045, a / 12.92, ((a + 0.055) / 1.055) ** 2.4)
@@ -362,7 +375,7 @@ def layered_key(sub, palette: list[Layer]) -> str:
             f"{entry.name}|{entry.path}|{entry.tint_color}|{entry.palette_tint}"
             f"|{round(entry.gloss_mult, 4)}|{round(entry.uv_tiling, 3)}"
         )
-    parts.append(f"wear:{WEAR_THRESHOLD}:{WEAR_FALLOFF}")
+    parts.append(f"wear:{WEAR_THRESHOLD}:{WEAR_FALLOFF}:metal:{METAL_F0_THRESHOLD}")
     return hashlib.sha1(";".join(parts).encode()).hexdigest()[:10]
 
 
@@ -452,8 +465,13 @@ def compose_layered(
             tint = np.array(entry.tint_color, dtype=np.float32)
             gloss_scale = 1.0
 
-        metallic = 1.0 if (detail and detail.path and entry.metallic) else 0.0
-        if metallic:
+        if detail is not None:
+            spec = np.array(detail.specular, dtype=np.float32)
+            reflectance = float(0.2126 * spec[0] + 0.7152 * spec[1] + 0.0722 * spec[2])
+            metallic = 1.0 if reflectance > METAL_F0_THRESHOLD else 0.0
+        else:
+            metallic = 1.0 if entry.metallic else 0.0
+        if metallic and detail is not None:
             # Metal has no diffuse; its base colour is its reflectance.
             tint = tint * np.array(detail.specular, dtype=np.float32)
 
