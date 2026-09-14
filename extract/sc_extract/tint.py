@@ -292,6 +292,40 @@ WEAR_FALLOFF = 0.5
 # of `/metal/` metal when their own reflectance says otherwise.
 METAL_F0_THRESHOLD = 0.2
 
+# Which base layer each blend-mask colour selects.
+#
+# The mask is a discrete selector, not soft weights: on real armour four
+# saturated colours cover 96% of it. The key is a 3-bit bucket of the
+# thresholded channels (red = 1, green = 2, blue = 4).
+#
+# Solved against in-game captures, not guessed. Measuring gold coverage as a
+# percentage of lit body pixels, in game and in the viewer from the same angle:
+#
+#   piece   in game   black->L1   magenta->L1
+#   arms    12-18%      3.4%        15.2%
+#   core    24.5%      24.5%        23.4%
+#   legs     5.3%      12.0%         6.0%
+#
+# Swapping black and magenta leaves the torso where it was and fixes both the
+# arms and the legs; summed error over the three drops from 18.3 to 2.0.
+#
+# Two other readings were tried against the same references and rejected:
+# putting blue on BaseLayer1 fits the arms (29.2%) but collapses the torso to
+# 4.8% and inflates the legs to 46.4%; treating PaletteTint as a rank within
+# the submaterial rather than an absolute entry is refuted outright by the
+# Chiron AA Support legs, which the game renders with no primary colour at all.
+BLEND_BUCKETS = {
+    0b101: 0,  # magenta -> BaseLayer1
+    0b100: 1,  # blue    -> BaseLayer2
+    0b110: 2,  # cyan    -> BaseLayer3
+    0b000: 3,  # black   -> BaseLayer4
+    0b010: 2,  # green   -> BaseLayer3
+    0b001: 3,  # red     -> BaseLayer4
+    0b011: 3,  # yellow  -> BaseLayer4
+    0b111: 3,  # white   -> BaseLayer4
+}
+BLEND_BUCKET_DEFAULT = 0
+
 
 def srgb_to_linear(a):
     return np.where(a <= 0.04045, a / 12.92, ((a + 0.055) / 1.055) ** 2.4)
@@ -377,7 +411,10 @@ def layered_key(sub, palette: list[Layer]) -> str:
             f"{entry.name}|{entry.path}|{entry.tint_color}|{entry.palette_tint}"
             f"|{round(entry.gloss_mult, 4)}|{round(entry.uv_tiling, 3)}"
         )
-    parts.append(f"wear:{WEAR_THRESHOLD}:{WEAR_FALLOFF}:metal:{METAL_F0_THRESHOLD}:diffuse")
+    parts.append(
+        f"wear:{WEAR_THRESHOLD}:{WEAR_FALLOFF}:metal:{METAL_F0_THRESHOLD}"
+        f":diffuse:buckets:{sorted(BLEND_BUCKETS.items())}"
+    )
     return hashlib.sha1(";".join(parts).encode()).hexdigest()[:10]
 
 
@@ -429,6 +466,20 @@ def compose_layered(
     mask = None
     if "blend" in resolved:
         mask = _resample(resolved["blend"], size, "RGB")
+
+    # Per-texel base layer, from the mask's 3-bit bucket.
+    selector = None
+    if mask is not None:
+        bucket = (
+            (mask[:, :, 0] > 0.5).astype(np.uint8)
+            | ((mask[:, :, 1] > 0.5).astype(np.uint8) << 1)
+            | ((mask[:, :, 2] > 0.5).astype(np.uint8) << 2)
+        )
+        selector = np.full(bucket.shape, BLEND_BUCKET_DEFAULT, dtype=np.int8)
+        for key, layer in BLEND_BUCKETS.items():
+            selector[bucket == key] = layer
+        # Never point at a layer this submaterial does not declare.
+        selector = np.minimum(selector, len(base_layers) - 1)
 
     rgb = np.zeros((size, size, 3), dtype=np.float32)
     rough = np.zeros((size, size, 1), dtype=np.float32)
@@ -520,14 +571,14 @@ def compose_layered(
 
         if not have_base:
             rgb, rough, metal, have_base = colour, layer_rough, layer_metal, True
+            if selector is None:
+                continue
+        if selector is None:
             continue
-        if mask is None:
-            continue
-        channel = 3 - index  # layer2 -> B, layer3 -> G, layer4 -> R
-        weight = mask[:, :, channel : channel + 1]
-        rgb = rgb + (colour - rgb) * weight
-        rough = rough + (layer_rough - rough) * weight
-        metal = metal + (layer_metal - metal) * weight
+        weight = (selector == index)[:, :, None].astype(np.float32)
+        rgb = rgb * (1.0 - weight) + colour * weight
+        rough = rough * (1.0 - weight) + layer_rough * weight
+        metal = metal * (1.0 - weight) + layer_metal * weight
 
     # Ambient occlusion: the _hal control map's green channel is the only one
     # carrying data (red and blue sit at the neutral 126). Using it as AO adds

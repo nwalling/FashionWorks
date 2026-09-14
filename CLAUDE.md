@@ -544,6 +544,37 @@ More decisive: `core_plate_m`, which matches the reference, and
 same `StringGenMask`. Nothing there distinguishes them. The answer is not in
 the shader block.
 
+### The blend mask table, solved against in-game captures
+
+The mask is a discrete selector: four saturated colours cover 96% of a real
+armour mask. `tint.BLEND_BUCKETS` maps a 3-bit bucket of the thresholded
+channels to a base layer, and the assignment was **fitted to measurements, not
+reasoned out**.
+
+Gold coverage as a percentage of lit body pixels, in game against the viewer
+from the same angle:
+
+| piece | in game | black to L1 | magenta to L1 |
+| ----- | ------- | ----------- | ------------- |
+| arms  | 12-18%  | 3.4%        | **15.2%** |
+| core  | 24.5%   | 24.5%       | **23.4%** |
+| legs  | 5.3%    | 12.0%       | **6.0%**  |
+
+Swapping black and magenta leaves the torso where it was and fixes both the
+arms and the legs. Summed error over the three drops from 18.3 to 2.0.
+
+Two other readings were tried against the same references and rejected:
+
+* **blue on BaseLayer1** fits the arms at 29.2% but collapses the torso to
+  4.8% against 24.5% and inflates the legs to 46.4% against 5.3%.
+* **PaletteTint as a rank** within the submaterial rather than an absolute
+  entry is refuted outright by Chiron AA Support, whose legs the game renders
+  with no primary colour at all where that reading predicts 49.5%.
+
+The lesson is that one piece cannot fit this table. The slaver torso alone
+suggested black was the base layer and that held up for two pieces while
+starving a third. Three references with different layer stacks were needed.
+
 ### PaletteTint is an absolute index, not a rank -- tested and settled
 
 The suspicion was that `PaletteTint` might be a rank among the indices a

@@ -132,13 +132,15 @@ def test_neutral_layers_are_not_white() -> None:
 # ---------------------------------------------------------------------------
 
 # The four colours that cover 96% of a real armour blend mask, and the base
-# layer each one must resolve to. Measured on the slaver torso mask: black
-# 34.8%, blue 32.9%, cyan 25.6%, magenta 2.7%.
+# layer each must resolve to, solved against in-game captures. Gold coverage
+# in game against the viewer, same angle: arms 12-18% against 15.2%, core
+# 24.5% against 23.4%, legs 5.3% against 6.0%. Putting black on BaseLayer1
+# instead starves the arms to 3.4% and doubles the legs to 12%.
 MASK_COLOURS = [
-    ((0, 0, 0), 0),
-    ((0, 0, 255), 1),
-    ((0, 255, 255), 2),
-    ((255, 0, 255), 3),
+    ((255, 0, 255), 0),  # magenta -> BaseLayer1
+    ((0, 0, 255), 1),    # blue    -> BaseLayer2
+    ((0, 255, 255), 2),  # cyan    -> BaseLayer3
+    ((0, 0, 0), 3),      # black   -> BaseLayer4
 ]
 
 # Four separable tints, one per base layer, so the composite is unambiguous.
@@ -171,16 +173,16 @@ def _mask(path) -> None:
     image.save(path)
 
 
-def test_blend_mask_channels_map_blue_green_red_to_layers_two_three_four(
+def test_blend_mask_buckets_map_to_the_solved_base_layers(
     tmp_path,
 ) -> None:
-    """The mask is a hard-edged layer selector, not a soft RGB gradient.
+    """The mask is a hard-edged selector, and this table is solved, not guessed.
 
-    Blending blue, then green, then red resolves the four dominant mask
-    colours to the four base layers exactly. The intuitive red-green-blue
-    order collapses cyan and magenta onto layer 4, which on the slaver torso
-    handed 60% of the surface to a rubber grip pattern and left the
-    palette-tinted layer on a few scraps.
+    Four saturated colours cover 96% of a real armour mask, so it indexes a
+    layer rather than blending weights. Which colour picks which layer was
+    fitted to in-game gold coverage: 32.2% on the Sunchaser forearm plate and
+    24.6% over the whole arm. Putting black on BaseLayer1, which the slaver
+    torso alone had suggested, predicts 6.2% for the arms.
     """
     blend = tmp_path / "x_blend.png"
     _mask(blend)

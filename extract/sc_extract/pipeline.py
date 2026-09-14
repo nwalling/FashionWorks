@@ -36,7 +36,7 @@ NORMALIZE_SCRIPT = BLENDER_DIR / "normalize_armor.py"
 # leaves inputs untouched. The hash watches file mtimes and record contents, so
 # a change to how a palette is composited is otherwise invisible and stale GLBs
 # are silently kept.
-MATERIAL_PIPELINE_VERSION = 8
+MATERIAL_PIPELINE_VERSION = 11
 
 
 @dataclass
