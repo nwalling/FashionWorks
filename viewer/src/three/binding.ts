@@ -109,6 +109,7 @@ export function bindSkinned(
     mesh.quaternion.identity();
     mesh.scale.set(1, 1, 1);
     mesh.frustumCulled = false;
+    rememberOrigin(mesh);
     target.add(mesh);
 
     attached.push(mesh);
@@ -119,6 +120,34 @@ export function bindSkinned(
 }
 
 /** Attach a rigid piece to a named socket bone. */
+
+/**
+ * Where a mesh lived before it was bound, so a rebind can find it again.
+ *
+ * Binding reparents meshes out of the cloned GLTF scene and under the base
+ * character. `detach` used to only remove them, which left the clone empty, so
+ * the next bind traversed it, found no meshes and attached nothing. That is
+ * silent: the piece simply vanishes. It bit socket pieces in particular,
+ * because their bind effect re-runs whenever the torso changes the mount
+ * offset -- equipping a torso made the backpack disappear for good.
+ */
+type Origin = { parent: THREE.Object3D | null; matrix: THREE.Matrix4 };
+
+function rememberOrigin(mesh: THREE.Object3D): void {
+  if (mesh.userData.__bindOrigin) return;
+  const origin: Origin = { parent: mesh.parent, matrix: mesh.matrix.clone() };
+  mesh.userData.__bindOrigin = origin;
+}
+
+function restoreOrigin(mesh: THREE.Object3D): void {
+  const origin = mesh.userData.__bindOrigin as Origin | undefined;
+  mesh.parent?.remove(mesh);
+  if (!origin) return;
+  origin.matrix.decompose(mesh.position, mesh.quaternion, mesh.scale);
+  origin.parent?.add(mesh);
+  delete mesh.userData.__bindOrigin;
+}
+
 export function bindSocket(
   source: THREE.Object3D,
   skeleton: THREE.Skeleton,
@@ -155,6 +184,7 @@ export function bindSocket(
   }
 
   for (const mesh of candidates) {
+    rememberOrigin(mesh);
     mesh.position.set(0, 0, 0);
     mesh.quaternion.identity();
     mesh.scale.set(1, 1, 1);
@@ -172,7 +202,7 @@ export function bindSocket(
  */
 export function detach(meshes: THREE.Object3D[], cloned: Set<THREE.BufferGeometry>): void {
   for (const mesh of meshes) {
-    mesh.parent?.remove(mesh);
+    restoreOrigin(mesh);
     const geometry = (mesh as THREE.Mesh).geometry;
     if (geometry && cloned.has(geometry)) {
       geometry.dispose();

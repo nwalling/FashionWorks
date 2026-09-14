@@ -540,6 +540,37 @@ among themselves, the helmet and arms carrying a different one from the core
 and legs. Order is now family, then edition (the words after the slot, such as
 "(Modified)" or "Tactical"), then palette, then canonical.
 
+### Binding must put meshes back where it found them
+
+Equipping a torso made the backpack disappear, permanently. Binding
+reparents meshes out of the cloned GLTF scene and under the base character,
+and `detach` only removed them, leaving the clone empty. The next bind
+traversed that clone, found no meshes and attached nothing -- silently. It hit
+socket pieces because their bind effect re-runs whenever the torso changes the
+mount offset. `binding.rememberOrigin`/`restoreOrigin` record each mesh's
+parent and local matrix at bind time and put it back on detach.
+
+The same fault was latent for skinned pieces; their effect just did not re-run,
+because only `offsetKey` was changing.
+
+### Open: the backpack shell takes the wrong palette entry
+
+With the palette now resolving, the CSP-68H Red Alert renders red on its trim
+and grey on its shell, where the game shows the shell red. `backpack_01_m`
+puts `PaletteTint=2` on the layer covering roughly half the surface and
+`PaletteTint=1` on the next, so the shell takes entryB (`#3d3d3d` grey) rather
+than entryA (`#bf2628` red).
+
+This reopens the index-to-entry question in a way the earlier test did not
+settle. That test showed entryA is the *primary* colour, in 81% of named
+colourways, and that stands. What it did not show is that `PaletteTint 1` is
+the index pointing at it. This backpack argues the dominant layer should be
+entryA, which would make the mapping off by one. Catalog-wide coverage does
+not adjudicate: indices 1, 2 and 3 cover 31%, 30% and 38% of palette-tinted
+area, which is too even to call. Do not "fix" this by guessing; it needs a
+piece whose in-game appearance is unambiguous and whose blend mask is
+understood.
+
 ### Attachment points and sockets
 
 The base skeleton has **no attachment bones**. Names like
