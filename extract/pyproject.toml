@@ -8,6 +8,7 @@ dependencies = [
     "rich>=13.7",
     # Compositing the tint palette into albedo/ORM images (sc_extract.tint).
     "pillow>=10.0",
+    "numpy>=1.24",
 ]
 
 [project.optional-dependencies]

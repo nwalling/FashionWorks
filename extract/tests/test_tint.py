@@ -4,16 +4,20 @@ from pathlib import Path
 
 import pytest
 
+from sc_extract.material import MatLayer, SubMaterial
 from sc_extract.tint import (
     Layer,
     compose,
+    compose_layered,
     hex_to_rgb,
     layers_from_tint,
+    linear_to_srgb,
     palette_key,
     roughness_from_gloss,
 )
 
 PIL = pytest.importorskip("PIL")
+np = pytest.importorskip("numpy")
 from PIL import Image  # noqa: E402
 
 
@@ -121,3 +125,152 @@ def test_neutral_layers_are_not_white() -> None:
     for layer in NEUTRAL_LAYERS:
         assert max(layer.color) < 0.7, "a stand-in must read as unpainted, not white"
     assert len({layer.color for layer in NEUTRAL_LAYERS}) == 3, "keep panel variation"
+
+
+# ---------------------------------------------------------------------------
+# v3 layered compositing
+# ---------------------------------------------------------------------------
+
+# The four colours that cover 96% of a real armour blend mask, and the base
+# layer each one must resolve to. Measured on the slaver torso mask: black
+# 34.8%, blue 32.9%, cyan 25.6%, magenta 2.7%.
+MASK_COLOURS = [
+    ((0, 0, 0), 0),
+    ((0, 0, 255), 1),
+    ((0, 255, 255), 2),
+    ((255, 0, 255), 3),
+]
+
+# Four separable tints, one per base layer, so the composite is unambiguous.
+LAYER_TINTS = [(0.8, 0.1, 0.1), (0.1, 0.8, 0.1), (0.1, 0.1, 0.8), (0.8, 0.8, 0.1)]
+
+
+def _layered_sub() -> SubMaterial:
+    return SubMaterial(
+        name="test_m",
+        shader="LayerBlend_V2",
+        layers=[
+            MatLayer(
+                name=f"BaseLayer{i + 1}",
+                # Deliberately unresolvable: with no detail texture the layer
+                # is its flat tint, which is what makes the assertion exact.
+                path=f"materials/layers/none/absent_{i}.mtl",
+                tint_color=tint,
+                gloss_mult=1.0,
+                uv_tiling=1.0,
+                palette_tint=0,
+            )
+            for i, tint in enumerate(LAYER_TINTS)
+        ],
+    )
+
+
+def _mask(path) -> None:
+    image = Image.new("RGB", (len(MASK_COLOURS), 1))
+    image.putdata([colour for colour, _ in MASK_COLOURS])
+    image.save(path)
+
+
+def test_blend_mask_channels_map_blue_green_red_to_layers_two_three_four(
+    tmp_path,
+) -> None:
+    """The mask is a hard-edged layer selector, not a soft RGB gradient.
+
+    Blending blue, then green, then red resolves the four dominant mask
+    colours to the four base layers exactly. The intuitive red-green-blue
+    order collapses cyan and magenta onto layer 4, which on the slaver torso
+    handed 60% of the surface to a rubber grip pattern and left the
+    palette-tinted layer on a few scraps.
+    """
+    blend = tmp_path / "x_blend.png"
+    _mask(blend)
+
+    written = compose_layered(
+        _layered_sub(),
+        [],
+        tmp_path / "out",
+        "test",
+        resolved={"blend": str(blend)},
+        raw_root=tmp_path / "raw",
+        size=len(MASK_COLOURS),
+    )
+
+    pixels = Image.open(written["base_color"]).convert("RGB").load()
+    for x, (_colour, expected) in enumerate(MASK_COLOURS):
+        want = linear_to_srgb(np.array(LAYER_TINTS[expected], dtype=np.float32))
+        got = np.array(pixels[x, 0], dtype=np.float32) / 255.0
+        assert np.allclose(got, want, atol=0.01), (
+            f"mask column {x} resolved to {got}, expected layer {expected + 1} {want}"
+        )
+
+
+def test_palette_tint_index_routes_to_the_palette(tmp_path) -> None:
+    """A layer with PaletteTint=N takes palette entry N, not its own tint."""
+    sub = _layered_sub()
+    sub.layers[0] = MatLayer(
+        name="BaseLayer1",
+        path="materials/layers/none/absent.mtl",
+        tint_color=(0.0, 0.0, 0.0),
+        palette_tint=1,
+        gloss_mult=1.0,
+        uv_tiling=1.0,
+    )
+    palette = [Layer(color=(1.0, 0.0, 0.0), glossiness=1.0)]
+
+    written = compose_layered(
+        sub, palette, tmp_path / "out", "pal",
+        resolved={}, raw_root=tmp_path / "raw", size=2,
+    )
+    red, green, blue = Image.open(written["base_color"]).convert("RGB").load()[0, 0]
+    assert red > 200 and green < 40 and blue < 40
+
+
+def test_untinted_layer_keeps_its_baked_colour(tmp_path) -> None:
+    """PaletteTint=0 must ignore the palette entirely.
+
+    This is the 87% case, and getting it wrong is what made every suit the
+    wrong colour.
+    """
+    sub = _layered_sub()
+    palette = [Layer(color=(1.0, 0.0, 0.0), glossiness=1.0)]
+
+    written = compose_layered(
+        sub, palette, tmp_path / "out", "untinted",
+        resolved={}, raw_root=tmp_path / "raw", size=2,
+    )
+    got = np.array(
+        Image.open(written["base_color"]).convert("RGB").load()[0, 0], dtype=np.float32
+    ) / 255.0
+    want = linear_to_srgb(np.array(LAYER_TINTS[0], dtype=np.float32))
+    assert np.allclose(got, want, atol=0.01)
+
+
+def test_no_layer_stack_falls_back(tmp_path) -> None:
+    """A glass or glow submaterial has no MatLayers; the caller must know."""
+    bare = SubMaterial(name="glass_m", shader="LayerBlend_V2")
+    assert compose_layered(
+        bare, [], tmp_path / "out", "glass",
+        resolved={}, raw_root=tmp_path / "raw", size=2,
+    ) == {}
+
+
+def test_submaterial_names_that_are_paths_do_not_break_the_cache(tmp_path) -> None:
+    """Some submaterials are named with a full asset path.
+
+    The VGL light backpack calls one "Objects/Characters/Human/backpack/vgl/..".
+    Pasting that into a cache filename asked Pillow to write into directories
+    that do not exist, and took a whole 20-item Blender batch down with it.
+    """
+    written = compose_layered(
+        _layered_sub(),
+        [],
+        tmp_path / "out",
+        "vgl_blend_Objects/Characters/Human/backpack/vgl/pack_01",
+        resolved={},
+        raw_root=tmp_path / "raw",
+        size=2,
+    )
+    assert written
+    for path in written.values():
+        assert path.parent == tmp_path / "out"
+        assert path.is_file()

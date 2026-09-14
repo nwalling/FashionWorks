@@ -61,7 +61,7 @@ def build_material(descriptor: dict):
     if base:
         tree.links.new(base.outputs["Color"], C.bsdf_input(bsdf, "base_color"))
 
-    # Packed occlusion/roughness/metallic, glTF's layout: R unused here, G
+    # Packed occlusion/roughness/metallic, glTF's layout: R occlusion, G
     # roughness, B metallic.
     orm = image_node(composed.get("orm"), non_color=True)
     if orm:
@@ -73,6 +73,7 @@ def build_material(descriptor: dict):
             tree.links.new(separate.outputs[1], rough)
         if metal:
             tree.links.new(separate.outputs[2], metal)
+        _wire_occlusion(tree, separate.outputs[0])
 
     normal = image_node(resolved.get("normal"), non_color=True)
     if normal:
@@ -100,6 +101,32 @@ def build_material(descriptor: dict):
             C.set_bsdf(bsdf, "emission_strength", 1.0)
 
     return material
+
+
+def _wire_occlusion(tree, socket) -> None:
+    """Route baked occlusion into the glTF exporter.
+
+    Principled BSDF has no occlusion input, so Blender's glTF exporter reads
+    it from a group node that must be named exactly "glTF Material Output"
+    with an "Occlusion" input. Without this the red channel of the ORM map is
+    written but never reaches the .glb, and the cavity shading recovered from
+    the material's _hal control map is silently lost.
+    """
+    name = "glTF Material Output"
+    group = bpy.data.node_groups.get(name)
+    if group is None:
+        group = bpy.data.node_groups.new(name, "ShaderNodeTree")
+        try:
+            group.interface.new_socket(
+                "Occlusion", in_out="INPUT", socket_type="NodeSocketFloat"
+            )
+        except AttributeError:  # Blender < 4.0
+            group.inputs.new("NodeSocketFloat", "Occlusion")
+        group.nodes.new("NodeGroupInput")
+    node = tree.nodes.new("ShaderNodeGroup")
+    node.node_tree = group
+    node.name = node.label = name
+    tree.links.new(socket, node.inputs["Occlusion"])
 
 
 def apply_materials(obj, descriptors: list[dict]) -> list[dict]:

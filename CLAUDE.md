@@ -293,8 +293,79 @@ guessing alone misses all of them; `mtl_to_pbr.TEX_SLOTS` maps by slot first.
 `Geometry.Palette.RootRecord`, a `file://` ref to a `TintPaletteTree` whose
 `entryA`/`entryB`/`entryC` each hold a tint colour, a specular colour and a
 glossiness (0-255), plus a glass colour. 1183 of 2615 items resolve a palette.
-v1 uses layer A's colour and glossiness and the normal map; compositing all
-three layers through the blend mask is not done.
+
+### LayerBlend_V2, properly (2026-09-14)
+
+Suits came out the wrong colour and looked untextured because the pipeline
+composited palette colours and nothing else. The shader's real input is the
+`<MatLayers>` block, which v2 never parsed.
+
+**Each submaterial names up to eight tiling detail materials.** Four
+`BaseLayer` and four `WearLayer` entries, each pointing at a small
+`Shader="Layer"` .mtl under `Data/Materials/Layers` (paint, nylon, rubber,
+scratched aluminium). Those supply `TexSlot1` diffuse and `TexSlot2` `_ddna`,
+tiled at the armour layer's `UVTiling` times the layer's own `TexMod` tiling.
+This is the surface detail that was missing; there is no per-piece albedo
+anywhere in the archive.
+
+**`PaletteTint` decides where a layer's colour comes from.** `0` means "use my
+own baked `TintColor`", `1`/`2`/`3` index palette entry A/B/C. Across the male
+armour set 17332 of 19981 layers are `0` - **87%**. Painting every layer with
+the palette, as v2 did, repainted surfaces the artist had already coloured.
+That was the colour bug.
+
+**The blend mask is a hard-edged layer selector, not a soft gradient.** Blend
+the mask channels over base layer 1 in the order **blue, then green, then
+red**. On the slaver torso four colours cover 96% of the mask: black 34.8%
+(layer 1), blue 32.9% (layer 2), cyan 25.6% (layer 3), magenta 2.7% (layer 4).
+The intuitive red-green-blue order collapses cyan and magenta onto layer 4,
+handing 60% of the surface to a rubber grip pattern and leaving the
+palette-tinted layer on a few scraps. `test_tint.py` asserts this and fails if
+the order is flipped.
+
+**Per-pixel gloss is in `.dds.Na` sibling streams, and `--convert dds-png`
+drops them.** Converted `_ddna` PNGs come out with a constant-255 alpha, which
+looks like "this texture has no gloss". It has to be decoded separately with
+`starbreaker dds decode --alpha`; `layers.gloss_for` does that and caches to
+`data/interim/gloss`. Real gloss is `layer Shininess x GlossMult x that alpha`,
+which replaced a hand-tuned 0.30-0.75 roughness band.
+
+**`.dds` and `.dds.N` are mips; `.dds.Na` are the alpha mips.** A `_ddn` name
+has no alpha stream at all and `--alpha` correctly errors on it. Only `_ddna`
+carries one.
+
+**Cache keys must name the submaterial.** v2 keyed the composite on the blend
+map alone, so all five submaterials of a mesh shared one albedo despite having
+different layer stacks.
+
+**Layers under `Materials/Layers/metal` are metallic**, and a metal layer has
+no diffuse texture at all - `aluminum_dirty.mtl` carries only a `_ddna`, with
+`Diffuse="0.013"` and `Specular="0.84"`. Its base colour is its reflectance.
+
+**.mtl colours are linear; palette hex and diffuse PNGs are sRGB.** Blend in
+linear, write sRGB. A `TintColor` of `0.0395` is a dark grey (sRGB 59), not
+black.
+
+**The `_hal` map's green channel is used as ambient occlusion — inferred, not
+confirmed.** In most of the 354 armour `_hal` maps red and blue sit pinned at
+the neutral 123-128 while green varies widely, usually bright with dark
+creases, which is what an occlusion map looks like. A minority vary in all
+three channels. The composite maps it to the 0.35-1.0 range so that a wrong
+reading stays a mild darkening rather than a black suit. Blender's glTF
+exporter only writes occlusion when a group node named exactly
+`glTF Material Output` with an `Occlusion` input is present, which
+`mtl_to_pbr._wire_occlusion` creates.
+
+**The four `WearLayer` entries are still unused.** The `_wear` mask (TexSlot11)
+is genuinely greyscale (R=G=B on every sample) but its mean swings from 80 to
+229 across pieces, so which end means "worn" is not established, and it is not
+known whether `WearLayerN` pairs with `BaseLayerN` or whether one layer is
+selected for the whole submaterial. Guessing here would make armour look worse,
+not better. Scuffed edges and worn paint are therefore still missing.
+
+**Meshes have exactly one UV set.** Checked on the imported Collada: one UV
+layer and one colour attribute. `normalize_armor.cleanup` trimming extra UV
+maps is therefore a no-op, not a cause of lost decals.
 
 **Meshes carry several material slots** (shell, interior, metal, bones, props),
 matching the `.mtl` submaterial order.

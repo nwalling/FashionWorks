@@ -81,6 +81,60 @@ def _color(value: str | None, default: tuple[float, float, float]) -> tuple[floa
     return parts if len(parts) == 3 else default  # type: ignore[return-value]
 
 
+def _scalar(value: str | None, default: float) -> float:
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+
+
+@dataclass
+class MatLayer:
+    """One ``<MatLayers><Layer>`` entry of a LayerBlend_V2 submaterial.
+
+    This is the shader input v2 ignored entirely, and the reason armour
+    rendered in the wrong colours with no surface detail. Each layer names a
+    tiling detail material under ``Materials/Layers`` and carries its own
+    colour. ``palette_tint`` decides where that colour comes from:
+
+    * ``0`` - use this layer's own baked ``tint_color`` (17332 of 19981
+      layers across the male armour set, i.e. 87%)
+    * ``1``/``2``/``3`` - take it from palette entry A/B/C
+
+    Applying the palette to every layer, as v2 did, repainted the 87% that
+    the artist had already coloured.
+    """
+
+    name: str = ""
+    path: str = ""
+    tint_color: tuple[float, float, float] = (1.0, 1.0, 1.0)
+    wear_tint: tuple[float, float, float] = (1.0, 1.0, 1.0)
+    gloss_mult: float = 1.0
+    wear_gloss: float = 1.0
+    uv_tiling: float = 1.0
+    palette_tint: int = 0
+
+    @property
+    def is_wear(self) -> bool:
+        return self.name.lower().startswith("wear")
+
+    @property
+    def metallic(self) -> bool:
+        """Layers under ``Materials/Layers/metal`` are bare metal."""
+        return "/metal/" in normalize(self.path).lower()
+
+    def as_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "path": self.path,
+            "tint_color": list(self.tint_color),
+            "gloss_mult": self.gloss_mult,
+            "uv_tiling": self.uv_tiling,
+            "palette_tint": self.palette_tint,
+            "metallic": self.metallic,
+        }
+
+
 @dataclass
 class SubMaterial:
     """One entry of a .mtl's SubMaterials list, in slot order."""
@@ -91,6 +145,16 @@ class SubMaterial:
     diffuse: tuple[float, float, float] = (1.0, 1.0, 1.0)
     specular: tuple[float, float, float] = (0.0, 0.0, 0.0)
     shininess: float = 10.0
+    layers: list[MatLayer] = field(default_factory=list)
+
+    @property
+    def base_layers(self) -> list[MatLayer]:
+        """BaseLayer1..4, in slot order. The blend mask picks between them."""
+        return [layer for layer in self.layers if not layer.is_wear]
+
+    @property
+    def wear_layers(self) -> list[MatLayer]:
+        return [layer for layer in self.layers if layer.is_wear]
 
     @property
     def tintable(self) -> bool:
@@ -106,6 +170,7 @@ class SubMaterial:
             "specular": list(self.specular),
             "shininess": self.shininess,
             "tintable": self.tintable,
+            "layers": [layer.as_dict() for layer in self.layers],
         }
 
 
@@ -130,6 +195,21 @@ def parse(path: Path) -> list[SubMaterial]:
             role = classify(file_attr, tex.get("Map"))
             if role and role not in textures:
                 textures[role] = normalize(file_attr)
+        layers: list[MatLayer] = []
+        for block in node.findall("MatLayers"):
+            for entry in block.findall("Layer"):
+                layers.append(
+                    MatLayer(
+                        name=entry.get("Name") or "",
+                        path=normalize(entry.get("Path") or ""),
+                        tint_color=_color(entry.get("TintColor"), (1.0, 1.0, 1.0)),
+                        wear_tint=_color(entry.get("WearTint"), (1.0, 1.0, 1.0)),
+                        gloss_mult=_scalar(entry.get("GlossMult"), 1.0),
+                        wear_gloss=_scalar(entry.get("WearGloss"), 1.0),
+                        uv_tiling=_scalar(entry.get("UVTiling"), 1.0),
+                        palette_tint=int(_scalar(entry.get("PaletteTint"), 0.0)),
+                    )
+                )
         out.append(
             SubMaterial(
                 name=node.get("Name") or path.stem,
@@ -138,6 +218,7 @@ def parse(path: Path) -> list[SubMaterial]:
                 diffuse=_color(node.get("Diffuse"), (1.0, 1.0, 1.0)),
                 specular=_color(node.get("Specular"), (0.0, 0.0, 0.0)),
                 shininess=float(node.get("Shininess") or 10.0),
+                layers=layers,
             )
         )
     return out

@@ -35,7 +35,7 @@ NORMALIZE_SCRIPT = BLENDER_DIR / "normalize_armor.py"
 # leaves inputs untouched. The hash watches file mtimes and record contents, so
 # a change to how a palette is composited is otherwise invisible and stale GLBs
 # are silently kept.
-MATERIAL_PIPELINE_VERSION = 2
+MATERIAL_PIPELINE_VERSION = 3
 
 
 @dataclass
@@ -282,17 +282,36 @@ def material_descriptors(settings: Settings, item: Item) -> list[dict]:
             # A layer-blend material with no palette still has a blend mask;
             # compositing neutral greys beats leaving it white.
             palette = layers or tint.NEUTRAL_LAYERS
+            composed: dict = {}
             if sub.tintable:
-                composed = tint.compose(
-                    Path(resolved["blend"]) if "blend" in resolved else None,
-                    palette,
-                    settings.interim_dir / "tint",
-                    Path(resolved.get("blend", sub.name)).stem or sub.name,
-                    wear_path=Path(resolved["wear"]) if "wear" in resolved else None,
-                )
-                descriptor["composed"] = {k: str(v) for k, v in composed.items()}
-            else:
-                descriptor["composed"] = {}
+                # Each submaterial has its own MatLayers stack, so the cache
+                # key has to name the submaterial. Keying on the blend map
+                # alone gave every submaterial of a mesh the same albedo.
+                base = Path(resolved.get("blend", mtl.stem)).stem or mtl.stem
+                stem = f"{base}_{sub.name}"
+                if sub.base_layers:
+                    composed = tint.compose_layered(
+                        sub,
+                        palette,
+                        settings.interim_dir / "tint",
+                        stem,
+                        resolved=resolved,
+                        raw_root=settings.raw_dir,
+                        gloss_cache=settings.interim_dir / "gloss",
+                        p4k=settings.p4k_path,
+                        starbreaker=Path(settings.starbreaker),
+                    )
+                if not composed:
+                    # No layer stack parsed: fall back to the flat palette
+                    # composite rather than leaving the piece untextured.
+                    composed = tint.compose(
+                        Path(resolved["blend"]) if "blend" in resolved else None,
+                        palette,
+                        settings.interim_dir / "tint",
+                        stem,
+                        wear_path=Path(resolved["wear"]) if "wear" in resolved else None,
+                    )
+            descriptor["composed"] = {k: str(v) for k, v in composed.items()}
             out.append(descriptor)
     return out
 

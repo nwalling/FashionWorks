@@ -62,3 +62,71 @@ def test_parse_bad_xml_is_empty(tmp_path: Path) -> None:
     path = tmp_path / "bad.mtl"
     path.write_text("<Material><oops>")
     assert parse(path) == []
+
+
+LAYERED_MTL = """<Material MtlFlags="256">
+  <SubMaterials>
+    <Material Name="core_plate_m" Shader="LayerBlend_V2" Shininess="255">
+      <Textures>
+        <Texture Map="TexSlot12" File="objects/a/textures/x_blend.tif"/>
+      </Textures>
+      <MatLayers>
+        <Layer Name="BaseLayer1" Path="materials/layers/synthetic/paint_01.mtl"
+               TintColor="0.04,0.04,0.04" GlossMult="0.44" UVTiling="20" PaletteTint="0" />
+        <Layer Name="BaseLayer2" Path="materials/layers/metal/aluminum_dirty.mtl"
+               TintColor="1,1,1" GlossMult="0.83" UVTiling="20" PaletteTint="0" />
+        <Layer Name="BaseLayer3" Path="materials/layers/synthetic/nylon_02.mtl"
+               TintColor="1,1,1" GlossMult="0.77" UVTiling="90" PaletteTint="2" />
+        <Layer Name="BaseLayer4" Path="materials/layers/synthetic/rubber_01.mtl"
+               TintColor="0.05,0.05,0.05" GlossMult="0.73" UVTiling="137" PaletteTint="0" />
+        <Layer Name="WearLayer1" Path="materials/layers/metal/aluminum_dirty.mtl"
+               TintColor="1,1,1" GlossMult="1" UVTiling="20" PaletteTint="0" />
+      </MatLayers>
+    </Material>
+  </SubMaterials>
+</Material>
+"""
+
+
+def _layered(tmp_path: Path):
+    path = tmp_path / "layered.mtl"
+    path.write_text(LAYERED_MTL)
+    return parse(path)[0]
+
+
+def test_parses_the_matlayers_stack(tmp_path: Path) -> None:
+    """LayerBlend_V2 gets its surface from <MatLayers>, not from an albedo.
+
+    Ignoring this block was why armour rendered flat and untextured.
+    """
+    sub = _layered(tmp_path)
+    assert [layer.name for layer in sub.base_layers] == [
+        "BaseLayer1",
+        "BaseLayer2",
+        "BaseLayer3",
+        "BaseLayer4",
+    ]
+    assert [layer.name for layer in sub.wear_layers] == ["WearLayer1"]
+
+
+def test_palette_tint_selects_the_colour_source(tmp_path: Path) -> None:
+    """PaletteTint 0 means "keep my own colour"; 1/2/3 index the palette.
+
+    87% of layers in the male armour set are 0. Applying the palette to all of
+    them repainted surfaces the artist had already coloured.
+    """
+    base = _layered(tmp_path).base_layers
+    assert [layer.palette_tint for layer in base] == [0, 0, 2, 0]
+    assert base[0].tint_color == (0.04, 0.04, 0.04)
+    assert base[2].tint_color == (1.0, 1.0, 1.0)
+
+
+def test_layers_under_metal_are_metallic(tmp_path: Path) -> None:
+    base = _layered(tmp_path).base_layers
+    assert [layer.metallic for layer in base] == [False, True, False, False]
+
+
+def test_layer_tiling_and_gloss_survive_parsing(tmp_path: Path) -> None:
+    base = _layered(tmp_path).base_layers
+    assert [layer.uv_tiling for layer in base] == [20.0, 20.0, 90.0, 137.0]
+    assert base[0].gloss_mult == 0.44
