@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from sc_extract import catalog
+from sc_extract.catalog import GeoNode
 from sc_extract.dcb import Index
 from sc_extract.localization import Localization
 from sc_extract.manifest import Item, Manufacturer
@@ -196,3 +197,36 @@ def test_npc_items_excluded_by_default(loc: Localization) -> None:
 def test_asset_paths_collapse_repeated_separators() -> None:
     assert catalog._normalize_asset_path("Data\\\\Objects//x.skin") == "Data/Objects/x.skin"
     assert catalog._normalize_asset_path("/Data/x.skin") == "Data/x.skin"
+
+
+def test_a_rigid_piece_finds_its_palette_off_the_worn_node() -> None:
+    """Backpacks hang the palette on a node that is not the worn mesh.
+
+    The CSP-68H Red Alert names its IAE palette on one geometry node, and it is
+    not the one select_wearables keeps. Searching only the worn nodes found
+    nothing, so 16 of the pack's 23 palette-tinted layers fell back to neutral
+    grey and the red pack rendered grey.
+    """
+    worn = [GeoNode(path="backpack.cga", material="m.mtl", depth=1, palette=None)]
+    other = worn + [
+        GeoNode(path="prop.cgf", material=None, depth=0, palette="file://./pal.json")
+    ]
+
+    assert catalog.tint_for(worn, _EmptyIndex()) is None
+    found = catalog.tint_for(worn, _EmptyIndex(), fallback=other)
+    assert found is not None
+    assert found["palette_ref"] == "pal"
+
+
+class _EmptyIndex:
+    """Enough of Index for tint_for: a ref that resolves to nothing."""
+
+    @staticmethod
+    def resolve_ref(_ref):
+        return None
+
+    @staticmethod
+    def ref_name(ref):
+        from sc_extract.dcb import Index
+
+        return Index.ref_name(ref)

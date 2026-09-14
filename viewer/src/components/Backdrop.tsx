@@ -5,13 +5,28 @@ import * as THREE from 'three';
 
 import { assetUrl } from '../manifest';
 
-/** Backdrops available behind the character. */
+/** Backdrops that ship with the app. */
 export const BACKDROPS = {
   none: null,
   hangar: 'backgrounds/hangar.jpg',
 } as const;
 
 export type BackdropName = keyof typeof BACKDROPS;
+
+/** The chosen backdrop: a built-in name, or an image the user opened. */
+export type BackdropChoice = BackdropName | 'custom';
+
+/**
+ * Resolve a choice to something the loader can fetch.
+ *
+ * A user-supplied image arrives as an object URL, which is already absolute
+ * and must not be pushed through `assetUrl`.
+ */
+export function backdropSrc(choice: BackdropChoice, custom: string | null): string | null {
+  if (choice === 'custom') return custom;
+  const file = BACKDROPS[choice];
+  return file ? assetUrl(file) : null;
+}
 
 /**
  * A photographic plate behind the character.
@@ -20,8 +35,8 @@ export type BackdropName = keyof typeof BACKDROPS;
  * you see behind the model. A screenshot is a perspective image, not an
  * equirectangular map, so using it to light the scene would be wrong.
  */
-export function Backdrop({ file }: { file: string }) {
-  const texture = useTexture(assetUrl(file));
+export function Backdrop({ src }: { src: string }) {
+  const texture = useTexture(src);
   const { scene, size } = useThree();
 
   useEffect(() => {

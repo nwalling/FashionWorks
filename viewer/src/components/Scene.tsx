@@ -1,12 +1,18 @@
 import { Suspense, useEffect } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
-import { Environment, Grid, OrbitControls, PerspectiveCamera } from '@react-three/drei';
+import {
+  ContactShadows,
+  Environment,
+  Grid,
+  OrbitControls,
+  PerspectiveCamera,
+} from '@react-three/drei';
 import * as THREE from 'three';
 
 import { useStore } from '../store';
 import { SLOTS } from '../manifest';
 import { ArmorPiece } from './ArmorPiece';
-import { BACKDROPS, Backdrop, type BackdropName } from './Backdrop';
+import { Backdrop, backdropSrc, type BackdropChoice } from './Backdrop';
 import { REST_POSE, type Pose } from '../three/poses';
 import { BaseCharacter } from './BaseCharacter';
 
@@ -54,11 +60,13 @@ const EXPOSURE = 0.85;
 export function Scene({
   preset,
   backdrop,
+  customBackdrop,
   pose,
   onReady,
 }: {
   preset: HdrPreset;
-  backdrop: BackdropName;
+  backdrop: BackdropChoice;
+  customBackdrop: string | null;
   pose: string;
   onReady: (state: { gl: THREE.WebGLRenderer; scene: THREE.Scene; camera: THREE.Camera }) => void;
 }) {
@@ -77,6 +85,10 @@ export function Scene({
   const torsoId = loadout.slots.torso ?? loadout.slots.undersuit;
   const mountOffsets = (torsoId ? byId.get(torsoId)?.socket_offsets : undefined) ?? {};
 
+  // A user-opened image is an object URL and is already absolute; a built-in
+  // one is a path under the served asset root.
+  const plate = backdropSrc(backdrop, customBackdrop);
+
   return (
     <Canvas
       shadows
@@ -94,7 +106,7 @@ export function Scene({
 
       <Suspense fallback={null}>
         <Environment preset={preset} environmentIntensity={ENV_INTENSITY} />
-        {BACKDROPS[backdrop] ? <Backdrop file={BACKDROPS[backdrop]} /> : null}
+        {plate ? <Backdrop src={plate} /> : null}
         {baseGlb ? (
           <BaseCharacter glb={baseGlb} pose={activePose}>
             {SLOTS.map((slot) => {
@@ -127,7 +139,7 @@ export function Scene({
 
       {/* The reference grid reads as floating debris once there is a photo
           behind the character, so it only shows on the plain background. */}
-      {BACKDROPS[backdrop] ? null : (
+      {plate ? null : (
         <Grid
           args={[12, 12]}
           cellColor="#1d2228"
@@ -139,6 +151,21 @@ export function Scene({
       )}
       <directionalLight position={[3, 5, 2]} intensity={0.15} castShadow />
       <ambientLight intensity={2.2} />
+      {/*
+        A soft shadow pooled under the feet. Without it the character floats,
+        which reads worst over a photographic plate, where there is no grid to
+        give the eye a ground plane. Lifted a hair off zero so it does not
+        z-fight the grid when that is showing.
+      */}
+      <ContactShadows
+        position={[0, 0.005, 0]}
+        scale={4}
+        far={2.2}
+        blur={2.6}
+        opacity={0.65}
+        resolution={1024}
+        color="#000000"
+      />
     </Canvas>
   );
 }

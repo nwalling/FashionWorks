@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import * as THREE from 'three';
 
 import { shareUrl } from '../loadout';
 import { useStore } from '../store';
 import { exportCombinedGlb, exportLoadoutJson, exportScreenshot } from '../exporters';
-import { BACKDROPS, type BackdropName } from './Backdrop';
+import { BACKDROPS, type BackdropChoice } from './Backdrop';
 import { REST_LABEL, REST_POSE } from '../three/poses';
 import { HDR_PRESETS, type HdrPreset } from './Scene';
 
@@ -14,17 +14,22 @@ export function LoadoutBar({
   onPreset,
   backdrop,
   onBackdrop,
+  customBackdrop,
+  onCustomBackdrop,
   pose,
   onPose,
 }: {
   capture: { gl: THREE.WebGLRenderer; scene: THREE.Scene; camera: THREE.Camera } | null;
   preset: HdrPreset;
   onPreset: (preset: HdrPreset) => void;
-  backdrop: BackdropName;
-  onBackdrop: (backdrop: BackdropName) => void;
+  backdrop: BackdropChoice;
+  onBackdrop: (backdrop: BackdropChoice) => void;
+  customBackdrop: string | null;
+  onCustomBackdrop: (file: File) => void;
   pose: string;
   onPose: (pose: string) => void;
 }) {
+  const fileInput = useRef<HTMLInputElement>(null);
   const manifest = useStore((state) => state.manifest);
   const poses = useStore((state) => state.poses);
   const loadout = useStore((state) => state.loadout);
@@ -75,14 +80,35 @@ export function LoadoutBar({
       <select
         value={backdrop}
         title="Backdrop behind the character"
-        onChange={(event) => onBackdrop(event.target.value as BackdropName)}
+        onChange={(event) => onBackdrop(event.target.value as BackdropChoice)}
       >
         {Object.keys(BACKDROPS).map((value) => (
           <option key={value} value={value}>
             {value === 'none' ? 'no backdrop' : value}
           </option>
         ))}
+        {customBackdrop ? <option value="custom">your image</option> : null}
       </select>
+      {/*
+        Opening an image keeps it in the browser: it becomes an object URL and
+        is never uploaded. Nothing here has a server to upload to, and these
+        are the user's own screenshots.
+      */}
+      <input
+        ref={fileInput}
+        type="file"
+        accept="image/*"
+        hidden
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) onCustomBackdrop(file);
+          // Let the same file be chosen again after it is cleared.
+          event.target.value = '';
+        }}
+      />
+      <button onClick={() => fileInput.current?.click()} title="Use an image from your computer">
+        Background…
+      </button>
       <select
         value={preset}
         title="Lighting environment"

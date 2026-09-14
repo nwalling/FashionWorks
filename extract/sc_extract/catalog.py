@@ -282,6 +282,30 @@ def walk_geometry(record: Record) -> list[GeoNode]:
     return out
 
 
+def material_palette(record: Record) -> str | None:
+    """Palette from the record's material override, if it carries one.
+
+    ``SGeometryResourceParams`` has a ``Material`` sibling to its geometry
+    tree, an ``SMaterialNodeParams`` holding both an override ``.mtl`` and its
+    own ``Palette``. That is where a rigid piece's colourway lives: the CSP-68H
+    Red Alert leaves every ``Palette`` in its geometry tree null and names
+    ``tintpalettes/brand/iae/iae_2022`` here instead. Missing it left 16 of the
+    pack's 23 palette-tinted layers on neutral grey, so the red pack rendered
+    grey.
+    """
+    component = F.component(record.data, F.GEOMETRY_COMPONENT)
+    if component is None:
+        return None
+    node = component.get("Material")
+    if not isinstance(node, dict):
+        return None
+    palette = node.get("Palette")
+    if not isinstance(palette, dict):
+        return None
+    ref = palette.get("RootRecord")
+    return ref if isinstance(ref, str) and ref else None
+
+
 def select_wearables(nodes: list[GeoNode], skeleton: str) -> list[GeoNode]:
     """Pick the meshes actually worn on ``skeleton`` from a geometry tree.
 
@@ -321,8 +345,16 @@ def select_wearables(nodes: list[GeoNode], skeleton: str) -> list[GeoNode]:
 
 def geometry_for(
     record: Record, skeleton: str = "male"
-) -> tuple[list[Geometry], list[str], list[GeoNode]]:
-    """Return worn geometry, its material paths, and the nodes they came from."""
+) -> tuple[list[Geometry], list[str], list[GeoNode], list[GeoNode]]:
+    """Worn geometry, its material paths, the nodes it came from, and every node.
+
+    The full list matters for the tint palette. A rigid backpack carries its
+    palette reference on a node that is not the worn mesh -- the CSP-68H Red
+    Alert names ``tintpalettes/brand/iae/iae_2022`` on one node only, and it is
+    not the one ``select_wearables`` keeps -- so looking for it among the worn
+    nodes alone found nothing and the pack fell back to neutral greys on the
+    16 of its 23 layers that are palette-tinted.
+    """
     nodes = walk_geometry(record)
     chosen = select_wearables(nodes, skeleton)
     geometry = [Geometry(source=n.path, side=_side_of(n.path)) for n in chosen]
@@ -330,7 +362,7 @@ def geometry_for(
     for node in chosen:
         if node.material and node.material not in materials:
             materials.append(node.material)
-    return geometry, materials, chosen
+    return geometry, materials, chosen, nodes
 
 
 def _srgb(entry: Any, key: str) -> str | None:
@@ -347,7 +379,13 @@ def _srgb(entry: Any, key: str) -> str | None:
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
-def tint_for(nodes: list[GeoNode], index: Index) -> dict[str, Any] | None:
+def tint_for(
+    nodes: list[GeoNode],
+    index: Index,
+    *,
+    fallback: list[GeoNode] | None = None,
+    override: str | None = None,
+) -> dict[str, Any] | None:
     """Resolve an item's tint palette.
 
     Armor in this build has no albedo texture. Its shader (``LayerBlend_V2``)
@@ -356,6 +394,11 @@ def tint_for(nodes: list[GeoNode], index: Index) -> dict[str, Any] | None:
     carries a tint colour, a specular colour and a glossiness.
     """
     ref = next((n.palette for n in nodes if n.palette), None)
+    if not ref and fallback:
+        # Rigid pieces hang the palette off a node that is not the worn mesh.
+        ref = next((n.palette for n in fallback if n.palette), None)
+    if not ref:
+        ref = override
     if not ref:
         return None
     record = index.resolve_ref(ref)
@@ -584,7 +627,7 @@ def build_item(
     if slot is None:
         return None
 
-    geometry, materials, nodes = geometry_for(record, skeleton)
+    geometry, materials, nodes, all_nodes = geometry_for(record, skeleton)
     name_key = _attach(record, F.NAME_KEY)
     desc_key = _attach(record, F.DESCRIPTION_KEY)
     name = loc.get(name_key) if isinstance(name_key, str) else None
@@ -605,7 +648,9 @@ def build_item(
         sub_slot=sub_slot_for(record, slot),
         weight_class=weight_class_for(record),
         manufacturer=manufacturer_for(record, index, loc),
-        tint=tint_for(nodes, index),
+        tint=tint_for(
+            nodes, index, fallback=all_nodes, override=material_palette(record)
+        ),
         stats=stats_for(record),
         tags=tags_for(record, index),
         geometry=geometry,

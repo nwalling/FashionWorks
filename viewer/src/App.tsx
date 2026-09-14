@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { ManifestVersionError, loadManifest, selectableItems } from './manifest';
 import { useStore } from './store';
 import { LoadoutBar } from './components/LoadoutBar';
-import { type BackdropName } from './components/Backdrop';
+import { type BackdropChoice } from './components/Backdrop';
 import { REST_POSE, loadPoses } from './three/poses';
 import { Scene, type HdrPreset } from './components/Scene';
 import { SlotPanel } from './components/SlotPanel';
@@ -23,10 +23,29 @@ export function App() {
 
   const [capture, setCapture] = useState<Capture | null>(null);
   const [preset, setPreset] = useState<HdrPreset>('warehouse');
-  const [backdrop, setBackdrop] = useState<BackdropName>('hangar');
+  const [backdrop, setBackdrop] = useState<BackdropChoice>('hangar');
+  const [customBackdrop, setCustomBackdrop] = useState<string | null>(null);
   const [pose, setPose] = useState<string>('idle');
 
   const onReady = useCallback((state: Capture) => setCapture(state), []);
+
+  // The image stays in the browser as an object URL; there is nowhere to
+  // upload it to and no reason to. Revoke the previous one so opening several
+  // in a row does not leak them.
+  const onCustomBackdrop = useCallback((file: File) => {
+    setCustomBackdrop((previous) => {
+      if (previous) URL.revokeObjectURL(previous);
+      return URL.createObjectURL(file);
+    });
+    setBackdrop('custom');
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (customBackdrop) URL.revokeObjectURL(customBackdrop);
+    },
+    [customBackdrop],
+  );
 
   useEffect(() => {
     const controller = new AbortController();
@@ -81,7 +100,13 @@ export function App() {
 
       <main>
         <div className="stage">
-          <Scene preset={preset} backdrop={backdrop} pose={pose} onReady={onReady} />
+          <Scene
+            preset={preset}
+            backdrop={backdrop}
+            customBackdrop={customBackdrop}
+            pose={pose}
+            onReady={onReady}
+          />
         </div>
         <aside>
           <SlotPanel />
@@ -96,6 +121,8 @@ export function App() {
           onPreset={setPreset}
           backdrop={backdrop}
           onBackdrop={setBackdrop}
+          customBackdrop={customBackdrop}
+          onCustomBackdrop={onCustomBackdrop}
           pose={pose}
           onPose={setPose}
         />
