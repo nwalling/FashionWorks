@@ -569,6 +569,31 @@ within one image:
 So the non-gold areas are roughly 25% too light relative to the gold, not the
 2x that raw luminance suggested. Use this ratio for any future comparison.
 
+### The palette modulates a layer's TintColor, it does not replace it
+
+966 of 1984 palette-tinted base layers carry a **non-white** `TintColor`,
+median 0.50. Substituting the palette colour for it, rather than multiplying,
+rendered half of them up to twice as bright as the game.
+
+### Compare contrast, not absolute luminance
+
+Two in-game captures of the same armour disagree on absolute brightness
+because their scenes differ: the Sunchaser reference reads a non-gold median of
+32.7 on one sheet and 42.3 on the store render. Absolute comparisons against a
+viewer tuned to a third capture are therefore meaningless.
+
+The lighting-invariant measure is the ratio of gold median to non-gold median
+within one image:
+
+| source | ratio |
+| ------ | ----- |
+| reference, user sheet | 3.47 |
+| reference, store render | 2.95 |
+| viewer | 2.33-2.55 |
+
+So the non-gold areas are roughly 25% too light relative to the gold, not the
+2x that raw luminance suggested. Use this ratio for any future comparison.
+
 ### The blend mask table, solved against in-game captures
 
 The mask is a discrete selector: four saturated colours cover 96% of a real
