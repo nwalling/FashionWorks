@@ -212,7 +212,10 @@ def test_palette_tint_index_routes_to_the_palette(tmp_path) -> None:
     sub.layers[0] = MatLayer(
         name="BaseLayer1",
         path="materials/layers/none/absent.mtl",
-        tint_color=(0.0, 0.0, 0.0),
+        # White, so the palette colour comes through unmodulated. Half of the
+        # real palette-tinted layers are white like this; the other half
+        # darken the palette colour, which the next test covers.
+        tint_color=(1.0, 1.0, 1.0),
         palette_tint=1,
         gloss_mult=1.0,
         uv_tiling=1.0,
@@ -484,3 +487,37 @@ def test_black_diffuse_with_reflectance_is_metal() -> None:
     assert LayerMaterial(path="x", specular=(0.188,) * 3, diffuse=(0.0, 0.0, 0.0)).is_metal
     assert LayerMaterial(path="x", specular=(1.0,) * 3, diffuse=(0.0, 0.0, 0.0)).is_metal
     assert not LayerMaterial(path="x", specular=(0.045,) * 3, diffuse=(1.0, 1.0, 1.0)).is_metal
+
+
+def test_the_palette_modulates_the_layer_tint_rather_than_replacing_it(tmp_path) -> None:
+    """A layer's own TintColor still applies under a palette.
+
+    966 of 1984 palette-tinted base layers carry a non-white TintColor, median
+    0.50. Replacing it with the palette colour rendered half of them up to
+    twice as bright as the game: the Sunchaser backplate, bracket and shoes
+    came out light grey against a near-black reference.
+    """
+    sub = SubMaterial(
+        name="m",
+        shader="LayerBlend_V2",
+        layers=[
+            MatLayer(
+                name="BaseLayer1",
+                path="materials/layers/none/absent.mtl",
+                tint_color=(0.5, 0.5, 0.5),
+                palette_tint=1,
+                gloss_mult=1.0,
+                uv_tiling=1.0,
+            )
+        ],
+    )
+    palette = [Layer(color=(1.0, 1.0, 1.0), glossiness=1.0)]
+    written = compose_layered(
+        sub, palette, tmp_path / "out", "mul", resolved={}, raw_root=tmp_path / "raw", size=2
+    )
+    got = np.array(
+        Image.open(written["base_color"]).convert("RGB").load()[0, 0], dtype=np.float32
+    ) / 255.0
+    # White palette times a half-strength layer is the layer, not white.
+    want = linear_to_srgb(np.array([0.5, 0.5, 0.5], dtype=np.float32))
+    assert np.allclose(got, want, atol=0.02), f"{got} should be modulated, not replaced"

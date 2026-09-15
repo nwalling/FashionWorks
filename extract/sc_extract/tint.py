@@ -413,7 +413,7 @@ def layered_key(sub, palette: list[Layer]) -> str:
         )
     parts.append(
         f"wear:{WEAR_THRESHOLD}:{WEAR_FALLOFF}:metal:{METAL_F0_THRESHOLD}"
-        f":diffuse:buckets:{sorted(BLEND_BUCKETS.items())}"
+        f":diffuse:buckets:{sorted(BLEND_BUCKETS.items())}:tintmul"
     )
     return hashlib.sha1(";".join(parts).encode()).hexdigest()[:10]
 
@@ -512,7 +512,15 @@ def compose_layered(
         # chose it and baked it into the .mtl in linear space.
         if 0 < entry.palette_tint <= len(palette):
             chosen = palette[entry.palette_tint - 1]
-            tint = srgb_to_linear(np.array(chosen.color, dtype=np.float32))
+            # The palette colour modulates the layer's own TintColor, it does
+            # not replace it. 966 of 1984 palette-tinted base layers carry a
+            # non-white TintColor, median 0.50, so discarding it rendered half
+            # of them up to twice as bright as the game does. It is why the
+            # Sunchaser backplate, bracket and shoes came out light grey where
+            # the reference is near-black.
+            tint = srgb_to_linear(np.array(chosen.color, dtype=np.float32)) * np.array(
+                entry.tint_color, dtype=np.float32
+            )
             gloss_scale = max(0.05, min(1.0, chosen.glossiness))
         else:
             tint = np.array(entry.tint_color, dtype=np.float32)
