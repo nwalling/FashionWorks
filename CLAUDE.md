@@ -8,6 +8,10 @@ A Star Citizen FPS-armor kitbasher. Pipeline:
 Data.p4k -> catalog (JSON) -> geometry/textures -> Blender normalize -> .glb + manifest.json -> React/Three.js viewer
 ```
 
+`LIGHTING.md` holds a deferred plan for the viewer's lighting model.
+`WEB.md` holds the plan for a public web front end on sc-hangarworks.org.
+`WEB-INTEGRATION.md` is the contract the Hangarworks site builds against.
+
 `PLAN.md` is the design document. This file is the operational one: what is
 decided, what is verified, and what to run. When the two disagree, this file wins
 and `PLAN.md` gets corrected.
@@ -59,15 +63,15 @@ reports ready.
 
 ## Commands
 
-`./starfashion` wraps all of this; the raw commands are below it for when you
+`./fashionworks` wraps all of this; the raw commands are below it for when you
 need a single stage.
 
 ```bash
-./starfashion setup                          # deps + build the extraction tools
-./starfashion use-p4k /Volumes/<card>/LIVE   # point at an install
-./starfashion build                          # catalog + rig + convert
-./starfashion run                            # viewer
-./starfashion check                          # tests, lint, typecheck, build
+./fashionworks setup                          # deps + build the extraction tools
+./fashionworks use-p4k /Volumes/<card>/LIVE   # point at an install
+./fashionworks build                          # catalog + rig + convert
+./fashionworks run                            # viewer
+./fashionworks check                          # tests, lint, typecheck, build
 ```
 
 Pipeline:
@@ -317,14 +321,11 @@ armour set 17332 of 19981 layers are `0` - **87%**. Painting every layer with
 the palette, as v2 did, repainted surfaces the artist had already coloured.
 That was the colour bug.
 
-**The blend mask is a hard-edged layer selector, not a soft gradient.** Blend
-the mask channels over base layer 1 in the order **blue, then green, then
-red**. On the slaver torso four colours cover 96% of the mask: black 34.8%
-(layer 1), blue 32.9% (layer 2), cyan 25.6% (layer 3), magenta 2.7% (layer 4).
-The intuitive red-green-blue order collapses cyan and magenta onto layer 4,
-handing 60% of the surface to a rubber grip pattern and leaving the
-palette-tinted layer on a few scraps. `test_tint.py` asserts this and fails if
-the order is flipped.
+**The blend mask is a hard-edged layer selector, not a soft gradient.** Four
+saturated colours cover 96% of a real armour mask. Which colour reaches which
+layer took four attempts; the settled mapping and the evidence for it are under
+"The blend mask table, settled on the fourth attempt" below. The figures that
+used to sit here described the first, refuted attempt.
 
 **Per-pixel gloss is in `.dds.Na` sibling streams, and `--convert dds-png`
 drops them.** Converted `_ddna` PNGs come out with a constant-255 alpha, which
@@ -487,6 +488,94 @@ and no slaver legs mesh exists in the archive. Only 27 of 2103 items pair a
 mesh and material from different family folders, and they are genuine reuse.
 Do not "fix" this.
 
+### Decals and the Detail map are inert on armour -- both closed
+
+Both were chased as "the missing texture layer". Neither is implementable, and
+more importantly neither is *wanted*. Do not reopen either without new evidence.
+
+**Decals (TexSlot9), declared by 5599 of 11436 layer-blend submaterials.**
+Compositing them lifts the gold region's luminance std from 13.4 to 36.9, so the
+temptation is real. Four independent findings say no:
+
+* No armour mesh has a second UV set. Sampling 25 `.skinm` files across 15
+  manufacturers with `SB_DEBUG_STREAMS=1`, every one carries exactly
+  `IVOVERTSUVS` at elem_size 20 and no `IVONORMALS2` at elem_size 4 and no
+  `IVOVERTSUVS2`. StarBreaker parses secondary UVs and its GLB writer emits
+  `TEXCOORD_1` when they exist, so this is the mesh, not the tooling.
+* The atlas is not in UV0 space. Decal alpha landing inside the union of a
+  piece's UV islands is **5.8%** where the islands cover **5.6%** of the square
+  -- an enrichment of **1.04x**, which is chance.
+* There is no decal geometry: zero `.skin`/`.cgf`/`.cga` matching *decal* in the
+  whole male armour tree.
+* **The in-game reference shows no decals on the piece.** A user photograph of
+  the real Sunchaser shoulder pad has none of the atlas's text on it.
+
+Sampled on UV0 anyway, it renders metre-high "WARNING" and "DEFENSE SYSTEMS"
+across the chest. That was implemented, rendered and reverted.
+
+**The Detail map.** `DetailDiffuse`, `DetailBump`, `DetailGloss` and
+`DetailTiling` appear on 475 of the 495 layer materials, but they are template
+defaults, not authored intent: 458/495 sit at `DetailDiffuse=0.5`, 450/495 at
+`DetailTiling=8`, 458/495 at `DetailGloss=0.5`. And **no detail texture is
+bound** -- TexSlot7 appears on exactly one layer material in 495
+(`weapon_parkerized_02`, pointing at `textures/unified_detail/metal/metal_006_detail.tif`).
+A `unified_detail` library of 66 textures exists but almost nothing references
+it. With no texture bound the parameters do nothing.
+
+So the flatness of a painted plate is faithful to the source. `paint_01`'s own
+diffuse texture has a std of **2.8** and its `_ddna` is a flat (127,127,254) at
+std 2.3. Surface interest comes from the wear blend and the armour's own `_ddn`
+(std 30/24/18), not from the layer and not from a detail map.
+
+### TintMode declares metal -- but mode 0 declares nothing
+
+`PublicParams TintMode` on a layer material takes three values: **0 (144
+layers), 1 (201), 2 (130)**. Modes 1 and 2 are the artist stating the shading
+outright -- mode 1 is 3% metal by reflectance and is fabric, canvas, fleece and
+paint; mode 2 is 96% metal and is aluminium, steel and bronze. That is exactly
+what `LayerMaterial.is_metal` was inferring, so the stated value now wins. The
+two disagree on 70 of 475 library layers, among them `anodized_white_metal_01`
+(specular 0.061, diffuse 1.0) and `burnt_metal_02`, which read dielectric and
+are declared metal.
+
+**Mode 0 is not a statement, and reading it as one caused a regression.** It was
+taken to mean "this layer is not tinted", which is wrong: `rubber_diamond_02` is
+mode 0, and every Venture undersuit colourway authors a *different* TintColor on
+it -- (54,31,79) on the purple, (210,210,210) on the base, (57,57,57) and
+(153,153,153) elsewhere. If mode 0 discarded the tint, every colourway would be
+identical on those layers, which is the whole point of the colourway system.
+Discarding it forced **1185 of 43576 armour layer references (2.7%)** to white
+and baked **12 of the 28 Venture undersuits flat near-white** -- Tan/Brown at
+(220,220,219), Olive/Black at (222,222,220), Green/Black at (223,224,223), none
+of which has a white layer.
+
+Mode 0 says nothing about metalness either, so it falls through to the
+reflectance heuristic rather than asserting dielectric.
+
+The general lesson: an enum value that is merely *absent of a claim* is not the
+same as a claim of the negative. Check what varies underneath it before acting
+on it -- here, the per-colourway TintColors settled it in one query.
+
+### A metal layer's diffuse texture is pattern, not albedo
+
+**77 of the 208 metal layers carry a TexSlot1 diffuse texture**, and multiplying
+it into the base colour scaled the metal's reflectance down by that texture's
+own mean. On `anodized_black` -- spec 0.254, `polished_surface_01_diff` at 0.235
+linear -- a sleeve the artist tinted (189,189,189) composited to
+0.509 x 0.254 x 0.235 = 0.030, or **sRGB 50**. Near-black, on a light grey
+garment. That is the "shiny black where it should be matte" symptom, and it is
+independent of the blend-table bug even though the two compound.
+
+These layers set their material `Diffuse` constant to **black (0.013)**, which
+is CryEngine's own signature for metal and says outright that there is no
+diffuse term for the texture to be. The colour is the F0 in `Specular`; the
+texture is brushed/scratched/polished surface pattern. So it is normalised to
+its own mean and modulates around 1.0, which keeps the detail without the
+darkening. `aluminum_dirty`, which ships no diffuse texture at all, is the shape
+the docs describe and was never affected.
+
+Dielectrics are unchanged: their texture genuinely is albedo.
+
 ### Stray weight goes to the vertex's own bones, not one bone per mesh
 
 Pieces floated off the body: a bracelet on the Defiance arms, a left
@@ -564,41 +653,101 @@ within one image:
 | ------ | ----- |
 | reference, user sheet | 3.47 |
 | reference, store render | 2.95 |
-| viewer | 2.33-2.55 |
+| viewer, before the blend-table fix | 2.33-2.55 |
+| viewer, after | **3.81** |
 
-So the non-gold areas are roughly 25% too light relative to the gold, not the
-2x that raw luminance suggested. Use this ratio for any future comparison.
+Use this ratio for any future comparison, and measure it against a real
+silhouette: masking the body by "brighter than the backdrop" counts the
+backdrop too and reported 4% gold over 442k pixels where the truth was 17.5%
+over 105k. Render the scene twice, once with the armour hidden, and take the
+pixels that changed.
 
-### The blend mask table, solved against in-game captures
+The blend-table fix moved the ratio from 25% under the reference band to about
+10% over it, so the residual is now non-gold being slightly too dark relative
+to gold rather than much too light. That is a smaller and opposite error.
 
-The mask is a discrete selector: four saturated colours cover 96% of a real
-armour mask. `tint.BLEND_BUCKETS` maps a 3-bit bucket of the thresholded
-channels to a base layer, and the assignment was **fitted to measurements, not
-reasoned out**.
+### The blend mask table, settled on the fourth attempt
 
-Gold coverage as a percentage of lit body pixels, in game against the viewer
-from the same angle:
+**The mapping.** A splat: a ground layer with blue, green and red lerping over
+it in that order, highest channel winning, and the layers **numbered from the
+top** -- the natural reading reversed.
 
-| piece | in game | black to L1 | magenta to L1 |
-| ----- | ------- | ----------- | ------------- |
-| arms  | 12-18%  | 3.4%        | **15.2%** |
-| core  | 24.5%   | 24.5%       | **23.4%** |
-| legs  | 5.3%    | 12.0%       | **6.0%**  |
+| mask | layer | | mask | layer |
+| --- | --- | --- | --- | --- |
+| black (ground) | BaseLayer4 | | red | BaseLayer1 |
+| blue | BaseLayer3 | | magenta | BaseLayer1 |
+| green | BaseLayer2 | | yellow | BaseLayer1 |
+| cyan | BaseLayer2 | | white | BaseLayer1 |
 
-Swapping black and magenta leaves the torso where it was and fixes both the
-arms and the legs. Summed error over the three drops from 18.3 to 2.0.
+**Derived on Corbel Halcyon, confirmed on references it was not fitted to.**
+That order is what makes this attempt different from the three before it.
 
-Two other readings were tried against the same references and rejected:
+* **Corbel Halcyon** (OMC utility heavy). Yellow exists only as palette entry A,
+  so every yellow pixel needs a PaletteTint=1 layer. The third table sent the
+  mask's ground -- 80% of the helmet mask, 76% of the core's -- to BaseLayer2,
+  which is `steel_dark_01` on palette C and `gun_metal_03`, so the helmet shell
+  and upper chest rendered black where the game shows yellow, and the yellow
+  landed on the faceplate and a stripe down the core instead. The whole Corbel
+  lineup was inverted the same way.
+* **Sunchaser back, blind.** Upper back gold on CIG's store render **33.0%**;
+  this table **32.9%**, the third table 20.3%. Waist and legs are identical under
+  both, as they should be.
+* **Sunchaser shoulder pad, preserved.** Its mask has blue on for 99.9% of the
+  pad and green off, so red alone chooses: red -> BaseLayer1 gold frame, blue ->
+  BaseLayer3 grey interior. No ground or green appears on the pad.
+* **Beacon Undersuit Orange, blind.** The ground region is the sleeves. On
+  BaseLayer4 they come out the dusky mauve-brown (123,92,89) the reference
+  shows; on BaseLayer2 they were glossy black anodized metal.
 
-* **blue on BaseLayer1** fits the arms at 29.2% but collapses the torso to
-  4.8% against 24.5% and inflates the legs to 46.4% against 5.3%.
-* **PaletteTint as a rank** within the submaterial rather than an absolute
-  entry is refuted outright by Chiron AA Support, whose legs the game renders
-  with no primary colour at all where that reading predicts 49.5%.
+This also fits the colourway structure better: BaseLayer4 carries an item's
+*second* colour, and it now lands on the large secondary region (Beacon's
+sleeves) rather than on small green details.
 
-The lesson is that one piece cannot fit this table. The slaver torso alone
-suggested black was the base layer and that held up for two pieces while
-starving a third. Three references with different layer stacks were needed.
+**Four readings are refuted. Do not try any of them again:**
+
+| reading | why it fails |
+| --- | --- |
+| ground -> BaseLayer2, green -> BaseLayer4 (third) | Corbel inverted; Sunchaser back 13 points short; Beacon sleeves black |
+| blue -> BaseLayer1 (second) | inverts the Sunchaser shoulder pad |
+| ground -> BaseLayer1, magenta -> BaseLayer4 (first) | Beacon body in anodized metal: grey, 59% metallic |
+| plain blue <-> magenta swap | pad interior on a light rubber (204,204,204) where the reference is charcoal |
+
+**Method, which matters more than the table.** The first two attempts were fitted
+to a single aggregate figure on the slaver torso, which cannot discriminate: it
+carries near-black paint on BaseLayer1 (0.0395), BaseLayer2 (0.0382) and
+BaseLayer4 (0.084) alike. The third was fitted to located regions on two pieces
+and still wrong, because neither piece exercised the ground-vs-green choice. So:
+
+1. Bake candidate tables for every submaterial of a set with
+   `tint.compose_layered`, monkeypatching `BLEND_BUCKETS`.
+2. Swap the baked albedo and ORM onto the live materials by name, and render the
+   **current table first as a control** -- it must reproduce the bug report.
+3. Compare against a reference image, then **confirm on a different piece and a
+   different reference** before committing. Measure banded gold fraction against
+   a silhouette diff, not by eye.
+
+All submaterials of one piece share a single blend mask, so a whole-atlas bucket
+histogram is not a per-submaterial coverage; weight by the submaterial's own
+triangles or read it off a render.
+
+**CIG's store renders are the best reference available**, far better than a
+screen grab: `~/Downloads/Buy CDS Defiance 'Sunchaser' Armor Set ... _files/source*.webp`,
+five 1820x1024 images, the fifth showing the back. Measured off them: torso
+36.0% gold, upper back 33.0%, gold median (190,136,49), gold-to-non-gold
+contrast 2.48.
+
+### A colourway names BaseLayer3, and BaseLayer4 is its second colour
+
+Read across the 14 named Beacon colourways and the roles are unambiguous:
+BaseLayer1 and BaseLayer2 are frozen neutrals -- (125,125,125) and (65,65,65)
+in 12 of 14 -- while **BaseLayer3 carries the colour in the item's name**
+(Crimson 164,43,43; Yellow 239,215,33; Purple 94,74,138) and **BaseLayer4
+carries the second** (Green/*White* 255,255,255; Grey/*Aqua* 132,226,223;
+Tan/*Brown* 139,115,90).
+
+This is the cheapest discriminator available for any layer question: take a
+family of colourways, and the layer whose TintColor tracks the name is the one
+the artist meant as primary. It needs no render and no in-game capture.
 
 ### PaletteTint is an absolute index, not a rank -- tested and settled
 
@@ -1135,6 +1284,18 @@ viewer/src/
   Everything else is owned by `three/gltfCache.ts`, which disposes a whole GLB
   when its byte budget evicts it, and never one that a mounted `ArmorPiece` has
   pinned.
+- **`ContactShadows` must not be offset upwards.** drei parents its depth camera
+  to the component's own group, but the plane it runs the two blur passes
+  through is a standalone mesh pinned at world y=0. Give the group a positive y
+  and that blur plane falls behind the camera's `near`, both blur passes draw
+  nothing, and the second writes that nothing back over the render target. The
+  shadow then disappears with no error, no console warning, and a scene graph
+  that probes as perfectly healthy: plane present, `visible: true`, opacity
+  intact, depth camera correctly framed over the body. Only reading the render
+  target's *alpha* shows it empty — sampling its colour shows black either way,
+  since "no shadow" and "full shadow" are both black and differ only in alpha.
+  Offset downwards to clear the grid instead. Measured: y=0 and y=-0.01 give
+  3.89% shadow coverage, y=+0.005 and y=+0.05 give 0%.
 
 ## Legal
 
