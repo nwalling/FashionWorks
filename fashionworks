@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# StarFashion — one entry point for the whole project.
+# FashionWorks — one entry point for the whole project.
 #
-#   ./starfashion setup     install dependencies and build the extraction tools
-#   ./starfashion doctor    report what this machine can run
-#   ./starfashion use-p4k   point the pipeline at a Star Citizen install
-#   ./starfashion build     catalog + rig + convert everything
-#   ./starfashion demo      generate placeholder assets, no game data needed
-#   ./starfashion run       start the viewer
-#   ./starfashion check     tests, lint and a production build
-#   ./starfashion scx ...   pass anything through to the pipeline CLI
+#   ./fashionworks setup     install dependencies and build the extraction tools
+#   ./fashionworks doctor    report what this machine can run
+#   ./fashionworks use-p4k   point the pipeline at a Star Citizen install
+#   ./fashionworks build     catalog + rig + convert everything
+#   ./fashionworks demo      generate placeholder assets, no game data needed
+#   ./fashionworks run       start the viewer
+#   ./fashionworks check     tests, lint and a production build
+#   ./fashionworks scx ...   pass anything through to the pipeline CLI
 
 set -euo pipefail
 
@@ -64,7 +64,7 @@ cmd_setup() {
   cmd_doctor
 }
 
-need_venv() { [[ -x "$SCX" ]] || die "not set up yet — run: ./starfashion setup"; }
+need_venv() { [[ -x "$SCX" ]] || die "not set up yet — run: ./fashionworks setup"; }
 
 cmd_doctor()  { need_venv; "$SCX" doctor; }
 cmd_use_p4k() { need_venv; "$SCX" use-p4k "$@"; }
@@ -80,7 +80,7 @@ cmd_demo() {
 cmd_build() {
   need_venv
   "$SCX" doctor | grep -q 'Data.p4k.*\[found\]' \
-    || die "no Data.p4k configured — run: ./starfashion use-p4k <path to the install>"
+    || die "no Data.p4k configured — run: ./fashionworks use-p4k <path to the install>"
   bold "Catalog"; "$SCX" catalog
   bold "Base rig"; "$SCX" rig
   bold "Converting armor (this takes a while)"; "$SCX" convert --all
@@ -92,7 +92,7 @@ cmd_build() {
 cmd_run() {
   need_venv
   [[ -f "$ROOT/data/out/manifest.json" ]] \
-    || die "nothing to show yet — run ./starfashion demo, or build against a real install"
+    || die "nothing to show yet — run ./fashionworks demo, or build against a real install"
   [[ -e "$ROOT/viewer/public/assets" ]] || npm --prefix viewer run --silent link-assets
   bold "Viewer on http://localhost:$PORT"
   npm --prefix viewer run dev -- --port "$PORT"
@@ -119,5 +119,5 @@ case "${1:-help}" in
   check)   shift; cmd_check "$@" ;;
   scx)     shift; cmd_scx "$@" ;;
   help|-h|--help) usage ;;
-  *) die "unknown command: $1 (try ./starfashion help)" ;;
+  *) die "unknown command: $1 (try ./fashionworks help)" ;;
 esac

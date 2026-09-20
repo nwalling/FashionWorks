@@ -1,4 +1,4 @@
-# StarFashion
+# FashionWorks
 
 A Star Citizen armor kitbasher. It reads the game's own data, converts every
 wearable piece onto one shared skeleton, and lets you mix and match them in the
@@ -31,9 +31,9 @@ in one click, tint individual pieces, and export the result as JSON, a combined
 ## Quick start
 
 ```bash
-./starfashion setup     # dependencies, and build the extraction tools
-./starfashion demo      # placeholder assets — no game install needed
-./starfashion run       # http://localhost:5173
+./fashionworks setup     # dependencies, and build the extraction tools
+./fashionworks demo      # placeholder assets — no game install needed
+./fashionworks run       # http://localhost:5173
 ```
 
 `demo` generates a synthetic rig and armor set so the viewer is usable
@@ -43,10 +43,10 @@ same manifest, skeleton and binding path as the real thing.
 ## With a real install
 
 ```bash
-./starfashion use-p4k /path/to/StarCitizen/LIVE   # or the Data.p4k itself
-./starfashion doctor                              # what this machine can run
-./starfashion build                               # catalog, rig, convert
-./starfashion run
+./fashionworks use-p4k /path/to/StarCitizen/LIVE   # or the Data.p4k itself
+./fashionworks doctor                              # what this machine can run
+./fashionworks build                               # catalog, rig, convert
+./fashionworks run
 ```
 
 `use-p4k` accepts any volume, including an external drive or SD card, and writes
@@ -61,14 +61,14 @@ redoes what changed. A full first pass takes a while: the archive is around
 
 | | |
 | --- | --- |
-| `./starfashion setup` | install dependencies, build the extraction tools |
-| `./starfashion doctor` | report what this machine can run, and what is blocking |
-| `./starfashion use-p4k <path>` | point the pipeline at a Star Citizen install |
-| `./starfashion demo` | generate placeholder assets, no game data needed |
-| `./starfashion build` | catalog + base rig + convert everything |
-| `./starfashion run` | start the viewer |
-| `./starfashion check` | tests, lint, typecheck and a production build |
-| `./starfashion scx …` | pass anything through to the pipeline CLI |
+| `./fashionworks setup` | install dependencies, build the extraction tools |
+| `./fashionworks doctor` | report what this machine can run, and what is blocking |
+| `./fashionworks use-p4k <path>` | point the pipeline at a Star Citizen install |
+| `./fashionworks demo` | generate placeholder assets, no game data needed |
+| `./fashionworks build` | catalog + base rig + convert everything |
+| `./fashionworks run` | start the viewer |
+| `./fashionworks check` | tests, lint, typecheck and a production build |
+| `./fashionworks scx …` | pass anything through to the pipeline CLI |
 
 Useful pipeline commands: `scx sets` lists armor sets and how much of each is
 converted, `scx convert --set <key>` does one set, `scx refresh` re-points the
@@ -86,7 +86,7 @@ exactly what is missing.
 ## Layout
 
 ```
-starfashion         one entry point for everything below
+fashionworks         one entry point for everything below
 config/             settings.toml — every path in the project
 extract/            Python pipeline and the scx CLI
 blender/            headless normalization and export scripts
