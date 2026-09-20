@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>FashionWorks Phase 0 spike</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #101216; --panel: #181b21; --line: #2a2f38;
+    --ink: #e6e8ec; --dim: #99a0ad; --ok: #6ee7a0; --bad: #ff8080; --warn: #ffcc66;
+    --accent: #6aa9ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px; background: var(--bg); color: var(--ink);
+    font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
+  }
+  main { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p.lede { color: var(--dim); margin: 0 0 20px; }
+  #drop {
+    border: 2px dashed var(--line); border-radius: 12px; padding: 40px 24px;
+    text-align: center; background: var(--panel); transition: border-color .15s, background .15s;
+  }
+  #drop.hot { border-color: var(--accent); background: #1b2330; }
+  #drop strong { display: block; font-size: 17px; margin-bottom: 6px; }
+  #drop span { color: var(--dim); }
+  input[type=file] { margin-top: 14px; color: var(--dim); }
+  pre {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 16px; overflow-x: auto; white-space: pre-wrap; margin: 20px 0 0;
+    font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; min-height: 40px;
+  }
+  .fail { color: var(--bad); } .ok { color: var(--ok); } .warn { color: var(--warn); }
+  canvas { margin-top: 16px; border: 1px solid var(--line); border-radius: 8px; max-width: 100%; image-rendering: pixelated; }
+  ul { color: var(--dim); font-size: 13px; padding-left: 20px; }
+  code { color: var(--ink); }
+</style>
+</head>
+<body>
+<main>
+  <h1>FashionWorks Phase 0 spike</h1>
+  <p class="lede">
+    Opens a real <code>Data.p4k</code> in this browser, indexes it, parses the
+    DataCore and decodes one armour texture. Nothing is uploaded — the file
+    never leaves this machine.
+  </p>
+
+  <div id="drop">
+    <strong>Drag Data.p4k here</strong>
+    <span>from <code>…\StarCitizen\LIVE\</code></span>
+    <input type="file" id="pick">
+  </div>
+
+  <pre id="out">Waiting for a file…</pre>
+  <canvas id="preview" width="256" height="256" hidden></canvas>
+
+  <ul>
+    <li><b>Drag-and-drop is the path that matters.</b> Chromium's File System
+      Access blocklist covers <code>Program Files</code>, so the modern picker
+      fails on a default install. Drag-and-drop and this plain file input are
+      not subject to it — that is what this page is checking.</li>
+    <li>Run in Chrome <i>and</i> Firefox. Both are Phase 0 exit criteria.</li>
+    <li>Must be served over http, not opened as a file:// URL — workers and
+      WebAssembly need an origin. <code>py -m http.server</code> in this folder
+      works.</li>
+  </ul>
+</main>
+
+<script>
+const out = document.getElementById('out');
+const drop = document.getElementById('drop');
+const canvas = document.getElementById('preview');
+let started = false;
+
+function reset() { out.textContent = ''; }
+function line(text, kind) {
+  const span = document.createElement('span');
+  if (kind && kind !== 'log') span.className = kind;
+  span.textContent = text + '\n';
+  out.appendChild(span);
+}
+
+function run(file) {
+  if (started) return;
+  started = true;
+  reset();
+  line('starting…', 'warn');
+  const worker = new Worker('./worker.js');
+  worker.onmessage = (ev) => {
+    const m = ev.data;
+    if (m.kind === 'log' || m.kind === 'fail' || m.kind === 'warn') {
+      if (out.firstChild && out.firstChild.textContent === 'starting…\n') reset();
+      line(m.line, m.kind);
+    } else if (m.kind === 'preview') {
+      // Downsample the 2048² mip so the page stays light.
+      const full = new ImageData(new Uint8ClampedArray(m.rgba), m.width, m.height);
+      const src = new OffscreenCanvas(m.width, m.height);
+      src.getContext('2d').putImageData(full, 0, 0);
+      canvas.hidden = false;
+      canvas.getContext('2d').drawImage(src, 0, 0, canvas.width, canvas.height);
+    } else if (m.kind === 'done') {
+      started = false;
+      if (m.results) {
+        const pass = m.results.indexMs < 120000 && m.results.count > 1000000;
+        line('\n' + (pass ? 'PASS  indexing inside the Phase 0 budget'
+                          : 'FAIL  see figures above'), pass ? 'ok' : 'fail');
+      }
+      worker.terminate();
+    }
+  };
+  worker.onerror = (e) => { line('worker error: ' + e.message, 'fail'); started = false; };
+  worker.postMessage({ file });
+}
+
+document.getElementById('pick').addEventListener('change', (e) => {
+  if (e.target.files[0]) run(e.target.files[0]);
+});
+['dragenter', 'dragover'].forEach((t) =>
+  drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add('hot'); }));
+['dragleave', 'drop'].forEach((t) =>
+  drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove('hot'); }));
+drop.addEventListener('drop', (e) => {
+  const f = e.dataTransfer.files[0];
+  if (f) run(f);
+});
+document.addEventListener('dragover', (e) => e.preventDefault());
+document.addEventListener('drop', (e) => e.preventDefault());
+</script>
+</body>
+</html>

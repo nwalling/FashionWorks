@@ -275,8 +275,15 @@ Built and verified in this repo:
 
 - `web/core/` — the Rust WebAssembly core. Reads a P4K archive over byte ranges
   instead of a file handle, which is what makes a 158 GB file usable in a
-  browser. Compiles clean to `wasm32-unknown-unknown`: **0.50 MB raw,
-  0.10 MB brotli**.
+  browser; also parses the DataCore and decodes split DDS textures.
+  **0.07 MB brotli.**
+- `web/spike/` — Phase 0 feasibility, **run against the real 147.59 GB archive**
+  rather than against a compiler: 1,365,842 entries indexed in 8.3s from two
+  range reads (0.29% of the file), `Game2.dcb` parsed to 116,921 records in
+  0.1s, a 2048² texture decoded in 383ms, peak RSS 1.45 GB. A file extracted
+  through the core is byte-identical to the native StarBreaker CLI's output.
+  The browser page, worker and wasm all run; **Windows, Firefox and
+  Program Files drag-and-drop are still untested** and remain the open risk.
 - `web/patches/0001-starbreaker-p4k-browser-support.patch` — 20 lines against
   the vendored StarBreaker checkout: gates the filesystem-only API away from
   wasm, and exposes `P4kArchive::entries_from_reader`, which already existed

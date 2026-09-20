@@ -303,7 +303,8 @@ Each phase ends on an exit criterion, not a date.
   the visitor's own game files and hosts none of them. Add the non-affiliation
   notice. StarBreaker is MIT, so redistributing a WebAssembly build needs only
   its notice. cgf-converter is not shipped.
-  **Exit:** a written go/no-go.
+  **Exit:** a written go/no-go. **Status: not started, and it blocks everything
+  else.**
 - *Feasibility spike:* compile `starbreaker-p4k`, `-datacore` and `-dds` to
   `wasm32`. In a bare page on Windows, in both Chrome and Firefox, open the real
   158 GB `Data.p4k` through `<input>` and drag-and-drop, read the central
@@ -312,6 +313,28 @@ Each phase ends on an exit criterion, not a date.
   **Exit:** indexing plus DataCore under 2 minutes, peak memory under 2 GB,
   WebAssembly ≤ 2 MB brotli. If this fails, reassess before building anything
   else; the local helper is the fallback.
+
+  **Status: the headless half passes on the real archive; the Windows/browser
+  half is outstanding.** `web/spike/` holds both, with the numbers in its
+  README. Against a 147.59 GB `Data.p4k`: 1,365,842 entries indexed in 8.3s from
+  **two range reads totalling 0.29% of the file**, `Game2.dcb` read in 1.2s and
+  parsed to 116,921 records in 0.1s, a 2048² DDS decoded in 383ms, peak RSS
+  1.45 GB, wasm **0.07 MB brotli**. A file extracted through the core is
+  byte-identical to the native StarBreaker CLI's output. In a browser the page,
+  worker, `FileReaderSync` and wasm all run and reject a fake archive correctly;
+  what is untested is the real file, Firefox, and Program Files drag-and-drop.
+
+  Three assumptions in this plan turned out to be wrong, all in our favour
+  except the last:
+  - `memmap2` and `rayon` **compile to wasm32 unchanged**. The table above says
+    both need a feature flag. They do not, on the paths the browser build calls.
+  - `.skinm` parsing is not needed for the spike to be meaningful; DataCore and
+    DDS were the real risks and both cleared.
+  - **A `.dds` in this archive is not a whole DDS.** Every real texture is split:
+    the named entry holds headers and the smallest mip, the rest live in sibling
+    entries. `FsSiblingReader` assumes a directory, which a browser has not, so
+    the core resolves siblings against the entry index. Anything that decodes a
+    texture has to do this, so it belongs in Phase 3's design, not as a surprise.
 
 **Phase 1 — Catalogue in the browser**
 Port `catalog.py`, including product-name set keys and variant linking.

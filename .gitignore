@@ -33,3 +33,7 @@ config/settings.local.toml
 
 # Scratch pages used to eyeball generated textures
 /viewer/public/_*/
+
+# Generated wasm bindings for the Phase 0 spike; web/spike/build.sh makes them.
+web/spike/pkg/
+web/spike/pkg-web/
