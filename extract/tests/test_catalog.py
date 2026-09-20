@@ -140,18 +140,58 @@ def test_canonical_key_strips_stacked_suffixes() -> None:
     assert catalog.canonical_key("cds_helmet_light") == "cds_helmet_light"
 
 
-def test_set_key_groups_by_path_manufacturer_and_weight() -> None:
+def test_set_key_groups_by_product_name() -> None:
+    """The display name is the set, because the game's own grouping is not.
+
+    ``Set_<n>`` is present on part of a family and absent from the rest. Corbel
+    is the case that exposed it: four helmets carry ``Set_01`` and land on the
+    shared ``cds_heavy_set01``, the arms, legs and core carry no set tag and
+    fall back to a path key, and one helmet has no manufacturer code and lands
+    on a third key -- so "equip full set" could never assemble it.
+    """
+    from sc_extract.manifest import Geometry
+
+    def item(name: str, slot: str, *, tags: list[str] | None = None,
+             code: str = "CDS", weight: str = "heavy", flags: list[str] | None = None) -> Item:
+        return Item(
+            id=name, class_name=name.lower().replace(" ", "_"), name=name, slot=slot,
+            weight_class=weight, manufacturer=Manufacturer(code=code),
+            geometry=[Geometry(source=f"objects/{slot}.skin")],
+            tags=tags or [], flags=flags or [],
+        )
+
+    # The real Corbel shape: a tagged helmet, and untagged arms/legs/core.
+    helmet = item("Corbel Helmet Halcyon", "helmet", tags=["Set_01", "Color_01"])
+    arms = item("Corbel Arms Halcyon", "arms")
+    legs = item("Corbel Legs Halcyon", "legs")
+    core = item("Corbel Core Halcyon", "torso")
+    keys = {catalog.set_key(i) for i in (helmet, arms, legs, core)}
+    assert keys == {"corbel"}, f"Corbel must be one set, got {keys}"
+
+    # A different product with the same manufacturer and weight stays separate,
+    # where the old path+manufacturer+weight key merged them.
+    other = item("Defiance Core Tactical", "torso")
+    assert catalog.set_key(other) != catalog.set_key(core)
+
+    # The product part ends at the slot word, so these do not collapse onto
+    # a shared first word.
+    assert catalog.set_key(item("The Butcher Helmet", "helmet")) != catalog.set_key(
+        item("The Hill Horror Helmet", "helmet")
+    )
+    assert catalog.set_key(item("Odyssey II Racing Helmet Alpha", "helmet")) != catalog.set_key(
+        item("Odyssey Helmet Tan", "helmet")
+    )
+
+
+def test_set_key_falls_back_when_the_name_did_not_resolve() -> None:
+    """An ``unnamed`` item has no product name, so the old scheme still applies."""
     from sc_extract.manifest import Geometry
 
     def item(path: str, code: str, weight: str) -> Item:
         return Item(
-            id=path,
-            class_name=path,
-            name=path,
-            slot="helmet",
-            weight_class=weight,
-            manufacturer=Manufacturer(code=code),
-            geometry=[Geometry(source=path)],
+            id=path, class_name=path, name=path, slot="helmet", weight_class=weight,
+            manufacturer=Manufacturer(code=code), geometry=[Geometry(source=path)],
+            flags=["unnamed"],
         )
 
     a = item("a/b/aeg/pathfinder/helmet.skin", "AEG", "light")

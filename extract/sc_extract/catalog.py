@@ -553,13 +553,56 @@ def canonical_key(class_name: str) -> str:
         key = stripped
 
 
-def set_key(item: Item) -> str:
-    """Derive a set id.
+# Words that end the product part of a display name: "Corbel Arms Crush" is the
+# Corbel set, "Odyssey II Racing Helmet Alpha" the Odyssey II Racing set.
+_NAME_SLOT_WORD = re.compile(
+    r"^(helmet|helm|core|torso|arms|arm|legs|leg|backpack|pack|undersuit|suit|flight)$",
+    re.IGNORECASE,
+)
 
-    This build tags items with ``Set_<n>`` and a manufacturer, which is an exact
-    grouping. Items without a set tag fall back to shared geometry path prefix
-    plus manufacturer plus weight class.
+
+def product_key(name: str) -> str:
+    """The product part of a display name: everything before the slot word."""
+    words = name.split()
+    kept: list[str] = []
+    for word in words:
+        if _NAME_SLOT_WORD.match(word.strip('"()')):
+            break
+        kept.append(word)
+    return " ".join(kept).strip().lower()
+
+
+def set_key(item: Item) -> str:
+    """Derive a set id, from the product name where there is one.
+
+    **The game's own grouping data does not describe sets.** ``Set_<n>`` is
+    present on only part of a family and absent from the rest, and the path
+    fallback is far too coarse, so the two together split 48 families across
+    several keys -- 1003 of 2439 visible items -- while lumping unrelated
+    families into one. Corbel is the clean example: its four helmets carry
+    ``Set_01`` and land on ``cds_heavy_set01`` (shared with 21 other product
+    lines), its arms, legs and core carry no set tag at all and fall back to
+    ``objects/characters/human/male_v7/armor|cds|heavy``, and ``Corbel Helmet
+    Crush`` has no manufacturer code so it lands on a third key. Equipping the
+    full set could never work: from the core there is no helmet in the bucket,
+    and from the helmet there are no arms, legs or core.
+
+    The display name is the reliable signal, because it is what CIG shows the
+    player and it names the product: "Corbel Arms Crush" is Corbel. Taking the
+    words before the slot word gives 191 keys and **38 complete
+    helmet/torso/arms/legs sets against 33** for the tag-and-path scheme, with
+    no product split across keys and no key mixing products. It also keeps
+    "The Butcher" apart from "The Hill Horror" and "Odyssey" from "Odyssey II
+    Racing", which keying on the first word alone does not.
+
+    Items whose localization key did not resolve have no usable name, so those
+    still fall back to the tag and path scheme below.
     """
+    if not (set(item.flags or []) & {"unnamed"}):
+        product = product_key(item.name or "")
+        if product:
+            return product
+
     set_tag = tag_value(item.tags, _SET_TAG)
     if set_tag:
         bits = [item.manufacturer.code or "", item.weight_class or "", f"set{set_tag}"]
