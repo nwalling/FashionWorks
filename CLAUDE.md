@@ -655,6 +655,52 @@ this work is built on them. A first eyeball reading of Odyssey as a tan/black
 reference (35% against 25%), and the excess contrast was crushing mid-tan to
 near-black.
 
+### An item with no material wears another item's surface
+
+A colour variant shares its canonical item's mesh, so an item that resolves
+*no* material and *no* override does not render untinted -- it renders as
+whichever item baked that GLB. `Citadel-SE Arms Maroon` came out as
+`Citadel Arms Brimstone`, `ORC-mkX Arms (XenoThreat v2)` as `GCD-Army Arms`,
+`ADP Arms Woodland` as `ADP Arms Aqua`. That is worse than a missing texture,
+because it looks deliberate.
+
+**146 items were in this state**, across every slot, and many were the
+*canonical* member of their family rather than a variant. Two causes:
+
+* **82: the material is authored on one gender's node only.** ADP, Aril, Aves
+  and Aztalan put it on the female `.skin` and leave the male one null.
+  `geometry_for` now falls back to the other skeleton's worn nodes. It must be
+  *those* nodes and not any node: the root is the dropped-item carry crate, and
+  its material would paint the armour as a storage box. Armour materials are
+  gender-neutral here and are assigned by submaterial name, so sharing one
+  across the pair is how the data already works. Rebuilding gave **114 items a
+  material and took none away**.
+* **63: no node carries a material at all.** Artimex and Carrion are the shape
+  of this. Still open; these need the Collada-stem discovery `discover_materials`
+  does at convert time, which the catalog stage does not run.
+
+Found by rendering the catalogue and diffing colourways against each other, not
+by reading records -- the manifest looks healthy, because "no material" is an
+empty list rather than an error.
+
+**`scx catalog` drops asset pointers and overrides**, by design: it rebuilds
+from the DataCore, and `scx refresh` then `scx variants` restore them. Measuring
+"items with a GLB" straight after a catalog run therefore reports zero and any
+check keyed on that silently passes. Run the three in order before trusting a
+count.
+
+### Two audit checks that would have caught these
+
+`scx audit` gained `surface-borrowed`/`surface-missing` and
+`variant-surfaces-identical`. The second compares baked *filenames* rather than
+pixels, deliberately: the names are content hashes, so equality means the
+pipeline decided two colourways are one surface -- which is the fact worth
+reporting, and is exactly how the palette-specular bug presented.
+
+`check_colourways_differ` already existed and did not catch either, because it
+looks for a whole family of four or more collapsing onto one colour. Lynx
+presented as *pairs* inside a family that otherwise varied fine.
+
 ### Stray weight goes to the vertex's own bones, not one bone per mesh
 
 Pieces floated off the body: a bracelet on the Defiance arms, a left

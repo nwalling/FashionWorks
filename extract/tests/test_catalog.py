@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sc_extract import catalog
 from sc_extract.catalog import GeoNode
-from sc_extract.dcb import Index
+from sc_extract.dcb import Index, Record
 from sc_extract.localization import Localization
 from sc_extract.manifest import Item, Manufacturer
 
@@ -304,3 +304,69 @@ def test_a_reference_resolves_to_the_right_record_type() -> None:
     assert index.resolve_ref("file://./shared_name.json", record_type="TintPaletteTree") is palette
     assert entity.record_type == "EntityClassDefinition"
     assert palette.record_type == "TintPaletteTree"
+
+
+_ARMOR = "Objects/Characters/Human"
+
+
+def _geometry_record(male_material: str | None, female_material: str | None) -> Record:
+    """A record shaped like the real ones: crate at the root, a skin per gender."""
+
+    def node(path: str, material: str | None) -> dict:
+        inner: dict = {"Geometry": {"path": path}}
+        if material is not None:
+            inner["Material"] = {"path": material}
+        return {"Geometry": inner}
+
+    return Record(
+        id="x",
+        class_name="cds_armor_heavy_arms_01_01_01",
+        path=None,
+        data={
+            "_RecordValue_": {
+                "Components": [
+                    {
+                        "_Type_": "SGeometryResourceParams",
+                        "Geometry": {
+                            "Geometry": {
+                                "Geometry": {"path": "crate_armor_arms_1_005x005x005.cgf"}
+                            },
+                            "SubGeometry": [
+                                node(f"{_ARMOR}/female_v2/f_cds_heavy_armor_01_arms.skin", female_material),
+                                node(f"{_ARMOR}/male_v7/m_cds_heavy_armor_01_arms.skin", male_material),
+                            ],
+                        },
+                    }
+                ]
+            }
+        },
+    )
+
+
+def test_material_falls_back_to_the_other_gender_s_worn_node() -> None:
+    """The material is often authored on one gender's node only.
+
+    ADP, Aril and Aves put it on the female skin and leave the male one null.
+    An item with no material does not render untinted -- it wears whatever
+    baked the shared GLB, which is how Citadel-SE Arms Maroon came out as
+    Citadel Arms Brimstone. 82 of 146 such items are this case.
+    """
+    record = _geometry_record(male_material=None, female_material="m_cds_heavy_armor.mtl")
+    assert catalog.materials_for(record, "male") == ["m_cds_heavy_armor.mtl"]
+
+    # The male node's own material still wins when it has one.
+    record = _geometry_record(male_material="male.mtl", female_material="female.mtl")
+    assert catalog.materials_for(record, "male") == ["male.mtl"]
+
+
+def test_material_fallback_never_takes_the_carry_crate_s() -> None:
+    """The root node is the dropped-item prop, and its material is a crate.
+
+    Falling back to *any* node rather than to the other skeleton's worn node
+    would paint the armour as a storage box.
+    """
+    record = _geometry_record(male_material=None, female_material=None)
+    record.data["_RecordValue_"]["Components"][0]["Geometry"]["Geometry"]["Material"] = {
+        "path": "crate_armor.mtl"
+    }
+    assert catalog.materials_for(record, "male") == []

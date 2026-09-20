@@ -389,6 +389,86 @@ def check_no_sentinel_red(settings: Settings, manifest: Manifest, report: AuditR
                 )
 
 
+def check_has_own_surface(settings: Settings, manifest: Manifest, report: AuditReport) -> None:
+    """An item with no material and no override wears whatever baked its GLB.
+
+    Colour variants share their canonical item's mesh, so a variant with
+    nothing of its own is not "untinted" -- it renders as *some other item*.
+    ``Citadel-SE Arms Maroon`` comes out as ``Citadel Arms Brimstone`` and
+    ``ORC-mkX Arms (XenoThreat v2)`` as ``GCD-Army Arms``, which is worse than
+    a missing texture because it looks deliberate.
+
+    Found by rendering 1874 items and diffing colourways against each other:
+    115 items were in this state, spread across every slot, and many are the
+    *canonical* member of their family rather than a variant.
+    """
+    byglb: dict[str, list[Item]] = defaultdict(list)
+    for item in manifest.items:
+        rel = (item.assets.glb if item.assets else None) or None
+        if rel and _visible(item):
+            byglb[rel].append(item)
+    for item in manifest.items:
+        if not _visible(item):
+            continue
+        rel = (item.assets.glb if item.assets else None) or None
+        if not rel or item.materials or item.material_overrides:
+            continue
+        others = sorted({o.name for o in byglb[rel] if o.name != item.name})
+        if others:
+            report.add(
+                "surface-borrowed",
+                "error",
+                item.name,
+                f"no material of its own; renders as {others[0]!r}"
+                + (f" (+{len(others) - 1} more on this mesh)" if len(others) > 1 else ""),
+            )
+        else:
+            report.add(
+                "surface-missing", "warn", item.name, f"no material and no override [{item.slot}]"
+            )
+
+
+def check_variant_surfaces_differ(
+    settings: Settings, manifest: Manifest, report: AuditReport
+) -> None:
+    """Two differently-named colourways must not bake to the same textures.
+
+    :func:`check_colourways_differ` catches a whole family collapsing onto one
+    colour; this catches a *pair*, which is how the palette-specular bug
+    presented. Lynx Blue, Green, Purple, Seagreen and Violet baked byte-identical
+    textures because ``layered_key`` hashed only the palette's colour and their
+    entire colourway lives in its specular.
+
+    Comparing the baked filenames rather than their pixels is deliberate: the
+    names are content hashes, so equality here means the pipeline decided these
+    are one surface, which is the thing worth reporting.
+    """
+    families: dict[str, list[Item]] = defaultdict(list)
+    for item in manifest.items:
+        if _visible(item) and (item.material_overrides or []):
+            families[item.variant_of or item.id].append(item)
+
+    def surface(item: Item) -> tuple[str, ...]:
+        return tuple(sorted(o.base_color for o in item.material_overrides or []))
+
+    for members in families.values():
+        if len(members) < 2:
+            continue
+        bysurface: dict[tuple[str, ...], list[str]] = defaultdict(list)
+        for item in members:
+            bysurface[surface(item)].append(item.name)
+        for names in bysurface.values():
+            distinct = sorted(set(names))
+            if len(distinct) > 1:
+                report.add(
+                    "variant-surfaces-identical",
+                    "error",
+                    distinct[0],
+                    f"bakes the same textures as {', '.join(distinct[1:4])}"
+                    + (f" (+{len(distinct) - 4} more)" if len(distinct) > 4 else ""),
+                )
+
+
 CHECKS = (
     check_overrides_bind,
     check_colourways_differ,
@@ -397,6 +477,8 @@ CHECKS = (
     check_distinct_names,
     check_not_a_fragment,
     check_no_sentinel_red,
+    check_has_own_surface,
+    check_variant_surfaces_differ,
 )
 
 

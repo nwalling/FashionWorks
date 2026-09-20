@@ -362,6 +362,25 @@ def geometry_for(
     for node in chosen:
         if node.material and node.material not in materials:
             materials.append(node.material)
+
+    if not materials:
+        # The material is often authored on one gender's node only. ADP, Aril
+        # and Aves all put it on the female `.skin` and leave the male one
+        # null, and a variant with no material does not render untinted -- it
+        # wears whatever item baked the shared GLB, so `Citadel-SE Arms Maroon`
+        # came out as `Citadel Arms Brimstone`. 82 of the 146 items with no
+        # material are this case.
+        #
+        # Taking it from the *other skeleton's worn nodes* rather than from any
+        # node matters: the root node is the dropped-item carry crate, and its
+        # material would paint the armour as a storage box. Armour materials
+        # are gender-neutral in this build and are assigned by submaterial
+        # name, so sharing one across the pair is how the data already works.
+        other = "female" if skeleton == "male" else "male"
+        for node in select_wearables(nodes, other):
+            if node.material and node.material not in materials:
+                materials.append(node.material)
+
     return geometry, materials, chosen, nodes
 
 
