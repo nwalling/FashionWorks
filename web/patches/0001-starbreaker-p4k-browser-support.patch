@@ -1,0 +1,67 @@
+diff --git a/crates/starbreaker-p4k/src/archive.rs b/crates/starbreaker-p4k/src/archive.rs
+index 3a7b1e1..dcfa8d0 100644
+--- a/crates/starbreaker-p4k/src/archive.rs
++++ b/crates/starbreaker-p4k/src/archive.rs
+@@ -97,6 +97,19 @@ impl<'a> P4kArchive<'a> {
+         })
+     }
+ 
++    /// Index an archive that is neither in memory nor on a local filesystem.
++    ///
++    /// Reads only the EOCD tail and the central directory, so it works over a
++    /// remote or browser-supplied reader where the archive itself is far too
++    /// large to hold. This is the same path `MappedP4k` takes internally; it is
++    /// exposed because a `Path` and a full byte slice are the only two ways in
++    /// otherwise, and a browser has neither.
++    pub fn entries_from_reader(
++        reader: &mut (impl std::io::Read + std::io::Seek),
++    ) -> Result<Vec<P4kEntry>, P4kError> {
++        parse_central_directory_from_file(reader, None).map(|parsed| parsed.0)
++    }
++
+     /// Read and decompress an entry's data.
+     pub fn read(&self, entry: &P4kEntry) -> Result<Vec<u8>, P4kError> {
+         Self::read_from_data(self.data, entry)
+@@ -174,6 +187,7 @@ impl<'a> P4kArchive<'a> {
+     /// Passes the offset explicitly so concurrent callers don't coordinate
+     /// on a cursor — the same `&File` handle is safe to share across threads.
+     /// Two syscalls per read (header + data); no seeks.
++    #[cfg(any(unix, windows))]
+     pub fn read_from_file_at(file: &std::fs::File, entry: &P4kEntry) -> Result<Vec<u8>, P4kError> {
+         use crate::posread::pread_exact;
+ 
+diff --git a/crates/starbreaker-p4k/src/lib.rs b/crates/starbreaker-p4k/src/lib.rs
+index 8d990c7..3bfb08e 100644
+--- a/crates/starbreaker-p4k/src/lib.rs
++++ b/crates/starbreaker-p4k/src/lib.rs
+@@ -1,12 +1,16 @@
+ pub mod archive;
+ pub mod crypto;
++#[cfg(any(unix, windows))]
+ pub mod discover;
+ pub mod error;
++#[cfg(any(unix, windows))]
+ pub mod owned;
+ pub(crate) mod posread;
+ pub mod types;
+ 
+ pub use archive::{DirEntry, P4kArchive, P4kEntry};
++#[cfg(any(unix, windows))]
+ pub use discover::{find_p4k, open_p4k};
+ pub use error::P4kError;
++#[cfg(any(unix, windows))]
+ pub use owned::MappedP4k;
+diff --git a/crates/starbreaker-p4k/src/posread.rs b/crates/starbreaker-p4k/src/posread.rs
+index c987501..a6136fe 100644
+--- a/crates/starbreaker-p4k/src/posread.rs
++++ b/crates/starbreaker-p4k/src/posread.rs
+@@ -3,7 +3,9 @@
+ //! Lets multiple threads read from a single `File` handle concurrently and
+ //! cuts one syscall per random read (no separate seek).
+ 
++#[cfg(any(unix, windows))]
+ use std::fs::File;
++#[cfg(any(unix, windows))]
+ use std::io;
+ 
+ /// Read exactly `buf.len()` bytes from `file` starting at absolute byte

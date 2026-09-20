@@ -34,6 +34,22 @@ if [[ ! -x "$CARGO" ]]; then
   exit 1
 fi
 clone_or_update https://github.com/diogotr7/StarBreaker.git "$SRC/StarBreaker"
+
+# The browser build needs two things upstream does not expose yet: the
+# filesystem-only API gated away from wasm32, and a reader-based index entry
+# point (`entries_from_reader`) so a 158 GB archive can be read over byte
+# ranges. Both are additive; see web/patches. Re-applied after every pull
+# because clone_or_update fast-forwards the checkout.
+PATCH="$ROOT/web/patches/0001-starbreaker-p4k-browser-support.patch"
+if [[ -f "$PATCH" ]]; then
+  if git -C "$SRC/StarBreaker" apply --reverse --check "$PATCH" 2>/dev/null; then
+    echo "  browser-support patch already applied"
+  elif git -C "$SRC/StarBreaker" apply "$PATCH" 2>/dev/null; then
+    echo "  browser-support patch applied"
+  else
+    echo "  WARNING: browser-support patch did not apply; the web core will not build" >&2
+  fi
+fi
 "$CARGO" build --release --manifest-path "$SRC/StarBreaker/Cargo.toml" -p starbreaker
 ln -sf ../src/StarBreaker/target/release/starbreaker "$BIN/starbreaker"
 "$BIN/starbreaker" --version
