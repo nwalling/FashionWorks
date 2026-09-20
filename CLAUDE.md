@@ -9,6 +9,8 @@ Data.p4k -> catalog (JSON) -> geometry/textures -> Blender normalize -> .glb + m
 ```
 
 `LIGHTING.md` holds a deferred plan for the viewer's lighting model.
+`WEB-LEGAL.md` holds the Phase 0 legal research: what CIG's EULA and
+Fandom FAQ actually say, and the options. The go/no-go is still open.
 `WEB.md` holds the plan for a public web front end on sc-hangarworks.org.
 `WEB-INTEGRATION.md` is the contract the Hangarworks site builds against.
 
