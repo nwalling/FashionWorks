@@ -187,7 +187,15 @@ Tokens consumed (all already defined on the live site):
 1. Render the component inside the normal site layout, so it inherits
    `<html data-theme>` — **not** in an iframe. A cross-origin iframe cannot read
    these tokens and would double the page weight.
-2. If a token is ever renamed, tell us; the component maps names in one place.
+2. If a token is ever renamed **or its resolved value corrected**, tell us. The
+   component maps names in one place, but a value change is the more dangerous
+   of the two: it fails silently, looking like a design choice rather than a
+   bug. Corrections so far:
+   - **2026-09-20** — `--sc-surface-2` and `--sc-shadow` were fixed on the
+     Hangarworks side. Before that, `--sc-surface-2` resolved to the default
+     theme's teal and `--sc-shadow` to the dark-theme shadow on *every* theme.
+     Nothing here was written against the old values: no component exists yet
+     (§7), so the fix lands before the first line that reads them.
 3. Tabler Icons is assumed available (the site already loads it). The component
    ships no icon font of its own.
 

@@ -576,6 +576,83 @@ the docs describe and was never affected.
 
 Dielectrics are unchanged: their texture genuinely is albedo.
 
+### A palette entry has two colours, and a metal layer takes the specular
+
+A tint palette entry carries a tint colour *and* a specular colour. The
+composite read only the first, which is right for a dielectric and wrong for a
+metal: a metal has no diffuse albedo, so its appearance **is** its F0. The
+entry's specular is that F0, and its tint colour says nothing.
+
+**The Lynx arms settle it, because they have nothing else.** All four base
+layers of `gauntlets_m` sit on `iron_scratched_*` with `TintColor` white and
+`PaletteTint` 1/2/3, every colourway names the same `.mtl` and the same
+geometry, and the whole colourway lives in the palette specular:
+
+| colourway | entryA colour | entryA **spec** |
+| --- | --- | --- |
+| Red | `#ffffff` | `#ff0000` |
+| Orange | `#ffffff` | `#ff7d03` |
+| Yellow | `#ffffff` | `#ffd303` |
+| Green | `#e3e3e3` | `#0a921c` |
+| Seagreen | `#e3e3e3` | `#00ffaa` |
+| Blue | `#e3e3e3` | `#0314fd` |
+| Purple | `#e3e3e3` | `#7703ff` |
+| Violet | `#e3e3e3` | `#ee01ff` |
+
+Reading the colour rendered ten Lynx colourways as the same grey arm, and the
+five that differ *only* in specular came out pixel-identical -- hue EMD exactly
+0.0000 between Blue, Green, Purple, Seagreen and Violet. The internal control is
+that Aqua and Olive, which carry their hue in the tint colour (`#39615a`,
+`#4a3e2c`) with a neutral spec, always rendered correctly.
+
+**Confirmed against CIG's own studio renders**, not inferred: the cstone
+reference shots of Lynx Arms Blue/Green/Red/Yellow show exactly the hue the
+specular predicts, on a steel arm whose other three layers take the neutral
+entryC spec, which is what the mask coverage predicts too.
+
+**Scope.** 1154 of 6275 palette-tinted base-layer references in the male armour
+tree are metal (18.4%), so this is not a corner. 46 items were rendering
+identically to a sibling purely from this -- the Lynx arms, the Oracle helmets,
+the Stirling Exploration backpacks among them.
+
+**Regression-checked against every piece this file already validated**, by
+baking each twice and diffing per submaterial: Defiance Core Sunchaser, Beacon
+Undersuit Orange and Odyssey II Undersuit Tan/Black are bit-identical, 0 of 5,
+7 and 12 submaterials changed. Corbel Halcyon moves slightly and stays plainly
+yellow (`core01_m` 173,127,0 -> 151,113,14). Emulate the old behaviour for such
+a diff by passing a palette whose `spec` is set to its `color`; that is exactly
+what the previous code did.
+
+### cstone.space is a reference corpus, and its ids are ours
+
+`finder.cstone.space` keys every item by the **same GUID the DataCore uses**, so
+it joins to `manifest.items[].id` exactly -- no name matching. 2402 of our 2615
+items are in their index, and `https://cstone.space/uifimages/<id>.png` is a
+reference photo for about 78% of those. Their item pages also carry the class
+name, and their names disambiguate 134 of our duplicate display names, including
+some we have as `unnamed` (`doom_combat_medium_arms_01_01_01` is "Clash Arms").
+There is no index route -- `/FPSArmors1/` is a 404 -- but `GET /GetSearch`
+returns the whole 7807-item list as JSON.
+
+**Most of those images are player screenshots, not studio renders, and that
+limits them.** Only about 3% have a uniform dark background; the rest are shot
+in hangars with machinery, signage and coloured lighting in frame. Scoring a
+reference against its *own* name, which should be easy, gives a median named-hue
+mass of 0.62 on the studio subset and 0.19 on the rest -- and blue scores 0.95
+because hangars are blue-lit while olive and gold score 0.01. So the cluttered
+ones are for eyeballing a suspicion, never for an automated verdict. Segment on
+a uniform dark border before trusting one.
+
+**Compare in hue, not luminance.** Our viewer runs about twice as contrasty as
+these references (Odyssey II Tan/Black: light/dark median ratio 4.48 against the
+reference's 2.27, matching the 4.09-vs-2.48 gap already recorded for Sunchaser),
+so any luminance comparison flags every item. HSV hue and saturation are ratios
+of channel extremes and survive that gap intact; that is why the comparator in
+this work is built on them. A first eyeball reading of Odyssey as a tan/black
+*inversion* was wrong -- measured, we render **more** light area than the
+reference (35% against 25%), and the excess contrast was crushing mid-tan to
+near-black.
+
 ### Stray weight goes to the vertex's own bones, not one bone per mesh
 
 Pieces floated off the body: a bracelet on the Defiance arms, a left

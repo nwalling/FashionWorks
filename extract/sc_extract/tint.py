@@ -446,8 +446,15 @@ def _resample(path, size: int, mode: str = "RGB"):
 
 
 def layered_key(sub, palette: list[Layer]) -> str:
-    """Digest covering the layer stack *and* the palette it is tinted with."""
-    parts = [f"{p.color}:{round(p.glossiness, 4)}" for p in palette]
+    """Digest covering the layer stack *and* the palette it is tinted with.
+
+    The palette's **specular** belongs in here as much as its colour does: a
+    metal layer takes its colour from the spec, so two colourways that differ
+    only there are different bakes. Leaving it out silently collapsed them --
+    Lynx Blue baked first and Green, Purple, Seagreen and Violet all reused its
+    file, which hid the fix for that bug completely.
+    """
+    parts = [f"{p.color}:{p.spec}:{round(p.glossiness, 4)}" for p in palette]
     for entry in sub.layers:
         parts.append(
             f"{entry.name}|{entry.path}|{entry.tint_color}|{entry.palette_tint}"
@@ -455,7 +462,7 @@ def layered_key(sub, palette: list[Layer]) -> str:
         )
     parts.append(
         f"wear:{WEAR_THRESHOLD}:{WEAR_FALLOFF}:metal:{METAL_F0_THRESHOLD}"
-        f":diffuse:buckets:{sorted(BLEND_BUCKETS.items())}:tintmul:metalnorm:tintmode2"
+        f":diffuse:buckets:{sorted(BLEND_BUCKETS.items())}:tintmul:metalnorm:tintmode2:palspec"
     )
     return hashlib.sha1(";".join(parts).encode()).hexdigest()[:10]
 
@@ -550,17 +557,39 @@ def compose_layered(
         """One layer's linear colour, roughness and metallic, at bake size."""
         detail = layer_lib.load(raw_root, entry.path)
 
+        # Metalness has to be settled before the palette is read, because it
+        # decides *which* of the palette entry's two colours applies.
+        if detail is not None:
+            metallic = 1.0 if detail.is_metal else 0.0
+        else:
+            metallic = 1.0 if entry.metallic else 0.0
+
         # Where the colour comes from: PaletteTint 0 means the artist already
         # chose it and baked it into the .mtl in linear space.
         if 0 < entry.palette_tint <= len(palette):
             chosen = palette[entry.palette_tint - 1]
-            # The palette colour modulates the layer's own TintColor, it does
-            # not replace it. 966 of 1984 palette-tinted base layers carry a
+            # A palette entry carries two colours, and which one is the visible
+            # one depends on the layer. A metal has no diffuse albedo -- its
+            # appearance *is* its F0 -- so for a metal layer the entry's
+            # specular is the colour and its tint colour says nothing.
+            #
+            # This is not a nicety. The Lynx arms and Oracle helmets put all
+            # four base layers on `iron_scratched_*` with TintColor white, so
+            # their entire colourway lives in the palette specular: Red
+            # #ff0000, Green #0a921c, Blue #0314fd, Violet #ee01ff, against a
+            # tint colour of #ffffff for every one of them. Reading the tint
+            # colour rendered ten Lynx colourways as the same grey arm, and the
+            # five that differ only in specular came out pixel-identical.
+            # Confirmed against CIG's own studio renders, which show the blue,
+            # green, red and yellow the specular predicts.
+            source = chosen.spec if metallic else chosen.color
+            # The palette modulates the layer's own TintColor, it does not
+            # replace it. 966 of 1984 palette-tinted base layers carry a
             # non-white TintColor, median 0.50, so discarding it rendered half
             # of them up to twice as bright as the game does. It is why the
             # Sunchaser backplate, bracket and shoes came out light grey where
             # the reference is near-black.
-            tint = srgb_to_linear(np.array(chosen.color, dtype=np.float32)) * np.array(
+            tint = srgb_to_linear(np.array(source, dtype=np.float32)) * np.array(
                 entry.tint_color, dtype=np.float32
             )
             gloss_scale = max(0.05, min(1.0, chosen.glossiness))
@@ -569,7 +598,6 @@ def compose_layered(
             gloss_scale = 1.0
 
         if detail is not None:
-            metallic = 1.0 if detail.is_metal else 0.0
             if metallic:
                 # Metal has no diffuse; its base colour is its reflectance.
                 tint = tint * np.array(detail.specular, dtype=np.float32)
@@ -578,8 +606,6 @@ def compose_layered(
                 # layers set this to something other than white, so skipping it
                 # rendered them at full brightness.
                 tint = tint * np.array(detail.diffuse, dtype=np.float32)
-        else:
-            metallic = 1.0 if entry.metallic else 0.0
 
         repeat = entry.uv_tiling * (detail.tile_u if detail else 1.0)
 
