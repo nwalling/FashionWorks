@@ -154,11 +154,19 @@ export function Scene({
       {/*
         A soft shadow pooled under the feet. Without it the character floats,
         which reads worst over a photographic plate, where there is no grid to
-        give the eye a ground plane. Lifted a hair off zero so it does not
-        z-fight the grid when that is showing.
+        give the eye a ground plane.
+
+        The y offset must stay <= 0. ContactShadows parents its depth camera to
+        this group, but the plane it blurs through is a standalone mesh left at
+        world y=0. Raise the group and that blur plane drops behind the camera's
+        near plane, both blur passes draw nothing, and the second one writes
+        that nothing back over the render target: the shadow silently vanishes
+        with no error and a perfectly healthy-looking scene graph. A previous
+        +0.005 to dodge grid z-fighting did exactly that. Offset downwards
+        instead, which clears the grid and keeps the blur plane in frustum.
       */}
       <ContactShadows
-        position={[0, 0.005, 0]}
+        position={[0, -0.002, 0]}
         scale={4}
         far={2.2}
         blur={2.6}
