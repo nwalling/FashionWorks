@@ -63,16 +63,40 @@ class LayerMaterial:
     # them render at full brightness. A black diffuse with real specular is
     # CryEngine's signature for bare metal.
     diffuse: tuple[float, float, float] = (1.0, 1.0, 1.0)
+    # PublicParams TintMode: 1 = tinted as a dielectric (201 layers, 3% metal by
+    # reflectance -- fabric, canvas, fleece, paint), 2 = tinted as a metal (130
+    # layers, 96% metal -- aluminium, steel, bronze), 0 = neither stated (144,
+    # the weapon and reference layers). -1 means the material omitted it.
+    #
+    # Modes 1 and 2 are what `is_metal` was inferring from reflectance, so they
+    # are taken at their word. **Mode 0 is not.** It does not mean "no tint":
+    # `rubber_diamond_02` is mode 0 and every Venture colourway authors a
+    # different TintColor on it -- (54,31,79) on the purple, (210,210,210) on
+    # the base -- so the tint plainly still applies, and discarding it rendered
+    # 1185 armour layer references, and 12 of 28 Venture undersuits, flat white.
+    # Mode 0 says nothing about metalness either, so it falls through to the
+    # reflectance heuristic.
+    tint_mode: int = -1
 
     @property
     def is_metal(self) -> bool:
-        """Whether this layer is bare metal, from its own reflectance.
+        """Whether this layer is bare metal.
 
+        `TintMode` is the artist saying so outright, and it wins wherever the
+        material states one: mode 2 is metal, mode 1 is not. It disagrees
+        with the reflectance heuristic below on 70 of 475 library layers and
+        0.5% of real armour layer references -- among them
+        `anodized_white_metal_01` (spec 0.061, diffuse 1.0) and `burnt_metal_02`,
+        which the numbers call dielectric and the artist calls metal.
+
+        The heuristic stays as the fallback for a material with no TintMode.
         Two signatures, both CryEngine's own. A high specular is the obvious
         one. The second catches near-metals whose specular sits just under the
         threshold: a black diffuse with any real reflectance can only be metal,
         since a dielectric gets its colour from diffuse.
         """
+        if self.tint_mode in (1, 2):
+            return self.tint_mode == 2
         spec = 0.2126 * self.specular[0] + 0.7152 * self.specular[1] + 0.0722 * self.specular[2]
         diff = 0.2126 * self.diffuse[0] + 0.7152 * self.diffuse[1] + 0.0722 * self.diffuse[2]
         return spec > 0.2 or (diff < 0.05 and spec > 0.02)
@@ -166,6 +190,11 @@ def _load_cached(raw_root: str, reference: str) -> LayerMaterial | None:
     spec = _colour("Specular", (0.04, 0.04, 0.04))
     diffuse = _colour("Diffuse", (1.0, 1.0, 1.0))
 
+    params = node.find("PublicParams")
+    tint_mode = -1
+    if params is not None and params.get("TintMode") is not None:
+        tint_mode = int(_scalar(params.get("TintMode"), -1.0))
+
     return LayerMaterial(
         path=reference,
         diff=diff,
@@ -173,6 +202,7 @@ def _load_cached(raw_root: str, reference: str) -> LayerMaterial | None:
         tile_u=tile_u,
         tile_v=tile_v,
         shininess=_scalar(node.get("Shininess"), 255.0),
+        tint_mode=tint_mode,
         specular=spec,  # type: ignore[arg-type]
         diffuse=diffuse,  # type: ignore[arg-type]
     )

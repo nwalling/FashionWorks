@@ -137,10 +137,14 @@ def test_neutral_layers_are_not_white() -> None:
 # 24.5% against 23.4%, legs 5.3% against 6.0%. Putting black on BaseLayer1
 # instead starves the arms to 3.4% and doubles the legs to 12%.
 MASK_COLOURS = [
-    ((255, 0, 255), 0),  # magenta -> BaseLayer1
-    ((0, 0, 255), 1),    # blue    -> BaseLayer2
-    ((0, 255, 255), 2),  # cyan    -> BaseLayer3
-    ((0, 0, 0), 3),      # black   -> BaseLayer4
+    ((0, 0, 0), 3),      # black   -> BaseLayer4, the ground
+    ((0, 0, 255), 2),    # blue    -> BaseLayer3
+    ((0, 255, 0), 1),    # green   -> BaseLayer2
+    ((0, 255, 255), 1),  # cyan    -> green over blue -> BaseLayer2
+    ((255, 0, 0), 0),    # red     -> BaseLayer1
+    ((255, 0, 255), 0),  # magenta -> red over blue   -> BaseLayer1
+    ((255, 255, 0), 0),  # yellow  -> red over green  -> BaseLayer1
+    ((255, 255, 255), 0),  # white -> BaseLayer1
 ]
 
 # Four separable tints, one per base layer, so the composite is unambiguous.
@@ -176,13 +180,24 @@ def _mask(path) -> None:
 def test_blend_mask_buckets_map_to_the_solved_base_layers(
     tmp_path,
 ) -> None:
-    """The mask is a hard-edged selector, and this table is solved, not guessed.
+    """Which mask colour selects which BaseLayer, pinned to four references.
 
-    Four saturated colours cover 96% of a real armour mask, so it indexes a
-    layer rather than blending weights. Which colour picks which layer was
-    fitted to in-game gold coverage: 32.2% on the Sunchaser forearm plate and
-    24.6% over the whole arm. Putting black on BaseLayer1, which the slaver
-    torso alone had suggested, predicts 6.2% for the arms.
+    A splat -- ground, then blue, green and red lerped over it, highest channel
+    winning -- with the layers numbered from the top: none, blue, green and red
+    reach BaseLayer 4, 3, 2 and 1. The natural reading, reversed.
+
+    The previous table put the ground on BaseLayer2 and green on BaseLayer4, and
+    it rendered the Corbel Halcyon inverted: helmet shell and upper chest black,
+    faceplate and a core stripe yellow, the opposite of the game. The corrected
+    table was then checked on references it was not derived from -- the
+    Sunchaser upper back renders 32.9% gold against 33.0% on CIG's store render
+    (20.3% before), and the Beacon undersuit's sleeves come out the mauve-brown
+    the reference shows instead of black -- while keeping the Sunchaser shoulder
+    pad, whose mask has no ground or green on it, exactly as it was.
+
+    Never settle this table on one aggregate figure or on a piece whose
+    candidate layers are all the same colour; bake candidates, swap them onto a
+    live piece, and compare against a reference image.
     """
     blend = tmp_path / "x_blend.png"
     _mask(blend)
@@ -521,3 +536,38 @@ def test_the_palette_modulates_the_layer_tint_rather_than_replacing_it(tmp_path)
     # White palette times a half-strength layer is the layer, not white.
     want = linear_to_srgb(np.array([0.5, 0.5, 0.5], dtype=np.float32))
     assert np.allclose(got, want, atol=0.02), f"{got} should be modulated, not replaced"
+
+
+def test_tint_mode_declares_metal_but_mode_zero_means_nothing() -> None:
+    """`TintMode` 1 and 2 are the artist stating dielectric or metal outright.
+
+    Mode 2 is metal, mode 1 is not, and both beat the reflectance heuristic --
+    `anodized_white_metal_01` reads dielectric (specular 0.061, diffuse 1.0) and
+    is declared metal.
+
+    **Mode 0 is not a statement and must not be treated as one.** It does not
+    mean "not metal" and it does not mean "not tinted": `rubber_diamond_02` is
+    mode 0, and every Venture undersuit colourway authors a different TintColor
+    on it -- (54,31,79) on the purple, (210,210,210) on the base -- so the tint
+    plainly applies. Reading mode 0 as "no tint" rendered 1185 armour layer
+    references, and 12 of the 28 Venture undersuits, flat white. Mode 0 falls
+    through to reflectance.
+    """
+    from sc_extract.layers import LayerMaterial
+
+    assert LayerMaterial(path="x", tint_mode=2).is_metal
+    assert not LayerMaterial(path="x", tint_mode=1).is_metal
+
+    # A stated mode beats reflectance that says the opposite.
+    assert LayerMaterial(
+        path="anodized_white_metal_01", tint_mode=2,
+        specular=(0.061, 0.061, 0.061), diffuse=(1.0, 1.0, 1.0),
+    ).is_metal
+
+    # Mode 0 defers to reflectance rather than asserting dielectric.
+    assert LayerMaterial(path="x", tint_mode=0, specular=(0.84, 0.84, 0.84)).is_metal
+    assert not LayerMaterial(path="x", tint_mode=0, specular=(0.04, 0.04, 0.04)).is_metal
+
+    # No TintMode at all: reflectance decides, as before.
+    assert LayerMaterial(path="x", specular=(0.84, 0.84, 0.84)).is_metal
+    assert not LayerMaterial(path="x", specular=(0.04, 0.04, 0.04)).is_metal

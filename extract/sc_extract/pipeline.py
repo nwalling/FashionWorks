@@ -13,7 +13,7 @@ import os
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from functools import lru_cache
+from functools import cache, lru_cache
 from pathlib import Path
 
 from . import material, tint
@@ -36,7 +36,7 @@ NORMALIZE_SCRIPT = BLENDER_DIR / "normalize_armor.py"
 # leaves inputs untouched. The hash watches file mtimes and record contents, so
 # a change to how a palette is composited is otherwise invisible and stale GLBs
 # are silently kept.
-MATERIAL_PIPELINE_VERSION = 12
+MATERIAL_PIPELINE_VERSION = 20
 
 
 @dataclass
@@ -211,6 +211,57 @@ def texture_on_disk(settings: Settings, reference: str) -> Path | None:
     return Path(found) if found else None
 
 
+# Engine-wide placeholder materials. ``default_grey`` and ``default_pink`` are
+# the "nothing assigned here" stand-ins: they live under ``Data/Materials``
+# rather than beside the mesh, and they declare a single ``Illum`` submaterial
+# where armour uses ``LayerBlend_V2``. Exactly five records name one and every
+# one is a shop mannequin or a test prop, so taking them at their word is
+# always wrong -- see ``_collada_material_stems`` for what it cost.
+_ENGINE_DEFAULT_MTL = re.compile(r"^(data/)?materials/", re.IGNORECASE)
+
+# cgf-converter writes every Collada material id as
+# ``<mtl stem>_mtl_<submaterial>-material``.
+_COLLADA_MATERIAL_ID = re.compile(r'<material id="(.+?)_mtl_([^"]+?)-material"')
+
+# ``<library_materials>`` closes inside the first 60 KB of a .dae that runs to
+# several megabytes, so the scan is bounded rather than reading the whole file.
+_DAE_SCAN_LIMIT = 1 << 20
+
+
+@cache
+def _collada_material_stems(dae: Path) -> tuple[str, ...]:
+    """Material stems the mesh itself names, read off its converted Collada.
+
+    cgf-converter takes these from the material reference inside the ``.skin``,
+    which makes them the mesh's own statement of which ``.mtl`` it wears.
+    Nothing else in the pipeline is: the two filenames need not agree at all --
+    ``m_rsi_deckcrew_01_undersuit.skin`` pairs with
+    ``m_rsi_deckcrew_undersuit_01_01_01.mtl`` -- and guessing from the mesh name
+    picks ``m_rsi_deckcrew_armor_01_01_01.mtl``, the *armour* material, for an
+    undersuit mesh, because it sorts first.
+
+    Tiling detail layers come through as ``<layer>_mtl_unknown``; only the
+    armour material contributes named submaterials, so those are skipped.
+    """
+    if not dae.is_file():
+        return ()
+    head = ""
+    with dae.open("r", errors="ignore") as handle:
+        while len(head) < _DAE_SCAN_LIMIT:
+            chunk = handle.read(65536)
+            if not chunk:
+                break
+            head += chunk
+            if "</library_materials>" in head:
+                break
+    stems: list[str] = []
+    for stem, submaterial in _COLLADA_MATERIAL_ID.findall(head):
+        if submaterial == "unknown" or stem in stems:
+            continue
+        stems.append(stem)
+    return tuple(stems)
+
+
 def discover_materials(settings: Settings, item: Item) -> list[Path]:
     """Find an item's ``.mtl`` files, declared or not.
 
@@ -224,6 +275,8 @@ def discover_materials(settings: Settings, item: Item) -> list[Path]:
     found: list[Path] = []
 
     for relative in item.materials:
+        if _ENGINE_DEFAULT_MTL.match(relative.replace("\\", "/")):
+            continue
         path = settings.raw_dir / "Data" / relative
         if path.is_file():
             found.append(path)
@@ -238,6 +291,21 @@ def discover_materials(settings: Settings, item: Item) -> list[Path]:
     for geo in item.geometry:
         mesh = raw_path(settings, geo.source)
         if mesh is None:
+            continue
+        # What the mesh itself names beats any guess from its filename.
+        named = _collada_material_stems(
+            settings.interim_dir / f"{Path(geo.source).stem}.dae"
+        )
+        own = next(
+            (
+                mesh.parent / f"{stem}.mtl"
+                for stem in named
+                if (mesh.parent / f"{stem}.mtl").is_file()
+            ),
+            None,
+        )
+        if own is not None:
+            found.append(own)
             continue
         exact = mesh.with_suffix(".mtl")
         if exact.is_file():

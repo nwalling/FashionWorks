@@ -314,15 +314,57 @@ METAL_F0_THRESHOLD = 0.2
 # 4.8% and inflates the legs to 46.4%; treating PaletteTint as a rank within
 # the submaterial rather than an absolute entry is refuted outright by the
 # Chiron AA Support legs, which the game renders with no primary colour at all.
+# Which mask colour selects which BaseLayer.
+#
+# The mask is a splat: a ground layer, with blue, green and red lerping further
+# layers over it in that order, so the highest channel present wins. The layers
+# are numbered from the top of that stack:
+#
+#     none  -> BaseLayer4     blue -> BaseLayer3
+#     green -> BaseLayer2     red  -> BaseLayer1
+#
+# i.e. the natural 1/2/3/4 reading with the layer order reversed. It took four
+# attempts, and the fourth is the first pinned by references it was *not*
+# derived from.
+#
+#   * Corbel Halcyon (OMC utility heavy), derived here. Yellow exists only as
+#     palette entry A, so every yellow pixel needs a PaletteTint=1 layer. The
+#     previous table sent the mask's ground -- 80% of the helmet, 76% of the core
+#     -- to BaseLayer2, which is steel_dark_01 on palette C and gun_metal_03
+#     respectively, so the helmet shell and upper chest rendered black where the
+#     game shows them yellow, and the yellow landed on the faceplate and a stripe
+#     down the core instead. Ground on BaseLayer4 reproduces the reference.
+#   * Sunchaser back, blind. On CIG's store render the upper back is 33.0% gold;
+#     this table renders 32.9%, the previous one 20.3%. Waist and legs are
+#     identical under both, as they should be.
+#   * Sunchaser shoulder pad, preserved. Its mask has blue on for 99.9% of the pad
+#     and green off, so red alone chooses: red -> BaseLayer1 (gold frame) and
+#     blue -> BaseLayer3 (grey interior). Neither ground nor green appears there.
+#   * Beacon Undersuit Orange, blind. The ground region is the sleeves; on
+#     BaseLayer4 they render the dusky mauve-brown (123,92,89) the reference
+#     shows, where BaseLayer2 rendered them glossy black anodized metal.
+#
+# Refuted readings, so none is tried a fifth time:
+#   * ground -> BaseLayer2, green -> BaseLayer4 (previous): Corbel inverted,
+#     Sunchaser back 13 points short, Beacon sleeves black.
+#   * blue -> BaseLayer1: inverts the Sunchaser shoulder pad.
+#   * ground -> BaseLayer1, magenta -> BaseLayer4: Beacon body in anodized metal.
+#   * a plain blue <-> magenta swap: pad interior on a light rubber.
+#
+# Judge a change here by baking candidate tables and swapping them onto a live
+# piece against a reference image -- ideally one the candidate was not fitted
+# to. Never on one aggregate coverage figure, and never on a piece whose
+# candidate layers are all the same colour: the slaver torso carries near-black
+# paint on BaseLayer1, 2 and 4 alike and cannot tell any of these tables apart.
 BLEND_BUCKETS = {
-    0b101: 0,  # magenta -> BaseLayer1
-    0b100: 1,  # blue    -> BaseLayer2
-    0b110: 2,  # cyan    -> BaseLayer3
-    0b000: 3,  # black   -> BaseLayer4
-    0b010: 2,  # green   -> BaseLayer3
-    0b001: 3,  # red     -> BaseLayer4
-    0b011: 3,  # yellow  -> BaseLayer4
-    0b111: 3,  # white   -> BaseLayer4
+    0b000: 3,  # black   -> BaseLayer4, the ground
+    0b100: 2,  # blue    -> BaseLayer3
+    0b010: 1,  # green   -> BaseLayer2
+    0b110: 1,  # cyan    -> green over blue -> BaseLayer2
+    0b001: 0,  # red     -> BaseLayer1
+    0b101: 0,  # magenta -> red over blue   -> BaseLayer1
+    0b011: 0,  # yellow  -> red over green  -> BaseLayer1
+    0b111: 0,  # white   -> BaseLayer1
 }
 BLEND_BUCKET_DEFAULT = 0
 
@@ -413,7 +455,7 @@ def layered_key(sub, palette: list[Layer]) -> str:
         )
     parts.append(
         f"wear:{WEAR_THRESHOLD}:{WEAR_FALLOFF}:metal:{METAL_F0_THRESHOLD}"
-        f":diffuse:buckets:{sorted(BLEND_BUCKETS.items())}:tintmul"
+        f":diffuse:buckets:{sorted(BLEND_BUCKETS.items())}:tintmul:metalnorm:tintmode2"
     )
     return hashlib.sha1(";".join(parts).encode()).hexdigest()[:10]
 
@@ -545,7 +587,22 @@ def compose_layered(
         if detail is not None and detail.diff is not None:
             sample = _tiled(detail.diff, size, repeat, "RGB")
             if sample is not None:
-                colour = _to_linear_lut()[sample] * tint
+                linear = _to_linear_lut()[sample]
+                if metallic:
+                    # A metal's colour is its F0, already in `tint` above. Its
+                    # TexSlot1 is surface pattern, not albedo -- these layers
+                    # set the material Diffuse constant to black (0.013), which
+                    # is CryEngine's own signature for metal, so there is no
+                    # diffuse term for the texture to be. Multiplying it in
+                    # raw scaled the reflectance down by its own mean: 77 of
+                    # the 208 metal layers carry one, and on anodized_black it
+                    # took a sleeve the artist tinted (189,189,189) to sRGB 50.
+                    # Normalising makes it modulate around 1.0, which keeps the
+                    # brushed and scratched detail without darkening.
+                    mean = float(linear.mean())
+                    if mean > 1e-4:
+                        linear = linear / mean
+                colour = linear * tint
 
         gloss = (detail.glossiness if detail else 0.5) * entry.gloss_mult * gloss_scale
         gloss_map = np.full((size, size, 1), gloss, dtype=np.float32)
@@ -587,6 +644,27 @@ def compose_layered(
         rgb = rgb * (1.0 - weight) + colour * weight
         rough = rough * (1.0 - weight) + layer_rough * weight
         metal = metal * (1.0 - weight) + layer_metal * weight
+
+    # Decals (TexSlot9) are NOT composited, and that is deliberate.
+    #
+    # 5599 of the 11436 layer-blend submaterials declare one, so this is half
+    # the armour tree, and the sheet is real content: on the slaver core it is
+    # 1024x1024, RGB std 43, alpha averaging 32/255 -- stencils, unit numbers,
+    # warning labels. Compositing it does lift the gold region's luminance std
+    # from 13.4 to 36.9, which is the surface interest a flat plate is missing.
+    #
+    # But it cannot be placed. The sheet is shared across a whole armour family
+    # (m_slaver_heavy_armor_decals_01_01 serves core, arms and legs) while the
+    # per-piece maps are m_slaver_heavy_core_01_01_*, so it is authored against
+    # a second UV channel. TexSlot9 carries no TexMod, and the mesh reaches us
+    # with exactly one UV set -- the Collada declares a single TEXCOORD at
+    # set="0". Sampling the atlas on UV0 stretches it over the whole piece and
+    # renders metre-high "WARNING" and "DEFENSE SYSTEMS" text across the chest.
+    # That was tried, rendered, and reverted.
+    #
+    # To do this properly the decal UV channel has to survive extraction, which
+    # cgf-converter's Collada does not carry today. Until then, leaving decals
+    # off is the honest failure: missing markings beat giant ones.
 
     # Ambient occlusion: the _hal control map's green channel is the only one
     # carrying data (red and blue sit at the neutral 126). Using it as AO adds
