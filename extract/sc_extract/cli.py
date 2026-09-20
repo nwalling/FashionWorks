@@ -508,6 +508,49 @@ def sets_cmd(ctx: click.Context, incomplete: bool, pending: bool) -> None:
     click.secho(f"{len(rows)} set(s)", fg="green")
 
 
+@main.command(name="audit")
+@click.option("--check", "only", default=None, help="run one check by name")
+@click.option("--limit", default=12, show_default=True, help="findings shown per check")
+@click.pass_context
+def audit_cmd(ctx: click.Context, only: str | None, limit: int) -> None:
+    """Run catalogue-wide invariants over the built output."""
+    from . import audit as audit_mod
+
+    settings = _settings(ctx)
+    path = settings.out_dir / "manifest.json"
+    if not path.is_file():
+        _fail("no manifest; run `scx catalog` first")
+    manifest = Manifest.read(path)
+
+    checks = audit_mod.CHECKS
+    if only:
+        checks = tuple(c for c in checks if only in c.__name__)
+        if not checks:
+            _fail(f"no check matching {only!r}")
+    report = audit_mod.AuditReport()
+    for check in checks:
+        check(settings, manifest, report)
+
+    by_check: dict[str, list[audit_mod.Finding]] = {}
+    for finding in report.findings:
+        by_check.setdefault(finding.check, []).append(finding)
+    for name in sorted(by_check):
+        found = by_check[name]
+        colour = "red" if found[0].severity == "error" else "yellow"
+        click.secho(f"{name}: {len(found)}", fg=colour, bold=True)
+        for finding in found[:limit]:
+            click.echo(f"    {finding.item[:44]:46} {finding.detail}")
+        if len(found) > limit:
+            click.echo(f"    ... {len(found) - limit} more")
+    if not report.findings:
+        click.secho("all checks clean", fg="green")
+        return
+    click.secho(
+        f"{report.errors} error(s), {len(report.findings) - report.errors} warning(s)",
+        fg="red" if report.errors else "yellow",
+    )
+
+
 @main.command(name="all")
 @click.option("--game-version", default="unknown")
 @click.pass_context
