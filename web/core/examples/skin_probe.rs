@@ -93,17 +93,40 @@ fn main() {
         match SkinMesh::read(ivo.chunk_data(entry)) {
             Ok(mesh) => {
                 report_body(&mesh);
-                // Material names live in their own chunks, and their order is
-                // the .mtl submaterial order the slot matching depends on.
-                let names: Vec<String> = ivo
+
+                // Dequantise into real vertices. Positions are SNorm i16
+                // against the *scaling* bbox, not the model one -- the header
+                // carries both and they are not the same box.
+                let names: Vec<starbreaker_3d::ivo::material::MaterialName> = ivo
                     .chunks()
                     .iter()
                     .filter(|c| c.chunk_type == starbreaker_chunks::known_types::ivo::MTL_NAME_IVO320)
                     .filter_map(|c| starbreaker_3d::ivo::material::MaterialName::read(ivo.chunk_data(c)).ok())
-                    .map(|m| m.name)
                     .collect();
-                if !names.is_empty() {
-                    println!("  mtl chunks    {names:?}");
+                let built = starbreaker_3d::types::build_mesh(&mesh, &names);
+                let mut lo = [f32::MAX; 3];
+                let mut hi = [f32::MIN; 3];
+                for p in &built.positions {
+                    for i in 0..3 {
+                        lo[i] = lo[i].min(p[i]);
+                        hi[i] = hi[i].max(p[i]);
+                    }
+                }
+                println!(
+                    "  dequantised   {} verts, actual min [{:.3} {:.3} {:.3}] max [{:.3} {:.3} {:.3}]",
+                    built.positions.len(), lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]
+                );
+                println!(
+                    "  scaling bbox  min [{:.3} {:.3} {:.3}] max [{:.3} {:.3} {:.3}]",
+                    built.scaling_min[0], built.scaling_min[1], built.scaling_min[2],
+                    built.scaling_max[0], built.scaling_max[1], built.scaling_max[2],
+                );
+                println!("  submeshes     {}", built.submeshes.len());
+                // Material names live in their own chunks, and their order is
+                // the .mtl submaterial order the slot matching depends on.
+                let labels: Vec<&str> = names.iter().map(|m| m.name.as_str()).collect();
+                if !labels.is_empty() {
+                    println!("  mtl chunks    {labels:?}");
                 }
             }
             Err(e) => println!("{}: parse failed: {e}", short(path)),

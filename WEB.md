@@ -411,6 +411,24 @@ Two API shapes to keep straight, having had both backwards once:
 `SkinMesh::read` takes **one chunk's data**, and `skeleton::parse_skeleton`
 takes the **whole file** and finds its chunk itself.
 
+*Dequantisation is verified against the pipeline's own GLB.* Positions are
+SNorm `i16` scaled to the **scaling** bounding box, not the model one -- the
+header carries both, and `build_mesh` picks correctly. Dequantised vertices fill
+the declared box exactly, and the box matches what the existing pipeline
+produced for the same mesh, once the Z-up to Y-up conversion is applied as
+`(x, y, z) -> (x, z, -y)`:
+
+| axis | from `.skin` | in the GLB |
+| --- | --- | --- |
+| x | -0.634 … 0.634 | -0.634 … 0.634 |
+| y_gltf = z_skin | 1.224 … 1.568 | 1.224 … 1.568 |
+| z_gltf = -y_skin | -0.246 … 0.088 | -0.246 … 0.088 |
+
+Submesh count agrees too: 3 in the `.skin`, 3 primitives in the GLB. **Vertex
+counts do not, and should not** -- 8,903 against 12,172, because Blender splits
+vertices at UV and normal seams on export. A port that expects them to match
+will chase a difference that is not there.
+
 `.skin` → three.js geometry; canonical skeleton with grafted attachment bones;
 per-vertex stray-weight redistribution; socket placement with its 180° yaw;
 retargeted poses.
