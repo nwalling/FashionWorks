@@ -198,6 +198,44 @@ fn report_body(mesh: &SkinMesh) {
             unweighted,
             bone_maps.len()
         );
+    } else if let Some(maps) = &streams.bone_maps32 {
+        // The invariant is what validates the 24-byte layout: if the split
+        // between indices and weights were wrong, these would not total 255.
+        let mut joints: Vec<u16> = Vec::new();
+        let mut bad_sum = 0usize;
+        let mut unweighted = 0usize;
+        let mut influences = [0usize; 9];
+        for m in maps {
+            let sum: u32 = m.weights.iter().map(|&w| w as u32).sum();
+            if sum != 255 {
+                bad_sum += 1;
+            }
+            let n = m.influences().count();
+            influences[n] += 1;
+            if n == 0 {
+                unweighted += 1;
+            }
+            for (j, _) in m.influences() {
+                joints.push(j);
+            }
+        }
+        joints.sort_unstable();
+        joints.dedup();
+        println!(
+            "  skinning      {} vertices, {} distinct joints, {} unweighted",
+            maps.len(), joints.len(), unweighted
+        );
+        println!(
+            "  weight sums   {} of {} total 255{}",
+            maps.len() - bad_sum, maps.len(),
+            if bad_sum == 0 { "  <- layout confirmed" } else { "  <- LAYOUT WRONG" }
+        );
+        let spread: Vec<String> = influences.iter().enumerate()
+            .filter(|(_, &c)| c > 0)
+            .map(|(n, c)| format!("{n}:{c}"))
+            .collect();
+        println!("  influences    {}", spread.join("  "));
+        println!("  joint range   {}..{}", joints.first().copied().unwrap_or(0), joints.last().copied().unwrap_or(0));
     } else {
         println!("  skinning      none (rigid mesh)");
     }

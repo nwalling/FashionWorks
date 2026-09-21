@@ -46,6 +46,94 @@ index 69fa2fd..1663340 100644
  pub use matching::{
      caf_anchored_remap_decisions, extract_animations_for_skeleton_json,
      ClipMatchDecision,
+diff --git a/crates/starbreaker-3d/src/ivo/skin.rs b/crates/starbreaker-3d/src/ivo/skin.rs
+index 14c9580..90a10b5 100644
+--- a/crates/starbreaker-3d/src/ivo/skin.rs
++++ b/crates/starbreaker-3d/src/ivo/skin.rs
+@@ -138,11 +138,39 @@ pub struct DataStreams {
+     pub secondary_uvs: Option<Vec<[u16; 2]>>,
+     pub indices: Vec<u32>,
+     pub bone_maps: Option<Vec<BoneMap12>>,
++    /// The eight-influence form, which is what armour ships.
++    pub bone_maps32: Option<Vec<BoneMap32>>,
+     pub colors: Option<Vec<[u8; 4]>>,
+     pub tangents: Option<TangentData>,
+     pub normals: Option<NormalData>,
+ }
+ 
++/// An eight-influence bone map, as `IVOBONEMAP32` stores it.
++///
++/// 24 bytes: eight `u16` joint indices followed by eight `u8` weights. The
++/// weights sum to 255. Worked out from the bytes rather than from
++/// documentation -- the sum is what confirms the split, since no other reading
++/// of 24 bytes makes four consecutive records total exactly 255.
++///
++/// This is the format armour actually uses, and upstream skips it, which is why
++/// a StarBreaker GLB of an armour mesh comes out rigid.
++#[derive(Debug, Clone, Copy)]
++pub struct BoneMap32 {
++    pub joint_indices: [u16; 8],
++    pub weights: [u8; 8],
++}
++
++impl BoneMap32 {
++    /// Influences with a non-zero weight, as (joint, weight).
++    pub fn influences(&self) -> impl Iterator<Item = (u16, u8)> + '_ {
++        self.joint_indices
++            .iter()
++            .copied()
++            .zip(self.weights.iter().copied())
++            .filter(|(_, w)| *w > 0)
++    }
++}
++
+ #[derive(Debug, Clone, Copy)]
+ pub struct BoneMap12 {
+     pub joint_indices: [u16; 4],
+@@ -300,6 +328,7 @@ impl SkinMesh {
+         let mut secondary_uvs: Option<Vec<[u16; 2]>> = None;
+         let mut indices: Option<Vec<u32>> = None;
+         let mut bone_maps: Option<Vec<BoneMap12>> = None;
++        let mut bone_maps32: Option<Vec<BoneMap32>> = None;
+         let mut colors: Option<Vec<[u8; 4]>> = None;
+         let mut tangents: Option<TangentData> = None;
+         let mut normals: Option<NormalData> = None;
+@@ -416,6 +445,27 @@ impl SkinMesh {
+                     }
+                     tangents = Some(TangentData::Tangents(raw.to_vec()));
+                 }
++                stream_type::IVOBONEMAP32 => {
++                    if element_size == 24 {
++                        let bytes = reader.read_slice::<u8>(24 * num_verts)?;
++                        bone_maps32 = Some(
++                            bytes
++                                .chunks_exact(24)
++                                .map(|rec| {
++                                    let mut joint_indices = [0u16; 8];
++                                    for (i, slot) in joint_indices.iter_mut().enumerate() {
++                                        *slot = u16::from_le_bytes([rec[i * 2], rec[i * 2 + 1]]);
++                                    }
++                                    let mut weights = [0u8; 8];
++                                    weights.copy_from_slice(&rec[16..24]);
++                                    BoneMap32 { joint_indices, weights }
++                                })
++                                .collect(),
++                        );
++                    } else {
++                        reader.advance(element_size as usize * num_verts)?;
++                    }
++                }
+                 stream_type::IVOBONEMAP => {
+                     if element_size == 12 {
+                         let raw = reader.read_slice::<RawBoneMap12>(num_verts)?;
+@@ -463,6 +513,7 @@ impl SkinMesh {
+                 chunk_type: stream_type::IVOINDICES,
+             })?,
+             bone_maps,
++            bone_maps32,
+             colors,
+             tangents,
+             normals,
 diff --git a/crates/starbreaker-3d/src/lib.rs b/crates/starbreaker-3d/src/lib.rs
 index 2dbdfbe..7478d71 100644
 --- a/crates/starbreaker-3d/src/lib.rs

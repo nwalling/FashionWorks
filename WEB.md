@@ -429,6 +429,23 @@ counts do not, and should not** -- 8,903 against 12,172, because Blender splits
 vertices at UV and normal seams on export. A port that expects them to match
 will chase a difference that is not there.
 
+*Armour skinning is in a stream upstream does not decode, and this explains a
+fact already in CLAUDE.md.* `starbreaker-3d` parses `IVOBONEMAP` at 12 bytes and
+falls through on **`IVOBONEMAP32`**, which is what armour actually ships. That
+is why "StarBreaker's `skin export` writes a rigid mesh" and why the Python
+pipeline has to route through cgf-converter for anything skinned.
+
+The layout was worked out from the bytes: **24 bytes, eight `u16` joint indices
+followed by eight `u8` weights, summing to 255**. The sum is what confirms the
+split -- no other reading of 24 bytes makes consecutive records total exactly
+255. Verified on **136,092 vertices across six meshes**, every one summing to
+255, with three further meshes using the older 12-byte form.
+
+**Up to eight influences are really used.** One core mesh has 305 vertices at
+8 and 323 at 7, so the four-influence `BoneMap12` path would silently truncate
+them. glTF's `JOINTS_0`/`WEIGHTS_0` carry four, so anything past that needs
+`JOINTS_1`/`WEIGHTS_1` -- a constraint for phases 2 and 3, not a detail.
+
 `.skin` → three.js geometry; canonical skeleton with grafted attachment bones;
 per-vertex stray-weight redistribution; socket placement with its 180° yaw;
 retargeted poses.
