@@ -11,9 +11,11 @@
 //! See `WEB.md` for the architecture and `WEB-INTEGRATION.md` for the contract
 //! the Hangarworks site consumes.
 
+pub mod audit;
 pub mod blend;
 pub mod catalog;
 pub mod composite;
+pub mod gold;
 mod p4k;
 pub mod poses;
 pub mod rebind;

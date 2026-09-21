@@ -148,7 +148,64 @@ pub struct Composite<'a> {
 }
 
 impl Composite<'_> {
+    /// The composited albedo's mean, in sRGB 0-255.
+    ///
+    /// Summed in `f64` from the unquantised values, where the Python writes
+    /// `astype(np.uint8)` and so truncates. That costs the bake **0.575 sRGB
+    /// units** of mean brightness, measured over two million samples, and it is
+    /// the single largest term in the residual either port shows against it --
+    /// so the difference is the bake's, not the port's.
     pub fn albedo_mean(&self, size: usize) -> [f32; 3] {
+        let image = self.albedo(size);
+        let mut total = [0.0f64; 3];
+        for texel in image.chunks_exact(3) {
+            for i in 0..3 {
+                total[i] += f64::from(texel[i]);
+            }
+        }
+        let n = (size * size) as f64;
+        [
+            (total[0] / n) as f32,
+            (total[1] / n) as f32,
+            (total[2] / n) as f32,
+        ]
+    }
+
+    /// Fraction of the surface that composites as metal.
+    ///
+    /// The bake packs metalness into the ORM's blue channel and the audit reads
+    /// it back with a `> 127.5` threshold, so the same half-way test is used
+    /// here. This is what `cloth_reads_metal` is measured on: the Beacon
+    /// undersuit shipped at 58.9% metallic on its jumpsuit because an earlier
+    /// blend table sent the body of the garment to `anodized_black`.
+    pub fn metal_fraction(&self, size: usize) -> f32 {
+        let mut metal = 0usize;
+        for y in 0..size {
+            let v = (y as f32 + 0.5) / size as f32;
+            for x in 0..size {
+                let u = (x as f32 + 0.5) / size as f32;
+                let index =
+                    blend::layer_for(self.blend.sample_bilinear(u, v)).min(self.layers.len() - 1);
+                let layer = &self.layers[index];
+                let mut value = if layer.metallic { 1.0f32 } else { 0.0 };
+                // Wear blends metalness the same way it blends colour, which is
+                // how paint worn through to bare metal reads as metal.
+                if let (Some(worn), Some(mask)) = (&layer.worn, self.wear) {
+                    let m = mask.sample_bilinear(u, v)[0] as f32 / 255.0;
+                    let amount = ((self.wear_threshold - m) / self.wear_falloff).clamp(0.0, 1.0);
+                    let worn_value = if worn.metallic { 1.0f32 } else { 0.0 };
+                    value += (worn_value - value) * amount;
+                }
+                if value > 0.5 {
+                    metal += 1;
+                }
+            }
+        }
+        metal as f32 / (size * size) as f32
+    }
+
+    /// The composited albedo as an sRGB image, row-major RGB.
+    pub fn albedo(&self, size: usize) -> Vec<f32> {
         // Precompute each layer's texture mean once; it is over the whole
         // image and does not vary per pixel.
         let means: Vec<f32> = self
@@ -167,7 +224,7 @@ impl Composite<'_> {
             })
             .collect();
 
-        let mut total = [0.0f64; 3];
+        let mut out = Vec::with_capacity(size * size * 3);
         for y in 0..size {
             let v = (y as f32 + 0.5) / size as f32;
             for x in 0..size {
@@ -193,16 +250,11 @@ impl Composite<'_> {
                 }
 
                 for i in 0..3 {
-                    total[i] += linear_to_srgb(colour[i].max(0.0)) as f64 * 255.0;
+                    out.push(linear_to_srgb(colour[i].max(0.0)) * 255.0);
                 }
             }
         }
-        let n = (size * size) as f64;
-        [
-            (total[0] / n) as f32,
-            (total[1] / n) as f32,
-            (total[2] / n) as f32,
-        ]
+        out
     }
 }
 

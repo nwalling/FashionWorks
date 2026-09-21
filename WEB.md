@@ -559,13 +559,13 @@ input.
 | `blend.rs` tests | the eight-entry blend table | matches the Python's dict exactly |
 | `composite_diff` | per-submaterial mean albedo against the baked PNGs | **40 of 40** within 3 sRGB units, 35 within 1 |
 
-The 5 outside a single unit are **not a rule difference**, and the evidence says
-so: they have median effective tiling 144 against 60 for the rest. The pipeline
-tiles a layer texture by downsampling it with Lanczos to a quantised tile size,
-`tile_px = round(size / repeat)`, so at tiling 144 on a 1024 bake each tile is
-**7 pixels**, and reducing a detail texture that far shifts its mean. A shader
-sampling the full-resolution texture continuously gives a different and better
-answer, so this gap should not be closed by imitating the bake.
+The 5 outside a single unit were attributed to tiling quantisation, on the
+evidence that they had a median effective tiling of 144 against 60 for the rest.
+**That attribution was wrong**, and the enlarged golden refutes it: across 357
+submaterials the rows *within* a unit have the higher median tiling. The real
+cause is the bake's own output truncation, measured under Phase 3's status
+below. The figure of 40 rows here also predates `scx golden`, which is what
+made the larger set reproducible.
 
 One thing worth contradicting in advance, because the opposite sounds more
 sensible: **the blend mask is sampled bilinearly, not nearest.** It is a
@@ -584,6 +584,87 @@ texture normalisation, wear pairs, `_hal` occlusion and palette multiply, all on
 texture arrays.
 **Exit:** per-submaterial mean albedo within tolerance of the Python bakes; the
 store-render comparisons re-run and pass; the audit invariants hold.
+
+**Status: met, all three.** `web/gpu/` holds the shader and a harness that runs
+it in a real WebGL2 context and reads both render targets back.
+
+| exit criterion | harness | result |
+| --- | --- | --- |
+| mean albedo within tolerance | `web/gpu/check.html` (GPU) | **356 of 357** within 3 sRGB units, 148 within 1 |
+| | `composite_diff` (CPU) | **345 of 345** within 3, 148 within 1 |
+| store-render comparison | `gold_fraction` | **313 of 318** surfaces within 1 coverage point; **30 of 31** pieces within 0.25 contrast |
+| audit invariants | `audit_port` | **every check holds**; the only findings are one known pipeline gap |
+
+Three things are worth carrying forward, because each cost a wrong answer
+first.
+
+**The golden outputs are now regenerable.** They were a throwaway script, so the
+numbers here could be quoted but not re-derived. `scx golden` is that script,
+kept, and all three harnesses read the same file. Making it re-runnable
+immediately mattered: the old selection skipped colour variants on the reasoning
+that they share geometry with their sibling, which dropped **Sunchaser and
+Halcyon** — the two pieces the store-render comparison is measured against. A
+variant names its own `mtl_var/` material, so it is a different layer stack, not
+a tint.
+
+**The residual against the bake is the bake's own quantisation, not the port's
+rules.** Two plausible explanations were tested and refuted before the real one
+turned up:
+
+- *Tiling quantisation* — the explanation this document previously gave, fitted
+  to 40 rows. On 357 it does not hold: rows **within** 1 unit have a higher
+  median effective tiling (200) than rows beyond it (107), and the worst row has
+  the lowest tiling in the set.
+- *The 512² layer-library cap* — repacking at 1024² changed the count within 1
+  unit not at all.
+- *The bake truncates* — confirmed. `compose_layered` writes
+  `(linear_to_srgb(rgb) * 255).astype(np.uint8)`, which truncates where a GPU
+  RGBA8 target rounds. Measured over two million samples that is **0.575 sRGB
+  units** of mean brightness (0.496 truncation, 0.079 LUT). The shader reads
+  brighter than the bake on 89% of channels by a mean of 0.80, so this is most
+  of it. The remaining ~0.30 is unexplained, grows with brightness, and sits
+  well inside tolerance.
+
+So the bake is 0.57 dark — 0.2%, not worth invalidating 21 GB of cache over, but
+worth not misreading as a porting fault.
+
+**Two measures had to be taken at the right level, and were not at first.**
+
+- *A piece's contrast is not the mean of its submaterials' contrasts.* A render
+  pools every material into one image; a single submaterial compares its gold
+  against its own non-gold, which for a mostly-dark bracket with a gold edge is
+  a different number. The Sunchaser's eight gold-bearing materials read 0.78 to
+  3.50 individually. Pooled, the piece reads 2.49.
+- *An albedo atlas is not a lit render, so the 2.95–3.47 reference band does not
+  apply to it.* The atlas reads 2.44–2.77 — for the port **and the bake alike**,
+  which is the point. A metal's specular response, occlusion, and UV space no
+  camera sees all separate the two. Judging the atlas against the band reported
+  "0 of 4 in band", which would have been a failure of the renderer read as a
+  failure of the port. The pass condition is port against bake.
+
+On the eight pieces the criterion actually names — Sunchaser and Corbel Halcyon,
+helmet, core, arms and legs — the port and the bake agree to **0.21 coverage
+points and 0.22 contrast** or better. The single piece outside the contrast
+tolerance, `Corbel Helmet Mire`, reads a contrast of **0.91**: its "gold" is
+darker than its body, which means the band is picking up dark olive rather than
+an accent. That is the band being applied to a colourway it was not defined for,
+not a rule difference, and it is left visible rather than tuned away.
+
+**Two checks were tightened by running them.** The colourway invariant, swept
+across every submaterial rather than the first, called two healthy families
+collapsed: the Defiance helmet's `camera_m` agrees to 5.9 across six colourways
+while its `coated_metal_m` spreads 44.1. A camera lens being one colour on every
+colourway is intent. The invariant now fires only when a family collapses on
+*every* submaterial, which is what the Venture regression actually did. And a
+surface whose accent sits on the hue band's boundary — the Ana set's is at
+exactly 30.0 against a band starting at 30 — has a coverage decided by noise, so
+it is reported apart rather than scored.
+
+The one finding the audit does report is `sentinel-red-baked`, on 21 surfaces,
+and it is **inherited rather than introduced**: CIG marks where a glow goes with
+a pure-red BaseLayer tint, and compositing that as albedo needs an emissive
+output plumbed through to fix. The Python's own audit reports 267 of these. On
+the items both cover the two agree to the percentage point.
 
 **Phase 4 — Onboarding and caching**
 The flow above: storage, update detection, every error state.

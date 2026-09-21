@@ -594,6 +594,32 @@ def audit_cmd(ctx: click.Context, only: str | None, limit: int) -> None:
     )
 
 
+@main.command(name="golden")
+@click.option("--out", "out", type=click.Path(path_type=Path), default=None)
+@click.option("--gloss/--no-gloss", default=True, help="resolve per-pixel gloss (slow, cached)")
+@click.pass_context
+def golden_cmd(ctx: click.Context, out: Path | None, gloss: bool) -> None:
+    """Dump the golden outputs the web port is scored against.
+
+    Every input `tint.compose_layered` consumes for the reference families, plus
+    the mean of what it produced, as one JSON file. `web/core` and `web/gpu`
+    both read it. Regenerate this after any change to how a surface is
+    composited -- otherwise the port is being scored against the old rules.
+    """
+    from . import golden as golden_mod
+
+    settings = _settings(ctx)
+    path = settings.out_dir / "manifest.json"
+    if not path.is_file():
+        _fail("no manifest; run `scx catalog` first")
+    manifest = Manifest.read(path)
+    target = out or (settings.interim_dir / "golden.json")
+    count = golden_mod.write(settings, manifest, target, gloss=gloss)
+    if not count:
+        _fail("no reference submaterials found; is the catalogue built?")
+    click.secho(f"{count} submaterial(s) -> {target}", fg="green")
+
+
 @main.command(name="all")
 @click.option("--game-version", default="unknown")
 @click.pass_context

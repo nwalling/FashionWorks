@@ -87,6 +87,7 @@ extract/.venv/bin/scx rig --skeleton male    # canonical armature -> data/out/ba
 extract/.venv/bin/scx convert --set <key>    # extract + convert + normalize one set
 extract/.venv/bin/scx convert --all          # every canonical item that has geometry
 extract/.venv/bin/scx refresh                # re-point the manifest at GLBs on disk
+extract/.venv/bin/scx golden                 # golden outputs the web port is scored against
 ```
 
 `scx convert` runs the whole chain: it extracts any missing raw assets, converts
@@ -719,6 +720,72 @@ reporting, and is exactly how the palette-specular bug presented.
 `check_colourways_differ` already existed and did not catch either, because it
 looks for a whole family of four or more collapsing onto one colour. Lynx
 presented as *pairs* inside a family that otherwise varied fine.
+
+### The bake truncates, and is 0.57 sRGB units dark
+
+`compose_layered` writes `(linear_to_srgb(rgb) * 255).astype(np.uint8)`, and
+`astype` **truncates**. Measured over two million samples that costs the baked
+albedo **0.575 sRGB units** of mean brightness: 0.496 from the truncation and
+0.079 from the 4096-step `linear_to_srgb` LUT. Anything that composites the
+same rules and rounds instead -- a GPU RGBA8 render target does -- reads
+brighter by that much, on 89% of channels.
+
+This is 0.2% and not worth invalidating 21 GB of cache over. It is recorded
+because it is **most of the residual any port shows against the bake**, and
+reading that residual as a porting fault sends you looking in the wrong place.
+Two better-sounding explanations were tested against 357 submaterials and both
+are refuted:
+
+* *Tiling quantisation.* The rows **within** a unit have a higher median
+  effective tiling (200) than the rows beyond it (107), and the worst row has
+  the lowest tiling in the set. An earlier note in `WEB.md` claimed the
+  opposite, fitted to 40 rows.
+* *Layer-library resolution.* Repacking the library from 512 to 1024 changed
+  the count within a unit not at all.
+
+### Measuring an accent: three ways to take it at the wrong level
+
+All three were done wrong first, and each produces a confident wrong number.
+
+**A piece's contrast is not the mean of its submaterials' contrasts.** A render
+pools every material into one image and compares gold against everything else. A
+single submaterial compares its gold against *its own* non-gold, which for a
+mostly-dark bracket with a gold edge is a different and much higher number. The
+Sunchaser's eight gold-bearing materials read 0.78 to 3.50 individually; pooled,
+the core reads 2.49. Pool the texels, then take one ratio.
+
+**An albedo atlas is not a lit render, so the 2.95-3.47 reference band does not
+apply to it.** The atlas reads 2.44-2.77 -- for the pipeline's own bake as much
+as for any port. A metal's specular response, occlusion, and UV space no camera
+sees all separate the two. Holding an atlas against that band reports a failure
+of the renderer as a failure of the compositor.
+
+**A ratio of almost nothing is not a measurement.** Two pieces looked like large
+regressions purely because one side found no accent at all -- `Reading::contrast`
+returns 0.0 for "undefined" and that reads as a drift of 1.21. Require a minimum
+accent coverage before comparing.
+
+**And a surface whose accent sits on the hue band's boundary cannot be scored on
+coverage.** The Ana set's accent has a median hue of **exactly 30.0** against a
+band starting at 30, with 31% of one atlas in a single uniform region right
+there, so a sub-unit colour difference moves the lot across at once: 9.4
+coverage points of apparent disagreement on surfaces whose mean albedo agrees to
+under 3 units. The band was defined for the Sunchaser gold at hue 37 and nothing
+says it discriminates elsewhere. Detect the edge case and report it apart.
+
+### A colourway family fails only if it collapses everywhere
+
+`check_colourways_differ` samples whichever submaterial comes first. Sweeping
+*every* submaterial instead -- which the Rust port does -- calls two healthy
+families collapsed: the Defiance helmet's `camera_m` agrees to 5.9 across six
+colourways while its `coated_metal_m` spreads 44.1, and the Corbel helmet's
+`helmet02_m` and `helmet03_m` agree to 2.9 and 0.0 while `helmet01_m` spreads
+42.7. A camera lens and an interior shell being one colour on every colourway is
+the artist's intent.
+
+What the invariant is for is the Venture collapse, where twelve undersuits went
+flat near-white **together, on every surface at once**. So the family's verdict
+is its widest-spreading submaterial, not its narrowest.
 
 ### Stray weight goes to the vertex's own bones, not one bone per mesh
 
@@ -1427,6 +1494,14 @@ blender/
   normalize_armor.py        batch: converted geometry -> item.glb
   mtl_to_pbr.py             StarEngine .mtl -> Principled BSDF
   make_synthetic.py         placeholder rig and items (no game data needed)
+web/core/src/
+  composite.rs              LayerBlend rules on the CPU, the port's reference
+  gold.rs                   accent coverage and contrast, with the band-edge test
+  audit.rs                  the invariants, ported to run on composited surfaces
+web/gpu/
+  layerblend.js             the LayerBlend fragment shader
+  bake.js                   WebGL2 texture arrays, MRT target, read-back
+  check.html                scores the shader against the Python's bakes
 viewer/src/
   manifest.ts               zod schema, mirrors manifest.py
   three/binding.ts          §5.3 Option A + Option B fallback

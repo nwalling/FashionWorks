@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LayerBlend shader check</title>
+<style>
+  :root { color-scheme: dark; font-family: ui-monospace, monospace; }
+  body { margin: 0; padding: 16px; background: #0a1219; color: #eaf2f6; }
+  h1 { font-size: 15px; margin: 0 0 12px; }
+  #summary { white-space: pre-wrap; line-height: 1.5; }
+  table { border-collapse: collapse; font-size: 12px; margin-top: 12px; }
+  td, th { padding: 2px 10px 2px 0; text-align: left; }
+  .bad { color: #ff8a34; }
+  canvas { display: none; }
+</style>
+</head>
+<body>
+<h1>LayerBlend shader vs. the Python bakes</h1>
+<div id="summary">waiting for a golden file…</div>
+<table id="rows"></table>
+<canvas id="gl"></canvas>
+
+<script type="module">
+// Runs the LayerBlend fragment shader over every submaterial in the golden
+// file and compares its mean albedo with the mean of the PNG
+// `tint.compose_layered` baked for the same submaterial.
+//
+// The comparison is a mean rather than a per-pixel diff on purpose: the mean is
+// insensitive to the sampling differences that do not matter -- a pixel either
+// side of a layer boundary -- while still catching every rule that does. It is
+// the same measure `web/core/examples/composite_diff.rs` scores the CPU port on,
+// so the two ports are held to one standard.
+import { createProgram, createLayerArray, createControlMap, createTarget, render, rasterise, linearMean, meanRgb, LAYER_SIZE } from './bake.js';
+
+const SIZE = 1024;           // the bake resolution, so resampling is not a variable
+const STRICT = 1.0;          // sRGB units out of 255
+const TOLERANCE = 3.0;
+
+// The layer library's packed resolution. WEB.md caps it at 512 for VRAM; the
+// query parameter exists because that cap is the only real difference between
+// this and the bake, and a claim about it should be measured rather than
+// asserted. `?layerSize=1024` and `?layerSize=2048` answer it directly.
+const LAYER_PX = Number(new URLSearchParams(location.search).get('layerSize')) || LAYER_SIZE;
+
+const summary = document.getElementById('summary');
+const rows = document.getElementById('rows');
+const canvas = document.getElementById('gl');
+
+function say(text) { summary.textContent = text; }
+
+/// Serve the repo root; the golden's paths are relative to it.
+async function loadImage(path) {
+  if (!path) return null;
+  const url = `/${path.replace(/^\/+/, '')}`;
+  const image = new Image();
+  image.decoding = 'async';
+  await new Promise((resolve, reject) => {
+    image.onload = resolve;
+    image.onerror = () => reject(new Error(`no such image: ${url}`));
+    image.src = url;
+  });
+  return image;
+}
+
+const gl = canvas.getContext('webgl2', { antialias: false, preserveDrawingBuffer: false });
+if (!gl) {
+  say('WebGL2 is not available in this browser.');
+  throw new Error('no webgl2');
+}
+
+const { program, uniforms } = createProgram(gl);
+const target = createTarget(gl, SIZE);
+
+// One blank texture stands in wherever a submaterial has no blend, wear or hal
+// map. The `uHas*` flags mean it is never sampled; it exists so the sampler
+// unit is bound, which WebGL requires.
+const blank = gl.createTexture();
+gl.bindTexture(gl.TEXTURE_2D, blank);
+gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 255]));
+
+const controlCache = new Map();
+async function control(path) {
+  if (!path) return null;
+  if (!controlCache.has(path)) {
+    const image = await loadImage(path);
+    controlCache.set(path, image ? createControlMap(gl, image) : null);
+  }
+  return controlCache.get(path);
+}
+
+async function run(golden) {
+  // The layer library, packed into one array texture. Every distinct diffuse
+  // and gloss texture the golden references gets a slice, which is the packing
+  // WEB.md calls for: 19 samplers' worth of layers down to two.
+  const wanted = { diffuse: new Map(), gloss: new Map() };
+  for (const row of golden) {
+    for (const layer of row.layers ?? []) {
+      for (const entry of [layer, layer.worn].filter(Boolean)) {
+        if (entry.diffuse) wanted.diffuse.set(entry.diffuse, -1);
+        if (entry.gloss) wanted.gloss.set(entry.gloss, -1);
+      }
+    }
+  }
+
+  const build = async (map, label) => {
+    const slices = [];
+    const means = new Map();
+    let i = 0;
+    for (const path of [...map.keys()]) {
+      say(`packing ${label} ${i + 1}/${map.size}…`);
+      let image;
+      try {
+        image = await loadImage(path);
+      } catch {
+        map.set(path, -1);
+        i += 1;
+        continue;
+      }
+      const rgba = rasterise(image, LAYER_PX);
+      // The mean is measured on the bytes the shader samples, so the metal
+      // normalisation is self-consistent with what is uploaded.
+      means.set(path, linearMean(rgba));
+      map.set(path, slices.length);
+      slices.push(rgba);
+      i += 1;
+    }
+    const fallback = [new Uint8Array(LAYER_PX * LAYER_PX * 4)];
+    return { texture: createLayerArray(gl, slices.length ? slices : fallback, LAYER_PX), means };
+  };
+
+  const diffuseArray = await build(wanted.diffuse, 'layer diffuse');
+  const glossArray = await build(wanted.gloss, 'layer gloss');
+  const arrays = { diffuse: diffuseArray.texture, gloss: glossArray.texture, blank };
+
+  const toLayer = (entry) => entry && ({
+    tint: entry.tint_color,
+    paletteTint: entry.palette_tint,
+    response: entry.response,
+    metal: entry.metal,
+    diffuseSlice: entry.diffuse ? wanted.diffuse.get(entry.diffuse) : -1,
+    glossSlice: entry.gloss ? wanted.gloss.get(entry.gloss) : -1,
+    diffuseMean: entry.diffuse ? (diffuseArray.means.get(entry.diffuse) ?? 1) : 1,
+    tiling: (entry.uv_tiling ?? 1) * (entry.tile_u ?? 1),
+    shininess: entry.shininess ?? 0.5,
+    glossMult: entry.gloss_mult ?? 1,
+    worn: entry.worn ? toLayer(entry.worn) : null,
+  });
+
+  let checked = 0;
+  let strict = 0;
+  let agree = 0;
+  let skipped = 0;
+  const bad = [];
+
+  for (const row of golden) {
+    if (!row.baked_mean || !(row.layers || []).length) { skipped += 1; continue; }
+    say(`compositing ${checked + 1}…  ${row.sub}`);
+
+    const result = render(gl, { program, uniforms }, target, SIZE, {
+      layers: row.layers.map(toLayer),
+      palette: row.palette,
+      blend: await control(row.blend),
+      wear: await control(row.wear),
+      hal: await control(row.hal),
+      wearThreshold: row.wear_threshold ?? 0.5,
+      wearFalloff: row.wear_falloff ?? 0.5,
+    }, arrays);
+
+    const got = meanRgb(result.albedo);
+    const off = Math.max(...[0, 1, 2].map((i) => Math.abs(got[i] - row.baked_mean[i])));
+    checked += 1;
+    if (off <= STRICT) strict += 1;
+    if (off <= TOLERANCE) agree += 1;
+    else bad.push({ row, got, off, orm: meanRgb(result.orm) });
+
+    // Report the ORM too, which the CPU harness cannot: `composite.rs`
+    // computes albedo only, so occlusion, roughness and metalness are checked
+    // here or nowhere.
+    row.__orm = meanRgb(result.orm);
+    row.__albedo = got;
+    row.__off = off;
+    // The effective tiling is recorded per row so the residual can be tested
+    // against the explanation rather than assumed to fit it: the bake tiles a
+    // layer by downsampling it to `round(size / repeat)` pixels, so a high
+    // tiling is where the two sampling strategies should diverge.
+    row.__tiling = Math.max(...row.layers.flatMap((l) => [l, l.worn].filter(Boolean)
+      .map((e) => (e.uv_tiling ?? 1) * (e.tile_u ?? 1))));
+  }
+
+  const pct = (n) => `${((n / Math.max(checked, 1)) * 100).toFixed(1)}%`;
+  say([
+    `submaterials composited  ${checked}  (${skipped} skipped, no bake on disk)`,
+    `within ${STRICT} sRGB unit         ${strict} of ${checked}  (${pct(strict)})`,
+    `layer library packed at   ${LAYER_PX}px`,
+    `within ${TOLERANCE} sRGB units        ${agree} of ${checked}  (${pct(agree)})`,
+  ].join('\n'));
+
+  rows.innerHTML = '<tr><th>submaterial</th><th>shader</th><th>bake</th><th>off</th></tr>'
+    + bad.sort((a, b) => b.off - a.off).slice(0, 20).map(({ row, got, off }) =>
+      `<tr class="bad"><td>${row.name ?? ''} / ${row.sub}</td>`
+      + `<td>${got.map((v) => v.toFixed(1)).join(' ')}</td>`
+      + `<td>${row.baked_mean.map((v) => v.toFixed(1)).join(' ')}</td>`
+      + `<td>${off.toFixed(1)}</td></tr>`).join('');
+
+  // Hand the whole result back for the driver to read.
+  window.__check = {
+    checked, strict, agree, skipped,
+    worst: bad.sort((a, b) => b.off - a.off).slice(0, 12).map(({ row, got, off, orm }) => ({
+      item: row.name, sub: row.sub, family: row.family,
+      shader: got, bake: row.baked_mean, off, orm,
+    })),
+    orm: golden.filter((r) => r.__orm).map((r) => ({
+      sub: r.sub, item: r.name, shader: r.__orm, bake: r.orm_mean,
+    })),
+    rows: golden.filter((r) => r.__albedo).map((r) => ({
+      item: r.name, sub: r.sub, family: r.family, slot: r.slot,
+      off: r.__off, tiling: r.__tiling, shader: r.__albedo, bake: r.baked_mean,
+    })),
+  };
+}
+
+const source = new URLSearchParams(location.search).get('golden') ?? '/golden.json';
+fetch(source)
+  .then((r) => { if (!r.ok) throw new Error(`${r.status} for ${source}`); return r.json(); })
+  .then(run)
+  .catch((error) => { say(`failed: ${error.message}`); window.__check = { error: error.message }; });
+</script>
+</body>
+</html>
