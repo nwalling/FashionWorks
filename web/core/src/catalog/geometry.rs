@@ -122,7 +122,12 @@ fn visit(node: &Value, depth: usize, out: &mut Vec<GeoNode>, seen: &mut Vec<Stri
             seen.push(key);
             out.push(GeoNode {
                 path: normalized,
-                material: first_str(node, &NODE_MATERIAL).map(normalize_asset_path),
+                // An empty string is absent, not a material. Python's
+                // truthiness collapses the two; Rust's Option does not, and
+                // Some("") sails through every later check.
+                material: first_str(node, &NODE_MATERIAL)
+                    .filter(|m| !m.is_empty())
+                    .map(normalize_asset_path),
                 depth,
                 palette: first_str(node, &NODE_PALETTE)
                     .filter(|p| !p.is_empty())
