@@ -16,6 +16,7 @@ crate-type = ["cdylib", "rlib"]
 starbreaker-p4k = { path = "../../tools/src/StarBreaker/crates/starbreaker-p4k" }
 starbreaker-common = { path = "../../tools/src/StarBreaker/crates/starbreaker-common" }
 starbreaker-dds = { path = "../../tools/src/StarBreaker/crates/starbreaker-dds" }
+starbreaker-chunks = { path = "../../tools/src/StarBreaker/crates/starbreaker-chunks" }
 starbreaker-3d = { path = "../../tools/src/StarBreaker/crates/starbreaker-3d", default-features = false }
 starbreaker-datacore = { path = "../../tools/src/StarBreaker/crates/starbreaker-datacore" }
 zerocopy = { version = "0.8", features = ["derive"] }

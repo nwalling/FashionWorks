@@ -357,6 +357,7 @@ dependencies = [
  "js-sys",
  "serde_json",
  "starbreaker-3d",
+ "starbreaker-chunks",
  "starbreaker-common",
  "starbreaker-datacore",
  "starbreaker-dds",

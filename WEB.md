@@ -390,6 +390,27 @@ mesh and skeleton parsers linked in.
 `tools/build.sh` now applies every patch in `web/patches/` rather than a named
 one, so the next of these does not need a code change.
 
+*The mesh pair is split by role, and the skeleton is in the small half.* This
+is the same shape of trap as a `.dds` holding only its smallest mip, and it
+matters because StarBreaker's own CLI takes the `.skinm`:
+
+| file | chunks |
+| --- | --- |
+| `.skin` (2,888 bytes) | `EXPORT_FLAGS`, **`COMPILED_BONES_IVO320`**, `MTL_NAME_IVO320`, `MESH_IVO320` |
+| `.skinm` (544,016 bytes) | `IVO_SKIN2` only -- the vertex streams |
+
+So a port that reads only the file the CLI wants gets geometry with **no
+skeleton**. Both halves have to be read, and the bones come from the 2.8 KB one.
+
+Measured on `m_outlaw_legacy_light_arms_01`: 8,903 vertices, 13,446 triangles,
+3 submeshes, bounds z 1.224-1.568 on a 1.745 m body, and 30 bones beginning
+`World, Hips, Spine, Spine1` with 2 `*_override` attachment bones -- which is
+the hierarchy and the attachment-bone behaviour this repo already records.
+
+Two API shapes to keep straight, having had both backwards once:
+`SkinMesh::read` takes **one chunk's data**, and `skeleton::parse_skeleton`
+takes the **whole file** and finds its chunk itself.
+
 `.skin` → three.js geometry; canonical skeleton with grafted attachment bones;
 per-vertex stray-weight redistribution; socket placement with its 180° yaw;
 retargeted poses.
