@@ -35,21 +35,30 @@ if [[ ! -x "$CARGO" ]]; then
 fi
 clone_or_update https://github.com/diogotr7/StarBreaker.git "$SRC/StarBreaker"
 
-# The browser build needs two things upstream does not expose yet: the
-# filesystem-only API gated away from wasm32, and a reader-based index entry
-# point (`entries_from_reader`) so a 158 GB archive can be read over byte
-# ranges. Both are additive; see web/patches. Re-applied after every pull
-# because clone_or_update fast-forwards the checkout.
-PATCH="$ROOT/web/patches/0001-starbreaker-p4k-browser-support.patch"
-if [[ -f "$PATCH" ]]; then
+# The browser build needs things upstream does not expose yet. All of them are
+# additive and default-off, so the native CLI built below is unaffected; see
+# web/patches. Re-applied after every pull because clone_or_update fast-forwards
+# the checkout.
+#
+#   0001  gates the filesystem-only P4K API away from wasm32, and adds a
+#         reader-based index entry point so a 158 GB archive can be read over
+#         byte ranges.
+#   0002  splits starbreaker-3d's byte parsers from its filesystem pipeline.
+#         The pipeline needs MappedP4k, which does not exist on wasm32, and
+#         the .blend writer needs zstd, a C library with no wasm target. Both
+#         are now features, on by default.
+for PATCH in "$ROOT"/web/patches/*.patch; do
+  [[ -f "$PATCH" ]] || continue
+  NAME="$(basename "$PATCH")"
   if git -C "$SRC/StarBreaker" apply --reverse --check "$PATCH" 2>/dev/null; then
-    echo "  browser-support patch already applied"
+    echo "  $NAME already applied"
   elif git -C "$SRC/StarBreaker" apply "$PATCH" 2>/dev/null; then
-    echo "  browser-support patch applied"
+    echo "  $NAME applied"
   else
-    echo "  WARNING: browser-support patch did not apply; the web core will not build" >&2
+    echo "  WARNING: $NAME did not apply; the web core will not build" >&2
   fi
-fi
+done
+
 "$CARGO" build --release --manifest-path "$SRC/StarBreaker/Cargo.toml" -p starbreaker
 ln -sf ../src/StarBreaker/target/release/starbreaker "$BIN/starbreaker"
 "$BIN/starbreaker" --version

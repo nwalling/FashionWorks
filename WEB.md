@@ -368,6 +368,28 @@ port has been run natively rather than in a browser. The wasm build is clean but
 has not been exercised against a DataCore extracted in-page.
 
 **Phase 2 — Geometry, skeleton and poses**
+
+*Started.* The first question was the same one phase 0 asked of the DataCore:
+does the parser run on wasm32 at all? `starbreaker-3d` as shipped does **not**,
+and the reason is worth recording because this plan's dependency table missed
+it. Two C-backed or filesystem-bound things reach into it:
+
+- **`starbreaker-blend` pulls in `zstd`**, a C library with no wasm32 target.
+  The table above says zstd is the pure-Rust `ruzstd`, and it is *in the P4K
+  crate*; the `.blend` writer uses the other one.
+- **The export pipeline needs `MappedP4k`**, which `web/patches/0001` gates away
+  from wasm32 by design.
+
+The parsers themselves are clean: `ivo`, `skeleton`, `types`, `dequant`,
+`chrparams` contain no reference to either. So `web/patches/0002` splits the
+crate along that line with two default-on features, `blend` and `pipeline`,
+and the web build takes neither. The native CLI is unaffected. Result:
+**0.57 MB raw, 0.12 MB brotli**, still far inside the 2 MB budget even with the
+mesh and skeleton parsers linked in.
+
+`tools/build.sh` now applies every patch in `web/patches/` rather than a named
+one, so the next of these does not need a code change.
+
 `.skin` → three.js geometry; canonical skeleton with grafted attachment bones;
 per-vertex stray-weight redistribution; socket placement with its 180° yaw;
 retargeted poses.
