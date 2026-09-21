@@ -454,6 +454,25 @@ attachment points, **35 are absent from the base and 1 is not**:
 carries no `_override` suffix. So 220 + 35 = 255, and `skeleton_diff` checks
 that arithmetic rather than assuming it.
 
+*Stray-weight redistribution is smaller than expected, and the reason is the
+graft.* Once the 35 attachment bones are on the armature, **most armour meshes
+have no stray weight at all** -- measured across eighteen, all but one came out
+at 0.00%. CLAUDE.md's "41 joints of which only 16 exist" is against the *base*
+220, not the canonical 255.
+
+What is left is simulation geometry. The worst mesh measured,
+`m_clda_utility_heavy_suit_04`, carries 3.48% of its weight on bones like
+`au_shoulder_pad_Left` and `ac_flap_x03_y02`, and **759 of 31,413 vertices have
+no surviving bone at all** -- those are the ones that get pinned to the origin
+if the weight is dropped.
+
+`core/src/rebind.rs` handles both cases and is verified on that mesh: 759
+guessed, **0 left unweighted, 0 failing to sum to 255**. The guess keeps side:
+380 left-pad vertices landed on left bones and 379 right-pad on right ones,
+**none crossed over**. That matters because the mesh's dominant bone is `Spine3`,
+which has no side -- a one-bone-per-mesh fallback would have collapsed all 759
+onto the spine, which is the shape of the Antium shoulderpad failure.
+
 *The graft reconciles too, bar one bone where the golden file is wrong.* Of the
 donor's 35 attachment bones, **34 match the canonical armature on both parent
 and world position**, to within a millimetre. The 35th,

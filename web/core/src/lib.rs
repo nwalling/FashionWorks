@@ -13,6 +13,7 @@
 
 pub mod catalog;
 mod p4k;
+pub mod rebind;
 mod range;
 
 use wasm_bindgen::prelude::*;
