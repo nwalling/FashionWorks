@@ -139,6 +139,40 @@ fn main() {
             });
         }
 
+        // tags, which carry Set_<n> and Color_<n>
+        let tags = catalog::tags_for(&record.value);
+        let ok = wants.iter().any(|w| {
+            let want: Vec<&str> = w["tags"].as_array()
+                .map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
+            tags.iter().map(String::as_str).collect::<Vec<_>>() == want
+        });
+        tally.check("tags", ok, || {
+            format!("{}: tags {tags:?} != {:?}", record.class_name, wants[0]["tags"])
+        });
+
+        // the set key, which is what makes "equip full set" work
+        let ok = wants.iter().any(|w| {
+            let flags: Vec<String> = w["flags"].as_array()
+                .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+                .unwrap_or_default();
+            let geo: Vec<String> = w["geometry"].as_array()
+                .map(|a| a.iter().filter_map(|g| g["source"].as_str()).map(str::to_string).collect())
+                .unwrap_or_default();
+            let got = catalog::set_key(
+                w["name"].as_str().unwrap_or(""),
+                &flags,
+                &tags,
+                w["manufacturer"]["code"].as_str().unwrap_or(""),
+                w["weight_class"].as_str(),
+                &geo,
+                &record.class_name,
+            );
+            Some(got.as_str()) == w["set"].as_str()
+        });
+        tally.check("set", ok, || {
+            format!("{}: set != {:?}", record.class_name, wants[0]["set"])
+        });
+
         // tint palette: the reference, the colours, and the speculars
         let worn = catalog::select_wearables(&nodes, "male");
         // The override is where a rigid piece's colourway lives: the record's
