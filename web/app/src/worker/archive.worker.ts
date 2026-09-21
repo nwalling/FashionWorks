@@ -27,7 +27,29 @@ export type ToWorker =
       catalogue?: boolean;
     }
   /** Load one mesh from the already-open archive. */
-  | { type: 'mesh'; path: string };
+  | { type: 'mesh'; path: string }
+  /** Build the canonical armature before any mesh is loaded. */
+  | { type: 'rig'; base: string; donors: string[] };
+
+export interface RigSummary {
+  /** Total bones: the base skeleton plus the grafted attachment points. */
+  bones: number;
+  base: number;
+  grafted: number;
+  attachments: number;
+}
+
+export interface RigBone {
+  name: string;
+  /** Index of the parent bone, or -1 for the root. */
+  parent: number;
+  /** Parent-relative position. */
+  position: Float32Array;
+  /** Parent-relative rotation, as the archive stores it: [w, x, y, z]. */
+  rotation: Float32Array;
+  world: Float32Array;
+  attachment: boolean;
+}
 
 export interface MeshPayload {
   positions: Float32Array;
@@ -39,6 +61,8 @@ export interface MeshPayload {
   bones: string[];
   submeshes: Array<{ materialId: number; start: number; count: number }>;
   materialFile: string | null;
+  /** Null when the mesh was loaded without a rig. */
+  rebind: { mapped: number; stray: number; redistributed: number; guessed: number } | null;
   min: Float32Array;
   max: Float32Array;
   unweighted: number;
@@ -50,6 +74,7 @@ export type FromWorker =
   | { type: 'catalogue'; json: string; itemCount: number; ms: number }
   | { type: 'stats'; reads: number; fetched: number }
   | { type: 'mesh'; path: string; mesh: MeshPayload; ms: number }
+  | { type: 'rig'; summary: RigSummary; bones: RigBone[]; ms: number }
   | { type: 'failed'; message: string };
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
@@ -129,9 +154,27 @@ function urlReader(url: string): (offset: number, length: number) => Uint8Array 
 
 /** The archive stays open between messages: re-indexing 1.37 M entries for
  * every mesh would cost 15 seconds each. */
-let opened: { archive: { loadMesh(path: string): unknown }; } | undefined;
+let opened: {
+  archive: {
+    loadMesh(path: string): unknown;
+    buildRig(base: string, donors: string[]): unknown;
+    rigBones(): unknown;
+  };
+} | undefined;
 
 async function run(message: ToWorker): Promise<void> {
+  if (message.type === 'rig') {
+    if (!opened) {
+      say({ type: 'failed', message: 'no archive is open' });
+      return;
+    }
+    const started = performance.now();
+    const summary = opened.archive.buildRig(message.base, message.donors) as RigSummary;
+    const bones = opened.archive.rigBones() as RigBone[];
+    say({ type: 'rig', summary, bones, ms: performance.now() - started });
+    return;
+  }
+
   if (message.type === 'mesh') {
     if (!opened) {
       say({ type: 'failed', message: 'no archive is open' });
@@ -150,7 +193,9 @@ async function run(message: ToWorker): Promise<void> {
   const skeleton = message.skeleton;
   let reads = 0;
   let fetched = 0;
-  const base = message.type === 'open' ? fileReader(message.file) : urlReader(message.url);
+  const base = message.type === 'open' || message.type === 'open-url'
+    ? (message.type === 'open' ? fileReader(message.file) : urlReader(message.url))
+    : (() => { throw new Error('unreachable'); })();
   const read = (offset: number, length: number) => {
     reads += 1;
     fetched += length;
@@ -161,7 +206,7 @@ async function run(message: ToWorker): Promise<void> {
   progress('reading archive index');
   let started = performance.now();
   const archive = new wasm.Archive(read, byteLength);
-  opened = { archive: archive as unknown as { loadMesh(path: string): unknown } };
+  opened = { archive: archive as unknown as NonNullable<typeof opened>['archive'] };
   const entryCount = archive.entryCount();
   const fingerprint = archive.fingerprint();
   say({ type: 'indexed', entryCount, fingerprint, ms: performance.now() - started });

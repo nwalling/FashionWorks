@@ -14,29 +14,67 @@
 
 import {
   AmbientLight,
-  Box3,
   Color,
   DirectionalLight,
   GridHelper,
-  Mesh,
   MeshStandardMaterial,
   PerspectiveCamera,
   Scene,
+  SkeletonHelper,
+  SkinnedMesh,
   Vector3,
   WebGLRenderer,
 } from 'three';
 
 import { buildGeometry } from './src/three/geometry';
-import type { FromWorker, MeshPayload, ToWorker } from './src/worker/archive.worker';
+import { buildRig, type BuiltRig } from './src/three/rig';
+import type { FromWorker, MeshPayload, RigBone, ToWorker } from './src/worker/archive.worker';
 
 /** The piece to show. Sunchaser because it is the set every other measurement
  * in this repo is anchored to. */
-const PIECE = {
-  name: 'Defiance Helmet Sunchaser',
-  path: 'Objects/Characters/Human/male_v7/armor/slaver/m_slaver_heavy_armor_helmet_01.skin',
-  /** The `.mtl` declares six submaterials; the mesh declares seven groups. */
-  materials: 6,
-};
+/** The pieces to show, and the point of showing more than one: they must end
+ * up on **the same skeleton**, so posing a bone deforms all of them together.
+ * The local pipeline's own measurement is one `THREE.Skeleton` across ten
+ * skinned meshes for a full set.
+ */
+const PIECES = [
+  {
+    name: 'Defiance Helmet Sunchaser',
+    path: 'Objects/Characters/Human/male_v7/armor/slaver/m_slaver_heavy_armor_helmet_01.skin',
+    /** The `.mtl` declares six submaterials; the mesh declares seven groups. */
+    materials: 6,
+  },
+  {
+    name: 'Defiance Core Sunchaser',
+    path: 'Objects/Characters/Human/male_v7/armor/slaver/m_slaver_heavy_armor_01_core.skin',
+    materials: 8,
+  },
+];
+
+const BASE_SKELETON = 'Objects/Characters/Human/male_v7/export/bhm_skeleton_v7.chr';
+
+/** Donors for the attachment points the base skeleton does not have.
+ *
+ * These two exactly: an undersuit contributes 34 and the slaver core the one
+ * more -- `gadget_attach_1_override` -- that reaches the pipeline's canonical
+ * armature of 255 bones and 35 attachment points, with no bone missing and
+ * none extra. Checked by `cargo run --example rig_union`.
+ *
+ * Adding donors *extends* it. The Sunchaser helmet, for instance, brings three
+ * `helm_*_flashlight_override` points the pipeline's armature does not have,
+ * because that one grafts from a single undersuit. A superset is safe here --
+ * the viewer binds by name, never by index -- but it is not the same rig, so
+ * the list is fixed rather than accumulated.
+ */
+const DONORS = [
+  'Objects/Characters/Human/male_v7/armor/cds/m_cds_undersuit_armor_02.skin',
+  'Objects/Characters/Human/male_v7/armor/slaver/m_slaver_heavy_armor_01_core.skin',
+];
+
+const bound: SkinnedMesh[] = [];
+let pending = 0;
+
+let rig: BuiltRig | undefined;
 
 const status = document.getElementById('status') as HTMLDivElement;
 const lines: string[] = [];
@@ -69,8 +107,8 @@ scene.add(grid);
 let spin = 0;
 function frame(): void {
   spin += 0.004;
-  const target = new Vector3(0, 1.72, 0);
-  camera.position.set(Math.sin(spin) * 0.75, 1.78, Math.cos(spin) * 0.75);
+  const target = new Vector3(0, 1.35, 0);
+  camera.position.set(Math.sin(spin) * 1.9, 1.5, Math.cos(spin) * 1.9);
   camera.lookAt(target);
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
@@ -82,26 +120,46 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
-function show(mesh: MeshPayload, ms: number): void {
-  const { geometry, bounds, orphanGroups } = buildGeometry(mesh, PIECE.materials);
+function showRig(bones: readonly RigBone[], summary: { bones: number; base: number; grafted: number; attachments: number }): void {
+  rig = buildRig(bones);
+  scene.add(rig.root);
+  const helper = new SkeletonHelper(rig.root);
+  (helper.material as { opacity: number; transparent: boolean }).opacity = 0.35;
+  (helper.material as { transparent: boolean }).transparent = true;
+  scene.add(helper);
+  say(`rig ${summary.bones} bones = ${summary.base} base + ${summary.grafted} grafted`);
+  say(`${summary.attachments} attachment points`);
+}
+
+function show(mesh: MeshPayload, ms: number, piece: (typeof PIECES)[number]): void {
+  const { geometry, bounds, orphanGroups } = buildGeometry(mesh, piece.materials);
 
   // One material per submaterial group. Flat greys for now: the LayerBlend
   // shader is what gives these their real surface, and standing it up here
   // would hide whether the *geometry* is right, which is what this page is for.
   const palette = ['#8a929a', '#5c646b', '#6d767e', '#9aa4ad', '#4e565d', '#b0b8c0'];
-  const materials = Array.from({ length: PIECE.materials }, (_, i) =>
+  const materials = Array.from({ length: piece.materials }, (_, i) =>
     new MeshStandardMaterial({
       color: new Color(palette[i % palette.length] ?? '#8a929a'),
       roughness: 0.55,
       metalness: 0.25,
     }));
 
-  const object = new Mesh(geometry, materials);
-  scene.add(object);
+  // A SkinnedMesh must be parented into the same space as the bones, and bound
+  // *after* both are in the scene: `bind` reads the bones' world matrices.
+  const object = new SkinnedMesh(geometry, materials);
+  object.frustumCulled = false;
+  if (rig) {
+    scene.add(object);
+    object.bind(rig.skeleton, object.matrixWorld);
+  } else {
+    scene.add(object);
+  }
+  bound.push(object);
 
   const size = new Vector3();
   bounds.getSize(size);
-  say(`\n${PIECE.name}`);
+  say(`\n${piece.name}`);
   say(`${(mesh.positions.length / 3).toLocaleString()} vertices, `
     + `${(mesh.indices.length / 3).toLocaleString()} triangles, ${ms.toFixed(0)}ms`);
   say(`${mesh.submeshes.filter((s) => s.count > 0).length} groups`
@@ -109,6 +167,33 @@ function show(mesh: MeshPayload, ms: number): void {
   say(`sits at y ${bounds.min.y.toFixed(3)}–${bounds.max.y.toFixed(3)} `
     + `(${size.x.toFixed(2)} × ${size.y.toFixed(2)} × ${size.z.toFixed(2)} m)`);
   say(`${mesh.unweighted} unweighted vertices, ${mesh.bones.length} bones`);
+  if (mesh.rebind) {
+    say(`rebind: ${mesh.rebind.mapped} joints mapped, ${mesh.rebind.stray} stray, `
+      + `${mesh.rebind.redistributed} vertices redistributed, ${mesh.rebind.guessed} guessed`);
+  }
+  // A pose probe, so "is it actually skinned" is answerable rather than
+  // assumed: a mesh bound to a skeleton it ignores looks identical until
+  // something moves.
+  (window as unknown as { __pose: unknown }).__pose = (boneName: string, radians: number) => {
+    const bone = rig?.byName.get(boneName);
+    if (!bone || !rig) return null;
+    const before = object.geometry.attributes.position!.count;
+    const sample = new Vector3().fromBufferAttribute(
+      object.geometry.attributes.position as never, 0);
+    bone.rotation.z += radians;
+    rig.root.updateMatrixWorld(true);
+    rig.skeleton.update();
+    // Where vertex 0 ends up once the skeleton has moved, computed the way the
+    // shader does it.
+    const after = new Vector3();
+    object.applyBoneTransform(0, after);
+    return { vertices: before, rest: sample.toArray(), posed: after.toArray() };
+  };
+
+  // The scene objects, so a probe can look at the real state rather than at
+  // whatever the page chose to summarise.
+  (window as unknown as { __scene: unknown }).__scene = { scene, object, bound, rig, camera, renderer };
+
   (window as unknown as { __render: unknown }).__render = {
     vertices: mesh.positions.length / 3,
     triangles: mesh.indices.length / 3,
@@ -116,6 +201,8 @@ function show(mesh: MeshPayload, ms: number): void {
     min: bounds.min.toArray(),
     max: bounds.max.toArray(),
     unweighted: mesh.unweighted,
+    rebind: mesh.rebind,
+    rigBones: rig?.bones.length ?? 0,
   };
 }
 
@@ -137,11 +224,26 @@ async function main(): Promise<void> {
       status.textContent = `${lines.join('\n')}\n${message.step}…`;
     } else if (message.type === 'indexed') {
       say(`${message.entryCount.toLocaleString()} entries in ${(message.ms / 1000).toFixed(1)}s`);
-      // The catalogue is not needed to draw one mesh, and skipping it is the
-      // point: a piece costs an index plus two entry reads, not a full build.
-      worker.postMessage({ type: 'mesh', path: PIECE.path } satisfies ToWorker);
+      // The rig first: a mesh loaded before it exists comes back with its own
+      // joint indices, which address a bone list the scene does not have.
+      worker.postMessage({
+        type: 'rig', base: BASE_SKELETON, donors: DONORS,
+      } satisfies ToWorker);
+    } else if (message.type === 'rig') {
+      showRig(message.bones, message.summary);
+      pending = PIECES.length;
+      for (const piece of PIECES) {
+        worker.postMessage({ type: 'mesh', path: piece.path } satisfies ToWorker);
+      }
     } else if (message.type === 'mesh') {
-      show(message.mesh, message.ms);
+      const piece = PIECES.find((p) => p.path === message.path) ?? PIECES[0]!;
+      show(message.mesh, message.ms, piece);
+      pending -= 1;
+      if (pending === 0) {
+        const skeletons = new Set(bound.map((m) => m.skeleton));
+        say(`\n${bound.length} pieces, ${skeletons.size} skeleton`
+          + `${skeletons.size === 1 ? '' : 's'}`);
+      }
     } else if (message.type === 'failed') {
       say(`failed: ${message.message}`);
     }

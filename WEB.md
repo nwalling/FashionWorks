@@ -407,12 +407,41 @@ has not been exercised against a DataCore extracted in-page.
 
 **Phase 2 — Geometry, skeleton and poses**
 
-**Status: the data paths are complete and every one is checked against the
-existing pipeline's own output.** Geometry, bounds and submeshes match the
-pipeline's GLB; skinning decodes; the skeleton reconciles 220 to 255; stray
-weight redistributes with nothing left unweighted; socket placement is verified
-by the props' own grip locators; and both poses retarget at 220 of 220 bones.
-What remains for a renderable result is assembly rather than format work.
+**Status: complete. Armour from the visitor's own archive renders, skinned, on
+the canonical armature, in a browser.**
+
+Two Sunchaser pieces read out of the real 147.59 GB `Data.p4k` and put on
+screen, against what the pipeline made of the same files:
+
+| | helmet | core |
+| --- | --- | --- |
+| triangles | 27,938 = **27,938** | 34,738 = **34,738** |
+| material groups | 7 (pipeline 6, see below) | 8 = **8** |
+| bounds | y 1.578–1.872, **exact** | y 1.000–1.727, **exact** |
+| joints | 255 | 255 |
+| unweighted vertices | 0 | 0 |
+
+Vertex counts differ -- 16,930 against 28,223 on the helmet -- and should:
+Blender splits a vertex wherever two faces disagree about a normal or a UV.
+Triangles are the invariant, since nothing in that chain adds or removes one.
+
+**The canonical armature is reproduced bone for bone.** The base `.chr` carries
+220; a CDS undersuit grafts 34 and the slaver core the one more
+(`gadget_attach_1_override`) that reaches **255 bones with 35 attachment
+points** -- against the pipeline's golden, *0 missing and 0 extra*. Positions
+agree on 251 of 255 within a millimetre; the four that do not are covered
+below. `cargo run --example rig_union` is the check.
+
+**Binding verified rather than assumed**, because a mesh bound to a skeleton it
+ignores looks identical until something moves. At rest, skinning reproduces the
+mesh **exactly** -- error 0.000000, so the bind matrices and inverse binds are
+right. Rotating `Head` moves helmet vertices; reversing it restores exactly;
+rotating `LeftFoot` moves the helmet by 0. And one `Spine1` rotation moves the
+helmet *and* the core, which is the whole point of the shared armature: **2
+pieces, 1 `THREE.Skeleton`, 1 bone array, 255 bone objects.**
+
+Socket placement and pose retargeting are ported and checked against the
+pipeline but are not yet wired into this scene.
 
 *How it went.* The first question was the same one phase 0 asked of the DataCore:
 does the parser run on wasm32 at all? `starbreaker-3d` as shipped does **not**,

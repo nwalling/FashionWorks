@@ -721,6 +721,58 @@ reporting, and is exactly how the palette-specular bug presented.
 looks for a whole family of four or more collapsing onto one colour. Lynx
 presented as *pairs* inside a family that otherwise varied fine.
 
+### The canonical armature comes from two donors, and matches bone for bone
+
+The base `.chr` carries 220 bones and **no attachment points at all**. A CDS
+undersuit (`m_cds_undersuit_armor_02.skin`) grafts 34, and the slaver core
+supplies the one more -- `gadget_attach_1_override` -- that reaches the
+pipeline's armature exactly: **255 bones, 35 attachment points, 0 missing and 0
+extra** against `data/out/base/male.skeleton.json`.
+
+Donors are a *fixed list*, not an accumulation. Grafting from more pieces
+extends the armature rather than reproducing it: the Sunchaser helmet alone
+brings three `helm_*_flashlight_override` points the pipeline does not have,
+because `build_base_rig` grafts from a single undersuit. A superset is harmless
+where binding is by name -- which it is, everywhere -- but it is not the same
+rig, so the list stays pinned. `cargo run --example rig_union` reports the
+difference by name.
+
+**Four attachment bones sit where Blender's import put them, not where the
+archive says**, which extends the `wep_sidearm_attach_override` note above from
+one bone to four. Each differs on exactly one axis while the other two match to
+four decimals:
+
+| bone | archive | golden | off |
+| --- | --- | --- | --- |
+| `utility_attach_1_override` | z 0.8718 | z 0.8932 | 21.4 mm |
+| `oxyPen_attach_1_override` | z 0.9863 | z 0.9709 | 15.3 mm |
+| `medPen_attach_1_override` | z 0.9820 | z 0.9723 | 9.7 mm |
+| `gadget_attach_1_override` | y -0.1292 | y -0.1385 | 9.3 mm |
+
+The other 251 agree within a millimetre. The archive is right in every case and
+a port should follow it.
+
+### A bone's rotation needs the quaternion reordered *and* the basis conjugated
+
+Two conversions, and doing only the first gives a rotation that looks plausible
+and is wrong.
+
+The archive stores `[w, x, y, z]`; three.js takes `(x, y, z, w)`. And the Z-up
+to Y-up change of basis that vertices get as `(x, y, z) -> (x, z, -y)` is a -90°
+rotation about X, which a *rotation* has to be conjugated by: `q' = B q B⁻¹`.
+Converting the position but not the rotation leaves the mesh and the skeleton in
+different spaces, which renders as a correctly-shaped piece that deforms into
+knots -- not as anything obviously broken.
+
+### `applyBoneTransform` skins the vector you hand it
+
+It does **not** read `geometry.attributes.position` for you: `_basePosition`
+is a copy of the argument. Passing a fresh `Vector3()` skins the origin and
+returns something near zero, which reads exactly like a mesh that is not bound
+to its skeleton. Read the vertex out of the position attribute first.
+
+Cost me a wrong diagnosis: the rig was correct and the probe was not.
+
 ### Skinning comes in two forms, and reading one leaves armour unweighted
 
 A `.skinm` carries its bone maps as **either** `IVOBONEMAP32` (eight influences,

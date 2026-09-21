@@ -11,6 +11,7 @@
 //! See `WEB.md` for the architecture and `WEB-INTEGRATION.md` for the contract
 //! the Hangarworks site consumes.
 
+pub mod armature;
 pub mod audit;
 pub mod blend;
 pub mod catalog;
@@ -36,6 +37,8 @@ pub use range::RangeSource;
 pub struct Archive {
     reader: RangeReader,
     entries: Vec<starbreaker_p4k::P4kEntry>,
+    /// The canonical armature, once built. One per session.
+    rig: Option<armature::Armature>,
 }
 
 #[wasm_bindgen]
@@ -49,7 +52,7 @@ impl Archive {
         let source = RangeSource::new(read_range, byte_length as u64);
         let mut reader = RangeReader::new(source);
         let entries = p4k::index(&mut reader).map_err(|e| JsValue::from_str(&e))?;
-        Ok(Archive { reader, entries })
+        Ok(Archive { reader, entries, rig: None })
     }
 
     /// Number of entries in the archive. The 4.10 build indexes 1,365,842.
@@ -339,8 +342,18 @@ impl Archive {
             .map(|e| e.bytes)
             .unwrap_or_default();
 
-        let loaded = mesh::load(&skin, &skinm).map_err(|e| JsValue::from_str(&e))?;
-        mesh_to_js(&loaded)
+        let mut loaded = mesh::load(&skin, &skinm).map_err(|e| JsValue::from_str(&e))?;
+
+        // With a rig, the mesh's own joint indices are rewritten to address the
+        // armature and stray weight is redistributed. Without one the piece's
+        // own bone list is returned as-is, which is what the geometry check
+        // wants and what a renderer cannot use.
+        let report = self.rig.as_ref().map(|rig| {
+            let report = armature::rebind(rig, &loaded.bones, &mut loaded.joints, &mut loaded.weights);
+            loaded.bones = rig.bones.iter().map(|b| b.name.clone()).collect();
+            report
+        });
+        mesh_to_js(&loaded, report.as_ref())
     }
 
     /// An entry index for an asset path, however it is spelled.
@@ -365,7 +378,10 @@ fn normalise_asset(path: &str) -> String {
     trimmed.strip_prefix("data/").unwrap_or(trimmed).to_string()
 }
 
-fn mesh_to_js(loaded: &mesh::LoadedMesh) -> Result<JsValue, JsValue> {
+fn mesh_to_js(
+    loaded: &mesh::LoadedMesh,
+    report: Option<&armature::RebindReport>,
+) -> Result<JsValue, JsValue> {
     let out = js_sys::Object::new();
     let set = |key: &str, value: &JsValue| js_sys::Reflect::set(&out, &key.into(), value);
 
@@ -399,5 +415,101 @@ fn mesh_to_js(loaded: &mesh::LoadedMesh) -> Result<JsValue, JsValue> {
     set("min", &js_sys::Float32Array::from(&loaded.min[..]).into())?;
     set("max", &js_sys::Float32Array::from(&loaded.max[..]).into())?;
     set("unweighted", &(loaded.unweighted() as f64).into())?;
+
+    if let Some(report) = report {
+        let rebind = js_sys::Object::new();
+        js_sys::Reflect::set(&rebind, &"mapped".into(), &(report.mapped as f64).into())?;
+        js_sys::Reflect::set(&rebind, &"stray".into(), &(report.stray as f64).into())?;
+        js_sys::Reflect::set(
+            &rebind,
+            &"redistributed".into(),
+            &(report.redistributed as f64).into(),
+        )?;
+        js_sys::Reflect::set(&rebind, &"guessed".into(), &(report.guessed as f64).into())?;
+        set("rebind", &rebind.into())?;
+    } else {
+        set("rebind", &JsValue::NULL)?;
+    }
     Ok(out.into())
+}
+
+#[wasm_bindgen]
+impl Archive {
+    /// Build the canonical armature: a base skeleton plus donors' attachment points.
+    ///
+    /// `donors` are `.skin` paths whose `*_override` bones are grafted on. The
+    /// base skeleton has **none of its own**, which is why a backpack first
+    /// rendered at the body origin, so at least one donor is needed before
+    /// anything can hang off a socket.
+    ///
+    /// The armature is kept on the archive because that is its real lifetime:
+    /// one per session, built once, used by every piece loaded afterwards.
+    #[wasm_bindgen(js_name = buildRig)]
+    pub fn build_rig(&mut self, base: &str, donors: Vec<String>) -> Result<JsValue, JsValue> {
+        let index = self
+            .find_asset(base)
+            .ok_or_else(|| JsValue::from_str(&format!("no skeleton at {base}")))?;
+        let bytes = p4k::read_entry(self.reader.source(), &self.entries[index])
+            .map_err(|e| JsValue::from_str(&e))?
+            .bytes;
+        let mut armature = armature::Armature::from_chr(&bytes)
+            .ok_or_else(|| JsValue::from_str("no CompiledBones in that skeleton"))?;
+
+        let base_bones = armature.len();
+        let mut grafted = 0usize;
+        for donor in &donors {
+            let Some(index) = self.find_asset(donor) else { continue };
+            let Ok(entry) = p4k::read_entry(self.reader.source(), &self.entries[index]) else {
+                continue;
+            };
+            if let Some(bones) = starbreaker_3d::skeleton::parse_skeleton(&entry.bytes) {
+                grafted += armature.graft(&bones);
+            }
+        }
+
+        let out = js_sys::Object::new();
+        js_sys::Reflect::set(&out, &"bones".into(), &(armature.len() as f64).into())?;
+        js_sys::Reflect::set(&out, &"base".into(), &(base_bones as f64).into())?;
+        js_sys::Reflect::set(&out, &"grafted".into(), &(grafted as f64).into())?;
+        js_sys::Reflect::set(&out, &"attachments".into(), &(armature.attachments() as f64).into())?;
+        self.rig = Some(armature);
+        Ok(out.into())
+    }
+
+    /// The armature's bones, in order, as the renderer needs to build them.
+    #[wasm_bindgen(js_name = rigBones)]
+    pub fn rig_bones(&self) -> Result<JsValue, JsValue> {
+        let rig = self
+            .rig
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("no rig; call buildRig first"))?;
+        let out = js_sys::Array::new();
+        for bone in &rig.bones {
+            let entry = js_sys::Object::new();
+            js_sys::Reflect::set(&entry, &"name".into(), &JsValue::from_str(&bone.name))?;
+            js_sys::Reflect::set(
+                &entry,
+                &"parent".into(),
+                &bone.parent.map_or(JsValue::from_f64(-1.0), |p| JsValue::from_f64(p as f64)),
+            )?;
+            js_sys::Reflect::set(
+                &entry,
+                &"position".into(),
+                &js_sys::Float32Array::from(&bone.local_position[..]).into(),
+            )?;
+            js_sys::Reflect::set(
+                &entry,
+                &"rotation".into(),
+                &js_sys::Float32Array::from(&bone.local_rotation[..]).into(),
+            )?;
+            js_sys::Reflect::set(
+                &entry,
+                &"world".into(),
+                &js_sys::Float32Array::from(&bone.world_position[..]).into(),
+            )?;
+            js_sys::Reflect::set(&entry, &"attachment".into(), &bone.attachment.into())?;
+            out.push(&entry);
+        }
+        Ok(out.into())
+    }
 }
