@@ -120,6 +120,26 @@ uses — hosts extracted item images and statistics at scale. That is evidence o
 practical tolerance, not of permission, and tolerance of *screenshots and stats*
 is a weaker precedent than a tool that hands over meshes.
 
+## Decision
+
+**2026-09-21 — Noel: go.** The risk is accepted and publishing is no longer
+gated on this file. What remains are the conditions below, which are cheap and
+which keep the position defensible:
+
+- the fan-site notice, verbatim and prominent, plus a link to the official site
+- no ads, paywall, subscription or account
+- **no game data served from the host**, which the architecture already
+  guarantees and which is the strongest argument available
+- ready to take it down on request
+
+Advertising or a paid tier would move this into Commercial use, which the FAQ
+prohibits outright; that would be a new decision, not a continuation of this
+one, and would want real legal advice.
+
+The recommendation below is kept as written, including the point about GLB
+export, because it is the reasoning that was weighed rather than a pending
+question.
+
 ## Recommendation
 
 Option 2, if publishing at all: **ship without GLB export**, carry the fan-site

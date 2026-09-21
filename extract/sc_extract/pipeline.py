@@ -274,6 +274,14 @@ def discover_materials(settings: Settings, item: Item) -> list[Path]:
     """
     found: list[Path] = []
 
+    if not item.materials:
+        # Nothing declared, so mesh pairing cannot tell one colourway from
+        # another -- every member of the family shares the mesh. The class name
+        # can, and is more specific, so it is tried first in exactly this case.
+        by_class = _material_by_class(settings, item.class_name)
+        if by_class is not None:
+            return [by_class]
+
     for relative in item.materials:
         if _ENGINE_DEFAULT_MTL.match(relative.replace("\\", "/")):
             continue
@@ -325,7 +333,42 @@ def discover_materials(settings: Settings, item: Item) -> list[Path]:
             found.append(candidates[0])
         else:
             log.warning("no material found for %s", geo.source)
+
     return found
+
+
+@cache
+def _mtl_index(raw_root: str) -> dict[str, Path]:
+    """Every ``.mtl`` under the raw tree, by lowercased stem."""
+    index: dict[str, Path] = {}
+    for path in (Path(raw_root) / "Data").rglob("*.mtl"):
+        index.setdefault(path.stem.lower(), path)
+    return index
+
+
+def _material_by_class(settings: Settings, class_name: str) -> Path | None:
+    """The material named after an item's class, longest prefix first.
+
+    Rigid backpacks need this. A colourway there declares no material and no
+    palette and hangs off a single ``.cga`` node shared by its whole family, so
+    pairing on the mesh returns one material for all of them -- which is how
+    CSP-68L Forest Camo and Night Camo came to wear Cayman's surface. The
+    material is in the archive under the *class* name, sometimes exactly
+    (``cds_combat_light_backpack_02_02_01.mtl``) and sometimes with the trailing
+    component dropped (``cds_combat_light_backpack_01_04_01`` ->
+    ``..._01_04.mtl``), so trailing tokens come off one at a time and the most
+    specific match wins.
+    """
+    index = _mtl_index(str(settings.raw_dir))
+    parts = class_name.lower().split("_")
+    while len(parts) > 2:
+        stem = "_".join(parts)
+        for candidate in (stem, f"m_{stem}"):
+            match = index.get(candidate)
+            if match is not None:
+                return match
+        parts.pop()
+    return None
 
 
 def material_descriptors(settings: Settings, item: Item) -> list[dict]:

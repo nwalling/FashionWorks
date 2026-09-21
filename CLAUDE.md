@@ -675,9 +675,28 @@ because it looks deliberate.
   gender-neutral here and are assigned by submaterial name, so sharing one
   across the pair is how the data already works. Rebuilding gave **114 items a
   material and took none away**.
-* **63: no node carries a material at all.** Artimex and Carrion are the shape
-  of this. Still open; these need the Collada-stem discovery `discover_materials`
-  does at convert time, which the catalog stage does not run.
+* **63: no node carries a material at all.** These are *not* broken. The
+  catalog stage records nothing, but `pipeline.discover_materials` pairs a
+  material with the mesh name at convert time and finds one for 63 of 65, so a
+  canonical item's GLB is baked correctly and the audit's first cut reported 36
+  false positives against 10 real ones. **A canonical item owns its GLB**, so
+  only a variant, pointed at someone else's, can borrow a surface -- that is
+  now the test.
+
+  The 9 that were genuinely wrong are rigid backpacks. A colourway there
+  declares no material and no palette and hangs off a single `.cga` shared by
+  its whole family, so mesh pairing hands every member the same file and
+  CSP-68L Forest Camo wore Cayman's surface. Their material is in the archive
+  under the **class** name, sometimes exactly
+  (`cds_combat_light_backpack_02_02_01.mtl`) and sometimes with the trailing
+  component dropped (`..._01_04_01` -> `..._01_04.mtl`).
+  `discover_materials` now tries the class name, longest prefix first, **but
+  only where the record declares nothing** -- where something is declared it
+  still wins. 8 of the 9 resolve their own material; Artimex Arms Wildwood has
+  none in the archive at all, and falls back to the family base as before.
+  Checked against all 168 undeclared items: 156 plausible, 0 unrelated, and the
+  one crate match is the hidden `<= PLACEHOLDER =>` record, which paired with a
+  crate before this too.
 
 Found by rendering the catalogue and diffing colourways against each other, not
 by reading records -- the manifest looks healthy, because "no material" is an
@@ -1425,5 +1444,9 @@ viewer/src/
 ## Legal
 
 Extracted geometry and textures are CIG copyright. Local use has no distribution
-component. **Public deployment of asset URLs is gated on a review of CIG's fan
-content policy** (PLAN.md §0, §6) and has not been done.
+component. **Public deployment was gated on a review of CIG's fan content
+policy** (PLAN.md §0, §6). That review is done and the answer is go, recorded
+with its conditions in `WEB-LEGAL.md`: the fan-site notice verbatim and
+prominent, a link to the official site, no ads or paywall or accounts, and no
+game data served from the host. Advertising or a paid tier would move this into
+Commercial use, which CIG prohibits outright, and would be a new decision.

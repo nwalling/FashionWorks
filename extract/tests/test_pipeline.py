@@ -160,3 +160,76 @@ def test_dominant_colour_falls_back_to_layers_without_a_bake() -> None:
     """Glass and glow submaterials composite nothing, so the layers are all there is."""
     layer = {"name": "BaseLayer1", "tint_color": [0.5, 0.5, 0.5], "palette_tint": 0}
     assert pipeline.dominant_colour([{"name": "m", "composed": {}, "layers": [layer]}]) == "#bcbcbc"
+
+
+def test_an_undeclared_material_is_found_by_class_name(tmp_path: Path) -> None:
+    """Rigid backpacks share one mesh across a whole family of colourways.
+
+    They declare no material and no palette, so pairing on the mesh name hands
+    every colourway the same file -- which is how CSP-68L Forest Camo and Night
+    Camo came to wear Cayman's surface. The material is in the archive under the
+    class name instead.
+    """
+    settings = settings_for(tmp_path)
+    packs = settings.raw_dir / "Data" / "Objects" / "backpack"
+    packs.mkdir(parents=True)
+    for stem in (
+        "cds_combat_light_backpack_02",           # the shared, family-wide one
+        "cds_combat_light_backpack_02_02_01",     # Forest Camo's own
+        "cds_combat_light_backpack_02_03_01",     # Night Camo's own
+    ):
+        (packs / f"{stem}.mtl").write_text("<Material/>")
+    (packs / "cds_combat_light_backpack_02.cga").write_text("")
+
+    pipeline._mtl_index.cache_clear()
+    mesh = "Objects/backpack/cds_combat_light_backpack_02.cga"
+    forest = Item(
+        id="f", class_name="cds_combat_light_backpack_02_02_01", name="Forest Camo",
+        slot="backpack", geometry=[Geometry(source=mesh, side=None)],
+    )
+    night = Item(
+        id="n", class_name="cds_combat_light_backpack_02_03_01", name="Night Camo",
+        slot="backpack", geometry=[Geometry(source=mesh, side=None)],
+    )
+    assert [p.stem for p in pipeline.discover_materials(settings, forest)] == [
+        "cds_combat_light_backpack_02_02_01"
+    ]
+    assert [p.stem for p in pipeline.discover_materials(settings, night)] == [
+        "cds_combat_light_backpack_02_03_01"
+    ]
+
+
+def test_class_name_lookup_drops_trailing_tokens(tmp_path: Path) -> None:
+    """Some colourways name the material with the last component removed.
+
+    ``cds_combat_light_backpack_01_04_01`` pairs with ``..._01_04.mtl``.
+    """
+    settings = settings_for(tmp_path)
+    packs = settings.raw_dir / "Data" / "Objects" / "backpack"
+    packs.mkdir(parents=True)
+    (packs / "cds_combat_light_backpack_01_04.mtl").write_text("<Material/>")
+
+    pipeline._mtl_index.cache_clear()
+    item = Item(
+        id="s", class_name="cds_combat_light_backpack_01_04_01", name="Snow Camo",
+        slot="backpack", geometry=[],
+    )
+    assert [p.stem for p in pipeline.discover_materials(settings, item)] == [
+        "cds_combat_light_backpack_01_04"
+    ]
+
+
+def test_a_declared_material_still_wins_over_the_class_name(tmp_path: Path) -> None:
+    """The class-name lookup only runs where the record declares nothing."""
+    settings = settings_for(tmp_path)
+    packs = settings.raw_dir / "Data" / "Objects" / "backpack"
+    packs.mkdir(parents=True)
+    (packs / "declared.mtl").write_text("<Material/>")
+    (packs / "cds_combat_light_backpack_02_02_01.mtl").write_text("<Material/>")
+
+    pipeline._mtl_index.cache_clear()
+    item = Item(
+        id="d", class_name="cds_combat_light_backpack_02_02_01", name="Declared",
+        slot="backpack", materials=["Objects/backpack/declared.mtl"], geometry=[],
+    )
+    assert [p.stem for p in pipeline.discover_materials(settings, item)] == ["declared"]

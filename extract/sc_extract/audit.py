@@ -413,6 +413,14 @@ def check_has_own_surface(settings: Settings, manifest: Manifest, report: AuditR
         rel = (item.assets.glb if item.assets else None) or None
         if not rel or item.materials or item.material_overrides:
             continue
+        # A canonical item's GLB is its own, baked at convert time from the
+        # material `pipeline.discover_materials` pairs with its mesh name --
+        # which finds one for 63 of the 65 items the manifest records no
+        # material for. So an empty `materials` list here is not a missing
+        # surface, and flagging it reported 36 false positives against 10 real
+        # ones. Only a variant, pointed at someone else's GLB, can borrow.
+        if rel and item.id in rel:
+            continue
         others = sorted({o.name for o in byglb[rel] if o.name != item.name})
         if others:
             report.add(
