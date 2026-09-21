@@ -27,6 +27,10 @@ const HUMAN_ITEMS: &str = "entities/scitem/characters/human/";
 pub struct ArmorRecord {
     pub class_name: String,
     pub attach_type: String,
+    /// Where the record lives in the foundry tree. The weight class is encoded
+    /// in it (`.../pu_armor/<weight>/<slot>/`) for items whose class name and
+    /// subtype do not say, so it is carried rather than discarded.
+    pub source_path: String,
     pub value: Value,
 }
 
@@ -62,8 +66,33 @@ pub fn armor_records(db: &Database) -> Vec<ArmorRecord> {
         out.push(ArmorRecord {
             class_name,
             attach_type,
+            source_path: source.to_string(),
             value,
         });
+    }
+    out
+}
+
+/// Every record of one struct type, as JSON, keyed by lowercased name.
+///
+/// Lowercased because a reference and the record it points at do not always
+/// agree on case -- `TintPaletteTree.IAE_2022` is reached by `.../iae_2022.json`
+/// -- and first-wins because a later record with the same name must not
+/// displace an earlier one.
+pub fn index_by_name(db: &Database, struct_type: &str) -> std::collections::HashMap<String, Value> {
+    let mut out = std::collections::HashMap::new();
+    for record in db.records_by_type_name(struct_type) {
+        let mut buf = Vec::new();
+        if export::write_json_compact(db, record, &mut buf).is_err() {
+            continue;
+        }
+        let Ok(value) = serde_json::from_slice::<Value>(&buf) else {
+            continue;
+        };
+        if let Some(name) = value.get("_RecordName_").and_then(Value::as_str) {
+            out.entry(super::class_name_of(name).to_ascii_lowercase())
+                .or_insert(value);
+        }
     }
     out
 }

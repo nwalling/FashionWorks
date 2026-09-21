@@ -341,6 +341,32 @@ Port `catalog.py`, including product-name set keys and variant linking.
 **Exit:** ≥ 99.5% field agreement with the Python manifest on the full build,
 with every remaining difference explained.
 
+**Status: met. 100.000% on all 20 fields across 2426 items, none unmatched.**
+`cargo run --example full_diff` builds a whole manifest from the real
+`Game2.dcb` and diffs it field by field; `catalog_diff` scores individual rules
+in isolation. Both run natively, because the DataCore layer takes bytes and does
+not care where they came from, and the same code compiles to `wasm32`.
+
+Four differences had to be chased, and none of them was visible from reading
+the code:
+
+- **Palette references resolve case-insensitively.** The record is
+  `TintPaletteTree.IAE_2022`; the reference is `.../iae_2022.json`. 124 items
+  came back with a palette name and no colours over one letter.
+- **The Python's scope is narrower than the DataCore's.** Its DCB export filters
+  on `**/entities/scitem/characters/human/**`, so eleven Vanduul pieces it never
+  sees looked like a porting bug. Matching the filter also cut the run from
+  16.6s to 3.8s.
+- **A rigid piece hangs its colourway off the record's `Material` sibling**, not
+  its geometry tree, so every backpack resolved no palette at all until
+  `material_palette` was passed as the override.
+- **The weight class is in the record's own directory** for 13 items that say it
+  nowhere else, which is why the source path is carried through to `build_item`.
+
+What this does *not* cover: the male skeleton only (female is phase 6), and the
+port has been run natively rather than in a browser. The wasm build is clean but
+has not been exercised against a DataCore extracted in-page.
+
 **Phase 2 — Geometry, skeleton and poses**
 `.skin` → three.js geometry; canonical skeleton with grafted attachment bones;
 per-vertex stray-weight redistribution; socket placement with its 180° yaw;

@@ -1,0 +1,125 @@
+//! Build a whole manifest with the port and diff it against the Python's.
+//!
+//! The per-field harness scores each rule in isolation against known-good
+//! inputs. This runs the real thing end to end -- every item assembled, sets
+//! assigned, variants linked -- which is what WEB.md's 99.5% bar is written
+//! against, and the only way `set` and `variant_of` get tested through the
+//! chain that feeds them rather than from the manifest's own answers.
+
+use std::collections::HashMap;
+use std::time::Instant;
+
+use fashionworks_core::catalog::{build, db, tint, Localization};
+use serde_json::Value;
+
+fn main() {
+    let mut args = std::env::args().skip(1);
+    let dcb_path = args.next().expect("usage: full_diff <Game2.dcb> <manifest.json> <global.ini>");
+    let manifest_path = args.next().expect("manifest.json");
+    let ini_path = args.next().expect("global.ini");
+
+    let bytes = std::fs::read(&dcb_path).expect("reading Game2.dcb");
+    let database = db::open(&bytes).expect("parsing DataCore");
+    let raw = std::fs::read(&ini_path).expect("reading global.ini");
+    let loc = Localization::parse(&String::from_utf8_lossy(&raw));
+    let palettes = tint::PaletteIndex::build(&database);
+    let makers = db::index_by_name(&database, "SCItemManufacturer");
+    println!("locale {} keys, {} palettes, {} manufacturers", loc.len(), palettes.len(), makers.len());
+
+    let t = Instant::now();
+    let records = db::armor_records(&database);
+    let mut items: Vec<Value> = records
+        .iter()
+        .filter_map(|r| build::build_item(&r.value, &palettes, &makers, &loc, "male", &r.source_path))
+        .filter(|i| {
+            !i["flags"].as_array().map(|f| f.iter().any(|x| x == "npc")).unwrap_or(false)
+        })
+        .collect();
+    items.sort_by(|a, b| {
+        let key = |v: &Value| {
+            (
+                v["slot"].as_str().unwrap_or("").to_string(),
+                v["name"].as_str().unwrap_or("").to_ascii_lowercase(),
+                v["class_name"].as_str().unwrap_or("").to_string(),
+            )
+        };
+        key(a).cmp(&key(b))
+    });
+    build::assign_sets(&mut items);
+    build::link_variants(&mut items);
+    println!("built  {} items in {:?}\n", items.len(), t.elapsed());
+
+    let manifest: Value =
+        serde_json::from_slice(&std::fs::read(&manifest_path).expect("manifest")).expect("json");
+    let want: HashMap<&str, &Value> = manifest["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .filter_map(|i| Some((i["id"].as_str()?, i)))
+        .collect();
+
+    // Every field the port produces. `swatch` and `assets` are deliberately
+    // absent: they are filled in later by the convert and variants stages, not
+    // by the catalogue.
+    const FIELDS: [&str; 20] = [
+        "class_name", "name", "name_key", "description", "description_key", "slot",
+        "sub_slot", "weight_class", "manufacturer", "set", "variant_of", "variants",
+        "tint", "tags", "geometry", "materials", "bind_mode", "socket", "flags", "stats",
+    ];
+    let mut agree: HashMap<&str, (usize, usize, Vec<String>)> = HashMap::new();
+    let mut unmatched = 0;
+
+    for got in &items {
+        let Some(exp) = got["id"].as_str().and_then(|id| want.get(id)) else {
+            unmatched += 1;
+            continue;
+        };
+        for field in FIELDS {
+            let a = got.get(field).unwrap_or(&Value::Null);
+            let b = exp.get(field).unwrap_or(&Value::Null);
+            let same = if field == "variants" {
+                let norm = |v: &Value| {
+                    let mut s: Vec<String> = v.as_array()
+                        .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+                        .unwrap_or_default();
+                    s.sort();
+                    s
+                };
+                norm(a) == norm(b)
+            } else {
+                a == b
+            };
+            let e = agree.entry(field).or_insert((0, 0, Vec::new()));
+            e.0 += 1;
+            if same {
+                e.1 += 1;
+            } else if e.2.len() < 3 {
+                e.2.push(format!(
+                    "{}: {} vs {}",
+                    got["class_name"].as_str().unwrap_or(""),
+                    truncate(a), truncate(b)
+                ));
+            }
+        }
+    }
+
+    println!("items built {}, matched by id {}, unmatched {unmatched}", items.len(), items.len() - unmatched);
+    println!("\n{:<16} {:>7} {:>7}  rate", "field", "agree", "of");
+    let mut names: Vec<&&str> = agree.keys().collect();
+    names.sort();
+    let mut total = 0usize;
+    let mut ok = 0usize;
+    for name in names {
+        let (n, a, ex) = &agree[*name];
+        total += n; ok += a;
+        let rate = *a as f64 / (*n).max(1) as f64 * 100.0;
+        println!("{name:<16} {a:>7} {n:>7}  {rate:>6.2}%{}", if rate >= 99.5 { "  PASS" } else { "" });
+        for e in ex { println!("                  {e}"); }
+    }
+    println!("\nOVERALL {:.3}%  (bar: 99.5%)", ok as f64 / total.max(1) as f64 * 100.0);
+}
+
+fn truncate(v: &Value) -> String {
+    let s = v.to_string();
+    if s.len() > 60 { format!("{}…", &s[..60]) } else { s }
+}

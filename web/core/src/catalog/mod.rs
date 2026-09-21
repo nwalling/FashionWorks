@@ -15,6 +15,7 @@
 
 use serde_json::Value;
 
+pub mod build;
 pub mod db;
 mod fields;
 mod flags;
@@ -26,6 +27,7 @@ mod geometry;
 pub use fields::{component, first, record_body};
 pub use flags::{flags_for, PLACEHOLDER_NAME};
 pub use localization::Localization;
+pub use build::{assign_sets, build_item, link_variants};
 pub use sets::{canonical_key, geometry_key, product_key, set_key, tag_value, tags_for};
 pub use tint::{tint_for, PaletteIndex};
 pub use geometry::{materials_for, material_palette, select_wearables, walk_geometry, GeoNode};
