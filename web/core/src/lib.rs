@@ -244,3 +244,66 @@ impl Archive {
         Ok(dds.mip_count())
     }
 }
+
+/// Build the whole armour catalogue from a DataCore and a localization file.
+///
+/// This is the browser's `scx catalog`, and it is the step that turns an opened
+/// archive into something a visitor can look at. Both inputs come straight out
+/// of the archive: `Data\Game2.dcb` and
+/// `Data\Localization\english\global.ini`.
+///
+/// Returns JSON rather than a `JsValue` tree. The catalogue is 2,426 items and
+/// building a JS object graph that size across the wasm boundary costs far more
+/// than serialising once and letting the worker's `postMessage` move a string --
+/// which it can transfer, where it would have to structurally clone the graph.
+///
+/// `skeleton` is "male" or "female". Female is WEB.md phase 6 and nothing has
+/// been run through it; the argument exists because `select_wearables` takes it
+/// and threading it now is free.
+#[wasm_bindgen(js_name = buildCatalogue)]
+pub fn build_catalogue(dcb: &[u8], ini: &str, skeleton: &str) -> Result<String, JsValue> {
+    use catalog::{build, db, tint, Localization};
+
+    let database = db::open(dcb).map_err(|e| JsValue::from_str(&format!("parsing DataCore: {e}")))?;
+    let loc = Localization::parse(ini);
+    let palettes = tint::PaletteIndex::build(&database);
+    let makers = db::index_by_name(&database, "SCItemManufacturer");
+
+    let records = db::armor_records(&database);
+    let mut items: Vec<serde_json::Value> = records
+        .iter()
+        .filter_map(|r| build::build_item(&r.value, &palettes, &makers, &loc, skeleton, &r.source_path))
+        // NPC-only records are in the DataCore and are not wearable, so they
+        // never reach the listing.
+        .filter(|i| {
+            !i["flags"]
+                .as_array()
+                .map(|f| f.iter().any(|x| x == "npc"))
+                .unwrap_or(false)
+        })
+        .collect();
+
+    // Sorted before sets are assigned, because `assign_sets` keys on the order
+    // it sees and the pipeline sorts here too. A catalogue built in a different
+    // order is not the same catalogue.
+    items.sort_by(|a, b| {
+        let key = |v: &serde_json::Value| {
+            (
+                v["slot"].as_str().unwrap_or("").to_string(),
+                v["name"].as_str().unwrap_or("").to_ascii_lowercase(),
+                v["class_name"].as_str().unwrap_or("").to_string(),
+            )
+        };
+        key(a).cmp(&key(b))
+    });
+    build::assign_sets(&mut items);
+    build::link_variants(&mut items);
+
+    serde_json::to_string(&serde_json::json!({
+        "skeleton": skeleton,
+        "localization_keys": loc.len(),
+        "palettes": palettes.len(),
+        "items": items,
+    }))
+    .map_err(|e| JsValue::from_str(&format!("serialising the catalogue: {e}")))
+}

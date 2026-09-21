@@ -4,8 +4,16 @@
     {
       "name": "fashionworks-web",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "web/app", "run", "verify"],
-      "port": 5183
+      "runtimeArgs": [
+        "--prefix",
+        "web/app",
+        "run",
+        "verify"
+      ],
+      "port": 5183,
+      "env": {
+        "FW_ARCHIVE": "/Volumes/Plex/SC Data/Data.p4k"
+      }
     }
   ]
 }

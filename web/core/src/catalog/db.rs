@@ -53,16 +53,26 @@ pub fn armor_records(db: &Database) -> Vec<ArmorRecord> {
         let Ok(value) = serde_json::from_slice::<Value>(&buf) else {
             continue;
         };
-        let Some(attach_type) = super::armor_type(&value) else {
-            continue;
-        };
-        let attach_type = attach_type.to_string();
         let class_name = value
             .get("_RecordName_")
             .and_then(Value::as_str)
             .map(super::class_name_of)
             .unwrap_or_default()
             .to_string();
+        // The attach type decides, and the class name is the fallback -- which
+        // is not a nicety: 23 wearable items, the Ready-Up Helmet's twenty
+        // colourways among them, are filed under `clothing/` with an attach
+        // type outside the `Char_Armor_*` family and nothing but their name to
+        // say what they are.
+        let attach_type = super::raw_attach_type(&value).unwrap_or_default().to_string();
+        if super::slot_of(
+            (!attach_type.is_empty()).then_some(attach_type.as_str()),
+            &class_name,
+        )
+        .is_none()
+        {
+            continue;
+        }
         out.push(ArmorRecord {
             class_name,
             attach_type,

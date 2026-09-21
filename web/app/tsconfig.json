@@ -22,6 +22,7 @@
     "src",
     "test",
     "demo.tsx",
-    "verify.ts"
+    "verify.ts",
+    "archive.ts"
   ]
 }

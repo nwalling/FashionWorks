@@ -104,6 +104,69 @@ fn main() {
     }
 
     println!("items built {}, matched by id {}, unmatched {unmatched}", items.len(), items.len() - unmatched);
+
+    // And the other direction, which this harness did not report for a long
+    // time and which is the one that matters more: a manifest item the port
+    // never builds is invisible to a port-to-manifest comparison, so "100% on
+    // 2426 items, none unmatched" was true while 189 of the manifest's 2615
+    // were simply absent. A rate is only a rate over a denominator, and the
+    // denominator has to be the reference, not the port's own output.
+    let built: std::collections::HashSet<&str> =
+        items.iter().filter_map(|i| i["id"].as_str()).collect();
+    let missing: Vec<&&Value> = want
+        .iter()
+        .filter(|(id, _)| !built.contains(*id))
+        .map(|(_, v)| v)
+        .collect();
+    println!(
+        "manifest items {}, built by the port {}, missing {} ({:.1}%)",
+        want.len(),
+        want.len() - missing.len(),
+        missing.len(),
+        missing.len() as f64 / want.len().max(1) as f64 * 100.0
+    );
+    if !missing.is_empty() {
+        let mut by_slot: std::collections::BTreeMap<&str, usize> = Default::default();
+        let mut by_flag: std::collections::BTreeMap<String, usize> = Default::default();
+        for item in &missing {
+            *by_slot.entry(item["slot"].as_str().unwrap_or("?")).or_default() += 1;
+            let flags = item["flags"]
+                .as_array()
+                .map(|f| {
+                    f.iter()
+                        .filter_map(|x| x.as_str())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                })
+                .unwrap_or_default();
+            *by_flag.entry(if flags.is_empty() { "(none)".into() } else { flags }).or_default() += 1;
+        }
+        if std::env::var("SHOW_MISSING").is_ok() {
+            for item in &missing {
+                println!("MISSING {}", item["class_name"].as_str().unwrap_or("?"));
+            }
+        }
+        println!("    by slot:  {by_slot:?}");
+        println!("    by flags: {by_flag:?}");
+        // The flagged ones explain themselves: an item with no geometry has
+        // nothing to render and a placeholder is hidden. The unflagged ones do
+        // not, so they are listed in full.
+        let unflagged: Vec<&&&Value> = missing
+            .iter()
+            .filter(|i| i["flags"].as_array().map(|f| f.is_empty()).unwrap_or(true))
+            .collect();
+        println!("\n    {} missing with no flags at all:", unflagged.len());
+        for item in &unflagged {
+            println!(
+                "      {:<44} {:<34} {} geom={} mat={}",
+                item["class_name"].as_str().unwrap_or("?"),
+                item["name"].as_str().unwrap_or("?"),
+                item["slot"].as_str().unwrap_or("?"),
+                item["geometry"].as_array().map(|g| g.len()).unwrap_or(0),
+                item["materials"].as_array().map(|m| m.len()).unwrap_or(0),
+            );
+        }
+    }
     println!("\n{:<16} {:>7} {:>7}  rate", "field", "agree", "of");
     let mut names: Vec<&&str> = agree.keys().collect();
     names.sort();

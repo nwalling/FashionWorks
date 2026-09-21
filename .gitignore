@@ -40,3 +40,6 @@ web/spike/pkg-web/
 
 # The web package's dependencies.
 web/app/node_modules/
+
+# wasm-bindgen output, rebuilt by web/spike/build.sh.
+web/core/pkg/

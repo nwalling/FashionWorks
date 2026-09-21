@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the Phase 0 spike: the wasm core plus bindings for Node and the browser.
+# Build the wasm core plus bindings for Node, a classic worker, and the app.
 #
 # Run this on the machine that has Rust. The output under pkg/ and pkg-web/ is
 # self-contained, so the whole web/spike folder can then be copied to a Windows
@@ -26,6 +26,10 @@ cargo build --manifest-path "$core/Cargo.toml" --target wasm32-unknown-unknown -
 # classic worker can importScripts().
 wasm-bindgen --target nodejs      --out-dir "$here/pkg"     "$wasm"
 wasm-bindgen --target no-modules  --out-dir "$here/pkg-web" "$wasm"
+
+# And an ES-module build for the app, whose worker is a module worker and whose
+# bundler wants a real import rather than importScripts.
+wasm-bindgen --target web         --out-dir "$core/pkg"     "$wasm"
 
 size=$(wc -c < "$here/pkg-web/fashionworks_core_bg.wasm")
 printf 'wasm %.0f KB raw' "$((size / 1024))"

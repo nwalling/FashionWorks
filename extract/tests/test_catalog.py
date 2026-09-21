@@ -16,7 +16,10 @@ def test_only_armor_records_become_items(index: Index, loc: Localization) -> Non
     class_names = {item.class_name for item in manifest.items}
     assert "behr_p8sc_smg" not in class_names, "weapons must not enter the armor catalog"
     assert "cds" not in class_names, "manufacturer records are not items"
-    assert stats.considered == 8
+    # Six entities. The two SCItemManufacturer records are not considered at
+    # all now: only entities describe an item, and the export carries the
+    # others so they can be looked up.
+    assert stats.considered == 6
     assert stats.matched == len(manifest.items)
 
 
@@ -223,7 +226,11 @@ def test_npc_items_excluded_by_default(loc: Localization) -> None:
 
     index = Index()
     data = {
-        "Components": {"SAttachableComponentParams": {"AttachDef": {"Type": "Char_Armor_Torso"}}}
+        # A real record names its own type here, and the catalogue now reads it:
+        # only entities become items. Without it this record is a typeless one
+        # the build skips, which is not what this test is about.
+        "_RecordName_": "EntityClassDefinition.npc_guard_torso",
+        "Components": {"SAttachableComponentParams": {"AttachDef": {"Type": "Char_Armor_Torso"}}},
     }
     index.add(Record(id="n1", class_name="npc_guard_torso", path=None, data=data))
 

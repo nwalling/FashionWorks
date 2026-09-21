@@ -31,6 +31,10 @@ SUB_SLOT_HINTS: list[tuple[str, str]] = [
 ]
 
 TEST_PATTERNS = re.compile(r"(^|_)(test|debug|placeholder|template|wip|dev)(_|$)", re.IGNORECASE)
+
+# The only record type that describes a wearable item. Everything else in the
+# export is there to be looked up, not catalogued.
+ENTITY_RECORD_TYPE = "EntityClassDefinition"
 NPC_PATTERNS = re.compile(r"(^|_)(npc|ai|crew_ai)(_|$)", re.IGNORECASE)
 
 # Records that carry an armor attach type but are not wearable: shop displays
@@ -746,6 +750,20 @@ def build(
     items: list[Item] = []
 
     for record in index.records:
+        # Only entities are items. The DCB export also pulls in
+        # `**/tintpalettes/**`, which the palette lookup needs, and a palette is
+        # named after the piece it colours -- so `slot_for`'s class-name
+        # fallback happily matched `ccc_combat_medium_armor_01_02_01` and
+        # `Tint_LootContainer_Generic_Legendary` and turned them into items with
+        # no geometry, no materials and no name.
+        #
+        # That was **140 phantom entries**, 5.4% of the catalogue, and 75 of
+        # them duplicated the class name of the real item they colour. The
+        # viewer never showed them, because it also requires a GLB, so this
+        # surfaced only when the Rust port -- which filters on the entity path --
+        # built 140 fewer items and the diff was finally run in both directions.
+        if record.record_type != ENTITY_RECORD_TYPE:
+            continue
         stats.considered += 1
         item = build_item(record, index, loc, skeleton=skeleton)
         if item is None:

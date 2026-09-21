@@ -721,6 +721,59 @@ reporting, and is exactly how the palette-specular bug presented.
 looks for a whole family of four or more collapsing onto one colour. Lynx
 presented as *pairs* inside a family that otherwise varied fine.
 
+### The catalogue held 140 phantom items, from tint palettes
+
+`catalog.build` iterated **every record in the DCB export**, and the export
+carries `**/tintpalettes/**` because the palette lookup needs it. A palette is
+named after the piece it colours, so `slot_for`'s class-name fallback matched
+`ccc_combat_medium_armor_01_02_01` (`_arm` -> arms) and even
+`Tint_LootContainer_Generic_Legendary`, and turned 140 `TintPaletteTree`
+records into catalogue items with no geometry, no materials and no name.
+
+**75 of them duplicated the class name of the real item they colour**, which
+matters beyond the count: anything keyed on class name -- `_material_by_class`,
+the audit's `check_distinct_names` -- was working against a list with 75
+collisions in it.
+
+The build now skips any record whose `record_type` is not
+`EntityClassDefinition`. Only entities describe an item; everything else in the
+export is there to be looked up. Rebuilt, the catalogue is **2475 items with 0
+`no_geometry` and 0 duplicate class names**, against 2615 with 140 and 75.
+
+**Why it survived so long:** the viewer requires `assets.glb` as well as the
+flags, and a phantom has no GLB, so nothing was ever visibly wrong. It surfaced
+only when the Rust port -- which filters on the `entities/scitem/characters/
+human/` path and so never saw them -- built 140 fewer items.
+
+`data/out/manifest.json` keeps the phantoms until `scx catalog`, `scx refresh`
+and `scx variants` are re-run in that order.
+
+### A one-directional diff scores the test, not the reference
+
+`full_diff` compared every item the port built against the manifest and
+reported "100.000% on all 20 fields, none unmatched". Both halves were true and
+the conclusion was not: an item the port **never built** cannot appear as a
+disagreement, so 189 manifest items -- 7.2% -- were absent from a comparison
+that called itself complete.
+
+A rate needs the reference as its denominator, not the thing being tested.
+Reported the other way round it immediately split into two real faults, one on
+each side: the port was missing the class-name slot fallback (23 wearable items,
+the Ready-Up Helmet's twenty colourways among them), and the pipeline was
+cataloguing 140 phantoms.
+
+### `@LOC_EMPTY` is a real key that resolves to an empty string
+
+`sc_nvy_deckcrew_helmet_01_01_01` carries
+`AttachDef.Localization.Name = "@LOC_EMPTY"`, and `global.ini` maps `LOC_EMPTY`
+to nothing at all. The Python writes `name or record.class_name`, and Python's
+truthiness folds `""` in with `None`, so it falls back to the class name and
+flags the item `unnamed`.
+
+A port using `unwrap_or` gets `Some("")` and keeps it: three helmets came out
+with a blank name and no flag. **An empty resolution is not a resolution**, and
+it is a distinction the original never had to make.
+
 ### The bake truncates, and is 0.57 sRGB units dark
 
 `compose_layered` writes `(linear_to_srgb(rgb) * 255).astype(np.uint8)`, and

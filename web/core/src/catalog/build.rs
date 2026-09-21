@@ -12,8 +12,8 @@ use serde_json::{json, Map, Value};
 use super::sets;
 use super::tint::{self, PaletteIndex};
 use super::{
-    armor_type, attach_first, class_name_of, first, flags_for, geometry::materials_for,
-    localization::Localization, record_body, select_wearables, slot_for, walk_geometry,
+    attach_first, class_name_of, first, flags_for, geometry::materials_for,
+    localization::Localization, record_body, select_wearables, slot_of, walk_geometry,
 };
 
 /// Rigid pieces hang off an attachment bone rather than deforming with the
@@ -182,9 +182,8 @@ pub fn build_item(
     skeleton: &str,
     source_path: &str,
 ) -> Option<Value> {
-    let attach = armor_type(record)?;
-    let slot = slot_for(attach)?;
     let class_name = class_name_of(record.get("_RecordName_")?.as_str()?).to_string();
+    let slot = slot_of(super::raw_attach_type(record), &class_name)?;
 
     let all_nodes = walk_geometry(record);
     let worn = select_wearables(&all_nodes, skeleton);
@@ -192,7 +191,16 @@ pub fn build_item(
     let materials = materials_for(&all_nodes, skeleton);
 
     let name_key = super::name_key(record);
-    let name = name_key.and_then(|k| loc.get(k));
+    // An empty resolution counts as no name, not as a name that is empty.
+    //
+    // The Python writes `name or record.class_name`, and Python's truthiness
+    // folds `""` in with `None`; Rust's `unwrap_or` fires only on `None`, so
+    // the distinction the original never had to make becomes a bug. CIG uses a
+    // real sentinel for this -- `sc_nvy_deckcrew_helmet_01_01_01` carries
+    // `AttachDef.Localization.Name = "@LOC_EMPTY"`, and `global.ini` maps
+    // `LOC_EMPTY` to the empty string -- so three helmets came out with a blank
+    // name and no `unnamed` flag.
+    let name = name_key.and_then(|k| loc.get(k)).filter(|value| !value.is_empty());
     let desc_key = super::description_key(record);
 
     let mut flags = flags_for(&class_name, Some(name.unwrap_or(&class_name)), !geometry.is_empty());

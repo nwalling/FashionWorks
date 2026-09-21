@@ -341,7 +341,45 @@ Port `catalog.py`, including product-name set keys and variant linking.
 **Exit:** ≥ 99.5% field agreement with the Python manifest on the full build,
 with every remaining difference explained.
 
-**Status: met. 100.000% on all 20 fields across 2426 items, none unmatched.**
+**Status: met, and the first version of this claim was measured the wrong way
+round.** 100.000% on all 20 fields across **2475 items**, with the manifest and
+the port now producing the same 2475 — checked in *both* directions.
+
+The original read "100.000% across 2426 items, none unmatched", and it was
+true and misleading. `full_diff` only ever compared port to manifest: an item
+the port never built could not appear as a disagreement, because there was
+nothing to disagree with. **189 of the manifest's 2615 items, 7.2%, were simply
+absent**, and the harness reported a perfect score over the port's own output.
+A rate needs the reference as its denominator, not the thing being tested.
+
+Reported in both directions, the gap split into two real faults, one on each
+side:
+
+- **The port was missing the class-name slot fallback**, which the Python keeps
+  *"so a renamed attach type cannot silently empty the catalog"*. That cost 23
+  wearable items: the Ready-Up Helmet's twenty colourways and three ThermoWeave
+  pieces are filed under `clothing/pu_clothing/clothing_hats/` with an attach
+  type outside the `Char_Armor_*` family, and nothing but their name says what
+  they are.
+- **The pipeline was cataloguing 140 phantom items.** `catalog.build` iterated
+  *every* record in the export, and the export includes `**/tintpalettes/**`
+  because the palette lookup needs it. A palette is named after the piece it
+  colours, so the same class-name fallback matched
+  `ccc_combat_medium_armor_01_02_01` and even
+  `Tint_LootContainer_Generic_Legendary` and turned them into items with no
+  geometry, no materials and no name. 75 of them duplicated the class name of
+  the real item they colour. The viewer never showed them, because it also
+  requires a GLB, which is why this survived until the port was diffed the
+  other way.
+
+Both are fixed. A third fault surfaced with them: the port resolved
+`@LOC_EMPTY`, a real CIG sentinel that `global.ini` maps to the empty string, to
+`Some("")`, where the Python's `name or class_name` folds `""` in with `None`.
+Three helmets came out with a blank name and no `unnamed` flag — a distinction
+Python's truthiness never had to make and Rust's `unwrap_or` does.
+
+`data/out/manifest.json` still holds the 140 phantoms until `scx catalog`,
+`scx refresh` and `scx variants` are re-run in that order.
 `cargo run --example full_diff` builds a whole manifest from the real
 `Game2.dcb` and diffs it field by field; `catalog_diff` scores individual rules
 in isolation. Both run natively, because the DataCore layer takes bytes and does
