@@ -446,6 +446,14 @@ split -- no other reading of 24 bytes makes consecutive records total exactly
 them. glTF's `JOINTS_0`/`WEIGHTS_0` carry four, so anything past that needs
 `JOINTS_1`/`WEIGHTS_1` -- a constraint for phases 2 and 3, not a detail.
 
+*The skeleton reconciles exactly against the canonical armature.* The base
+`.chr` parses to **220 bones**, every one of them present in
+`data/out/base/male.skeleton.json`, with nothing extra. Of the armature's 36
+attachment points, **35 are absent from the base and 1 is not**:
+`mobiglas_attach` ships in the skeleton itself and, unlike the grafted 35,
+carries no `_override` suffix. So 220 + 35 = 255, and `skeleton_diff` checks
+that arithmetic rather than assuming it.
+
 `.skin` → three.js geometry; canonical skeleton with grafted attachment bones;
 per-vertex stray-weight redistribution; socket placement with its 180° yaw;
 retargeted poses.
