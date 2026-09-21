@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use fashionworks_core::catalog::{self, db};
+use fashionworks_core::catalog::{self, db, tint};
 use serde_json::Value;
 
 fn main() {
@@ -30,6 +30,10 @@ fn main() {
     let t = Instant::now();
     let database = db::open(&bytes).expect("parsing DataCore");
     println!("parse     {:?}", t.elapsed());
+
+    let t = Instant::now();
+    let palettes = tint::PaletteIndex::build(&database);
+    println!("palettes  {} indexed in {:?}", palettes.len(), t.elapsed());
 
     let t = Instant::now();
     let records = db::armor_records(&database);
@@ -100,14 +104,61 @@ fn main() {
 
         // materials, including the per-gender fallback
         let got = catalog::materials_for(&nodes, "male");
-        let ok = wants.iter().any(|w| {
+        let ok_materials = wants.iter().any(|w| {
             let want_mat: Vec<&str> = w["materials"]
                 .as_array()
                 .map(|a| a.iter().filter_map(Value::as_str).collect())
                 .unwrap_or_default();
             got == want_mat
         });
-        tally.check("materials", ok, || {
+        // tint palette: the reference, the colours, and the speculars
+        let worn = catalog::select_wearables(&nodes, "male");
+        // The override is where a rigid piece's colourway lives: the record's
+        // `Material` sibling, not its geometry tree.
+        let override_ref = catalog::material_palette(&record.value);
+        let got_tint = tint::tint_for(&worn, &palettes, &nodes, override_ref.as_deref());
+        let ok = wants.iter().any(|w| {
+            let want = w.get("tint").filter(|v| !v.is_null());
+            match (&got_tint, want) {
+                (None, None) => true,
+                (Some(g), Some(w)) => {
+                    g.get("palette_ref") == w.get("palette_ref")
+                        && g.get("colors") == w.get("colors")
+                }
+                _ => false,
+            }
+        });
+        tally.check("tint", ok, || {
+            let w = wants[0].get("tint");
+            format!(
+                "{}: tint ref {:?}/{:?} colors {:?}/{:?}",
+                record.class_name,
+                got_tint.as_ref().and_then(|g| g.get("palette_ref")),
+                w.and_then(|w| w.get("palette_ref")),
+                got_tint.as_ref().and_then(|g| g.get("colors")),
+                w.and_then(|w| w.get("colors")),
+            )
+        });
+
+        // the specular, which the compositor needs and which is easy to drop
+        let ok = wants.iter().any(|w| {
+            let want = w.get("tint").and_then(|t| t.get("layers"));
+            let got = got_tint.as_ref().and_then(|g| g.get("layers"));
+            match (got, want) {
+                (None, None) => true,
+                (Some(g), Some(w)) => {
+                    let spec = |v: &Value| -> Vec<Value> {
+                        v.as_array().map(|a| a.iter().map(|l| l["spec"].clone()).collect())
+                            .unwrap_or_default()
+                    };
+                    spec(g) == spec(w)
+                }
+                _ => false,
+            }
+        });
+        tally.check("tint.spec", ok, || format!("{}: specular mismatch", record.class_name));
+
+        tally.check("materials", ok_materials, || {
             let want_mat: Vec<&str> = wants[0]["materials"]
                 .as_array()
                 .map(|a| a.iter().filter_map(Value::as_str).collect())

@@ -18,10 +18,12 @@ use serde_json::Value;
 pub mod db;
 mod fields;
 mod flags;
+pub mod tint;
 mod geometry;
 
 pub use fields::{component, first, record_body};
 pub use flags::{flags_for, PLACEHOLDER_NAME};
+pub use tint::{tint_for, PaletteIndex};
 pub use geometry::{materials_for, material_palette, select_wearables, walk_geometry, GeoNode};
 
 /// Attach types that make a record wearable armour.
