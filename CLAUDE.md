@@ -1089,8 +1089,17 @@ Nothing hangs off this point yet, so it has not shown, but a holstered sidearm
 would sit low and rotate with the wrong parent. Found by the Rust port's
 `graft_diff`, which follows the archive and lists this as expected divergence.
 
+**`SOCKET_YAW` is a Blender-frame correction, not a property of the archive.**
+`place_at_socket` composes against `bone.matrix_local`, where a bone's local Y
+axis runs along the bone, and the yaw corrects for that convention. Composed in
+the archive's own frame instead -- the bone's `world_rotation` straight out of
+the `.skin` -- **no yaw is needed**, and adding one mounts the pack backwards:
+`grip_left_1` lands at x=-0.156 without it and x=+0.156 with it, on a bone rest
+of (0.000, -0.130, 1.440). So the Python is right in its own space and a port
+composing natively must not copy the yaw. Checked with `socket_yaw`.
+
 **The prop's locator faces into the body, so the placement needs a 180 degree
-yaw.** Without it every backpack is mounted backwards. A bounding box will not
+yaw** (in Blender's frame). Without it every backpack is mounted backwards. A bounding box will not
 catch this, since a pack's extents look much the same either way; the props'
 own `grip_left_1` / `grip_right_1` locators will. Composed directly, a pack's
 left grip lands on the character's right at x=+0.190; with the yaw it lands at

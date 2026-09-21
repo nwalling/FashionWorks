@@ -473,6 +473,16 @@ guessed, **0 left unweighted, 0 failing to sum to 255**. The guess keeps side:
 which has no side -- a one-bone-per-mesh fallback would have collapsed all 759
 onto the spine, which is the shape of the Antium shoulderpad failure.
 
+*The socket yaw does not port.* `normalize_armor.SOCKET_YAW` rotates a rigid
+prop 180 degrees before mounting it, and copying that into the port would mount
+every backpack backwards. The yaw corrects for **Blender's bone-axis
+convention**: `place_at_socket` composes against `bone.matrix_local`, where a
+bone's local Y runs along the bone. Composed in the archive's own frame, with
+the bone's `world_rotation` from the `.skin`, `grip_left_1` already lands at
+x=-0.156 -- the character's left -- and the yaw would move it to +0.156. The
+bone rest position agrees with the Python exactly at (0.000, -0.130, 1.440), so
+this is a frame difference and not a data one.
+
 *The graft reconciles too, bar one bone where the golden file is wrong.* Of the
 donor's 35 attachment bones, **34 match the canonical armature on both parent
 and world position**, to within a millimetre. The 35th,
