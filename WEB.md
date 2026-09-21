@@ -369,7 +369,14 @@ has not been exercised against a DataCore extracted in-page.
 
 **Phase 2 — Geometry, skeleton and poses**
 
-*Started.* The first question was the same one phase 0 asked of the DataCore:
+**Status: the data paths are complete and every one is checked against the
+existing pipeline's own output.** Geometry, bounds and submeshes match the
+pipeline's GLB; skinning decodes; the skeleton reconciles 220 to 255; stray
+weight redistributes with nothing left unweighted; socket placement is verified
+by the props' own grip locators; and both poses retarget at 220 of 220 bones.
+What remains for a renderable result is assembly rather than format work.
+
+*How it went.* The first question was the same one phase 0 asked of the DataCore:
 does the parser run on wasm32 at all? `starbreaker-3d` as shipped does **not**,
 and the reason is worth recording because this plan's dependency table missed
 it. Two C-backed or filesystem-bound things reach into it:
@@ -486,12 +493,21 @@ to, so a lookup has to match on the stem. The `_add` clips -- 11 in stand, 3 in
 crouch -- are additive deltas layered at runtime and are no use alone, so they
 are counted separately rather than silently included.
 
-What is **not** done is the retarget itself. Three approaches were tried in the
-Python and only the third works: transferring each bone's delta from its own
-rig's bind pose, `world_clip · inverse(world_bind)`. Copying local rotations
-puts the character on its back, and copying world orientations points the arms
-at the ceiling. The port must do the same, and `data/out/poses.json` is the
-golden output to check it against.
+*The retarget reproduces the pipeline exactly.* `core/src/poses.rs` runs forward
+kinematics over the bind hierarchy and takes each bone's delta from its own bind
+pose, `world_clip · inverse(world_bind)`, which is the third of three approaches
+and the only one that works -- copying local rotations puts the character on its
+back and copying world orientations points the arms at the ceiling.
+`pose_diff` scores it against `data/out/poses.json`: **220 of 220 bones on both
+the idle and the crouch**, within 1e-4.
+
+It read 16.8% first. `parse_dba` hands back raw keyframes in CryEngine axes, and
+the crate's own `clip_final_pose` is what applies the conversion --
+`cry_xyzw_to_blender_wxyz` on the quaternion and `[x, -z, y]` on the
+translation. Reading `kf.value` directly and reshuffling it by hand looked
+plausible and was wrong. The signature was visible in the diff: x and w matched
+while y and z were swapped and negated, which is a missing axis conversion
+rather than a wrong algorithm.
 
 *The socket yaw does not port.* `normalize_armor.SOCKET_YAW` rotates a rigid
 prop 180 degrees before mounting it, and copying that into the port would mount

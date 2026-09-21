@@ -13,6 +13,7 @@
 
 pub mod catalog;
 mod p4k;
+pub mod poses;
 pub mod rebind;
 mod range;
 
