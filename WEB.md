@@ -671,6 +671,52 @@ The flow above: storage, update detection, every error state.
 **Exit:** a first-time tester on a default install gets from landing to a
 rendered set without help.
 
+**Status: the machinery is built and verified; the exit criterion is not met,
+and cannot be yet.** `web/app/` holds it: 37 tests, plus a browser check for the
+parts a headless test cannot reach.
+
+Done and checked — capability detection split into blocking and warning;
+validation with every failure state worded as guidance; the build fingerprint;
+the catalogue cache, versioned and keyed per build so LIVE and PTU coexist; the
+OPFS piece cache under a byte budget with LRU eviction; the flow as a pure state
+machine; and the UI, with all fifteen screens rendered side by side because the
+failure screens are rare by definition and so are the ones that ship broken.
+
+**The index step is stubbed, so the flow cannot reach a rendered set.** The
+worker that drives the WebAssembly core through indexing, catalogue, geometry
+and materials is not wired up. Everything before it is real — the check, the
+drop, validation, the caches — and none of it can finish the sentence. That
+assembly is the next piece of work, and it is what Phase 2's note meant by
+*"what remains for a renderable result is assembly rather than format work."*
+The tester on a default install is then a second gate, and a Windows one,
+alongside Phase 0's outstanding browser half.
+
+Three things the platform dictated, and one bug worth recording.
+
+- **Drag-and-drop is the primary path, not a nicety.** Chromium's blocklist
+  refuses every File System Access picker under Program Files, which is exactly
+  where Star Citizen installs, so `showOpenFilePicker()` *fails on the default
+  install*. The same fact makes "drop it again" the ordinary return visit for
+  most visitors, so it is worded as normal rather than as a failure.
+- **The fingerprint is the entry index, not the timestamp.** This plan said size
+  plus `lastModified` plus a hash of the central directory. `lastModified` is a
+  property of the copy: moving the archive, restoring a backup or a launcher
+  touching the file would each throw the catalogue away and force a needless
+  re-index. Size and the entry list are properties of the build, and both are
+  already in memory once indexed.
+- **Say it does not upload before asking for the file.** A visitor asked to hand
+  over 158 GB will assume an upload and stop.
+- **The browser check found a race the tests could not.** `get()` fired an
+  unawaited index write on every read; one landing across a reopen's read left a
+  half-written file, and `loadIndex` responds to an unreadable index by
+  *clearing the cache*, because it cannot budget entries whose sizes it does not
+  know. A visitor clicking through pieces quickly could lose everything cached.
+  Writes are now serialised and touch-on-read debounced. A quieter sibling:
+  `clear()` removed the pieces directory without replacing the handle, so every
+  later write silently cached nothing — a cache that works until "Clear cache"
+  is pressed once. Neither is reproducible against a fake; both needed the real
+  file system.
+
 **Phase 5 — Hangarworks integration and theming**
 Package, Next route, tokens, all four themes, accessibility.
 **Exit:** switching theme on the site restyles the page and the 3D view with no

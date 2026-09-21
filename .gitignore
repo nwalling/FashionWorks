@@ -37,3 +37,6 @@ config/settings.local.toml
 # Generated wasm bindings for the Phase 0 spike; web/spike/build.sh makes them.
 web/spike/pkg/
 web/spike/pkg-web/
+
+# The web package's dependencies.
+web/app/node_modules/

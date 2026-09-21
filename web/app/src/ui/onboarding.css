@@ -1,0 +1,47 @@
+/* Minimal styling on the Hangarworks tokens, with fallbacks so the component
+ * renders standalone. Phase 5 replaces this with the site's own primitives;
+ * nothing here should survive that, which is why there are no hex values
+ * outside the fallbacks. */
+.fw-onboarding {
+  --fw-bg: var(--sc-card, #16292f);
+  --fw-text: var(--sc-text, #eaf2f6);
+  --fw-subtle: var(--sc-subtle, #9fb6c2);
+  --fw-border: var(--sc-border, #2c4e5d);
+  --fw-accent: var(--sc-accent, #ff8a34);
+  --fw-field: var(--sc-field, #1e3a44);
+  background: var(--fw-bg);
+  color: var(--fw-text);
+  font-family: system-ui, sans-serif;
+  padding: 24px;
+  border-radius: 12px;
+  max-width: 640px;
+}
+.fw-onboarding h2 { font-family: var(--font-display, inherit); margin: 0 0 12px; font-size: 20px; }
+.fw-muted, .fw-fineprint { color: var(--fw-subtle); font-size: 13px; }
+.fw-promise { font-weight: 600; }
+.fw-requirements { color: var(--fw-subtle); font-size: 14px; }
+.fw-onboarding button {
+  background: var(--fw-field); color: var(--fw-text);
+  border: 1px solid var(--fw-border); border-radius: 8px;
+  padding: 8px 14px; font: inherit; cursor: pointer; margin-right: 8px;
+}
+.fw-onboarding button.fw-primary { background: var(--fw-accent); color: #16110b; border-color: transparent; }
+.fw-drop {
+  border: 2px dashed var(--fw-border); border-radius: 18px;
+  padding: 32px; text-align: center; margin: 16px 0;
+}
+.fw-drop-active { border-color: var(--fw-accent); }
+.fw-droptitle { font-size: 18px; margin: 0 0 8px; }
+.fw-problem {
+  border: 1px solid var(--fw-accent); border-radius: 8px;
+  padding: 12px 16px; margin: 12px 0;
+}
+.fw-notice { background: var(--fw-field); border-radius: 8px; padding: 10px 14px; font-size: 14px; }
+.fw-checks { list-style: none; padding: 0; font-size: 14px; }
+.fw-checks .fw-blocking { color: var(--fw-accent); }
+.fw-steps { color: var(--fw-subtle); font-size: 14px; }
+.fw-steps .fw-done { color: var(--fw-text); }
+.fw-steps .fw-current { color: var(--fw-accent); font-weight: 600; }
+.fw-onboarding progress { width: 100%; height: 8px; }
+.fw-path { display: block; background: var(--fw-field); padding: 8px; border-radius: 6px; margin: 8px 0; font-size: 13px; word-break: break-all; }
+.fw-help { margin-top: 16px; font-size: 14px; }

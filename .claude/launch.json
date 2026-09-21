@@ -2,16 +2,10 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "viewer",
+      "name": "fashionworks-web",
       "runtimeExecutable": "npm",
-      "runtimeArgs": [
-        "run",
-        "dev",
-        "--prefix",
-        "viewer"
-      ],
-      "port": 5173,
-      "autoPort": true
+      "runtimeArgs": ["--prefix", "web/app", "run", "verify"],
+      "port": 5183
     }
   ]
 }

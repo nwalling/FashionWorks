@@ -78,6 +78,61 @@ impl Archive {
     pub fn entry_size(&self, index: usize) -> Option<u64> {
         self.entries.get(index).map(|e| e.uncompressed_size)
     }
+
+    /// A stable identifier for this game build.
+    ///
+    /// The catalogue is cached against it, so what it must do is change when a
+    /// patch changes the archive and *not* change otherwise. The entry index
+    /// answers that exactly: a patch rewrites entries, and copying the file to
+    /// another drive does not.
+    ///
+    /// `lastModified` is deliberately not part of it. WEB.md suggested size
+    /// plus `lastModified` plus a hash of the central directory, but the
+    /// timestamp is a property of the copy rather than the build -- moving the
+    /// archive, restoring it from a backup, or a launcher touching it would all
+    /// throw the cache away and force a re-index for no reason. Size and the
+    /// entry list are properties of the build itself.
+    ///
+    /// Free, because the index is already in memory: no extra range read.
+    pub fn fingerprint(&self) -> String {
+        // FNV-1a over name, size and offset of every entry. Not a security
+        // hash; it identifies a build, and a collision would only mean a stale
+        // catalogue, which the version check below still catches.
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        let mut feed = |bytes: &[u8]| {
+            for &b in bytes {
+                hash ^= u64::from(b);
+                hash = hash.wrapping_mul(0x1000_0000_01b3);
+            }
+        };
+        feed(&(self.entries.len() as u64).to_le_bytes());
+        for entry in &self.entries {
+            feed(entry.name.as_bytes());
+            feed(&entry.uncompressed_size.to_le_bytes());
+        }
+        format!("{hash:016x}")
+    }
+
+    /// Whether an entry exists, by exact path. Paths use backslashes.
+    #[wasm_bindgen(js_name = hasEntry)]
+    pub fn has_entry(&self, path: &str) -> bool {
+        self.find(path).is_some()
+    }
+
+    /// How many entries sit under a path prefix, matched case-insensitively.
+    ///
+    /// Validation uses this rather than one exact name: the DataCore spells the
+    /// same directory both `Objects/...` and `objects/...`, and a
+    /// case-sensitive check on this archive is how four items once failed
+    /// conversion silently.
+    #[wasm_bindgen(js_name = countUnder)]
+    pub fn count_under(&self, prefix: &str) -> usize {
+        let wanted = prefix.to_ascii_lowercase().replace('/', "\\");
+        self.entries
+            .iter()
+            .filter(|e| e.name.to_ascii_lowercase().replace('/', "\\").starts_with(&wanted))
+            .count()
+    }
 }
 
 /// Parse a DataCore blob and report what it holds.
