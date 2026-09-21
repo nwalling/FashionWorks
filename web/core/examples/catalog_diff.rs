@@ -15,13 +15,14 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use fashionworks_core::catalog::{self, db, tint};
+use fashionworks_core::catalog::{self, db, tint, Localization};
 use serde_json::Value;
 
 fn main() {
     let mut args = std::env::args().skip(1);
     let dcb_path = args.next().expect("usage: catalog_diff <Game2.dcb> <manifest.json>");
     let manifest_path = args.next().expect("usage: catalog_diff <Game2.dcb> <manifest.json>");
+    let ini_path = args.next();
 
     let t = Instant::now();
     let bytes = std::fs::read(&dcb_path).expect("reading Game2.dcb");
@@ -30,6 +31,16 @@ fn main() {
     let t = Instant::now();
     let database = db::open(&bytes).expect("parsing DataCore");
     println!("parse     {:?}", t.elapsed());
+
+    let loc = match &ini_path {
+        Some(p) => {
+            let raw = std::fs::read(p).expect("reading global.ini");
+            let loc = Localization::parse(&String::from_utf8_lossy(&raw));
+            println!("locale    {} keys", loc.len());
+            loc
+        }
+        None => Localization::default(),
+    };
 
     let t = Instant::now();
     let palettes = tint::PaletteIndex::build(&database);
@@ -111,6 +122,23 @@ fn main() {
                 .unwrap_or_default();
             got == want_mat
         });
+        // the display name, which is a localisation key on the attach component
+        if !loc.is_empty() {
+            let key = catalog::name_key(&record.value);
+            let got = key.and_then(|k| loc.get(k)).unwrap_or(&record.class_name);
+            let ok = wants.iter().any(|w| w["name"].as_str() == Some(got));
+            tally.check("name", ok, || {
+                format!("{}: name {got:?} != {:?}", record.class_name, wants[0]["name"])
+            });
+
+            let ok = wants
+                .iter()
+                .any(|w| w["name_key"].as_str() == key);
+            tally.check("name_key", ok, || {
+                format!("{}: key {key:?} != {:?}", record.class_name, wants[0]["name_key"])
+            });
+        }
+
         // tint palette: the reference, the colours, and the speculars
         let worn = catalog::select_wearables(&nodes, "male");
         // The override is where a rigid piece's colourway lives: the record's

@@ -513,6 +513,44 @@ def sets_cmd(ctx: click.Context, incomplete: bool, pending: bool) -> None:
     click.secho(f"{len(rows)} set(s)", fg="green")
 
 
+@main.command(name="prune")
+@click.option("--apply", "apply_", is_flag=True, help="actually delete; otherwise report only")
+@click.pass_context
+def prune_cmd(ctx: click.Context, apply_: bool) -> None:
+    """Delete composited textures the manifest no longer refers to.
+
+    A change to how a surface is composited changes its cache key, stranding
+    the previous generation on disk under a hash nothing will ask for again.
+    Reports by default; pass --apply to delete.
+    """
+    from .manifest import Manifest
+    from .pipeline import orphaned_bakes
+
+    settings = ctx.obj["settings"]
+    manifest = Manifest.read(settings.out_dir / "manifest.json")
+    orphans, total = orphaned_bakes(settings, manifest)
+    gib = total / 1024**3
+    if not orphans:
+        click.secho("no orphaned bakes", fg="green")
+        return
+    click.echo(f"{len(orphans):,} orphaned bake(s), {gib:.1f} GB")
+    for path in orphans[:5]:
+        click.echo(f"  {path.name}")
+    if len(orphans) > 5:
+        click.echo(f"  ... and {len(orphans) - 5:,} more")
+    if not apply_:
+        click.secho("nothing deleted; re-run with --apply", fg="yellow")
+        return
+    removed = 0
+    for path in orphans:
+        try:
+            path.unlink()
+            removed += 1
+        except OSError as exc:
+            click.secho(f"  could not remove {path.name}: {exc}", fg="yellow")
+    click.secho(f"removed {removed:,} file(s), {gib:.1f} GB freed", fg="green")
+
+
 @main.command(name="audit")
 @click.option("--check", "only", default=None, help="run one check by name")
 @click.option("--limit", default=12, show_default=True, help="findings shown per check")

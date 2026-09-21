@@ -764,3 +764,36 @@ def convert(
 
     settings.write_errors("convert", result.errors)
     return result
+
+
+def orphaned_bakes(settings: Settings, manifest: Manifest) -> tuple[list[Path], int]:
+    """Composited textures no item in the manifest refers to any more.
+
+    Every change to how a surface is composited changes the cache key, and the
+    previous generation is then stranded: the files stay on disk under their old
+    hash and nothing will ever ask for them again. Three key changes in one day
+    left 214 GB of a 226 GB cache unreachable, against 11.8 GB live.
+
+    Returns the orphans and their total size. Deleting them costs nothing but
+    time to regenerate -- ``scx variants`` rebuilds whatever is missing -- but
+    it is still a one-way operation, so the caller decides.
+    """
+    live: set[str] = set()
+    for item in manifest.items:
+        for override in item.material_overrides or []:
+            for role in ("base_color", "orm", "base_color_unworn", "orm_unworn"):
+                value = getattr(override, role, None)
+                if value:
+                    live.add(Path(value).name)
+
+    cache = settings.interim_dir / "tint"
+    orphans: list[Path] = []
+    total = 0
+    if not cache.is_dir():
+        return orphans, total
+    for path in cache.iterdir():
+        if not path.is_file() or path.name in live:
+            continue
+        orphans.append(path)
+        total += path.stat().st_size
+    return orphans, total

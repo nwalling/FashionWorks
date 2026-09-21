@@ -18,11 +18,13 @@ use serde_json::Value;
 pub mod db;
 mod fields;
 mod flags;
+pub mod localization;
 pub mod tint;
 mod geometry;
 
 pub use fields::{component, first, record_body};
 pub use flags::{flags_for, PLACEHOLDER_NAME};
+pub use localization::Localization;
 pub use tint::{tint_for, PaletteIndex};
 pub use geometry::{materials_for, material_palette, select_wearables, walk_geometry, GeoNode};
 
@@ -66,15 +68,34 @@ pub fn class_name_of(record_name: &str) -> &str {
     }
 }
 
-/// The `AttachDef` block of a record, or `None` when it has no attach component.
+/// The `SAttachableComponentParams` component, or `None`.
+///
+/// Returns the *component*, not its inner `AttachDef`, so every path below
+/// reads the same as its Python counterpart (`AttachDef.Type`,
+/// `AttachDef.Localization.Name`) rather than silently shifting by one level.
 pub fn attach_def(record: &Value) -> Option<&Value> {
-    component(record, "SAttachableComponentParams")?.get("AttachDef")
+    component(record, "SAttachableComponentParams")
+}
+
+/// A field of the attach component, by the first path that resolves.
+pub fn attach_first<'a>(record: &'a Value, paths: &[&str]) -> Option<&'a Value> {
+    first(attach_def(record)?, paths)
 }
 
 /// An armour record's attach type, if it is armour at all.
 pub fn armor_type(record: &Value) -> Option<&str> {
-    let value = attach_def(record)?.get("Type")?.as_str()?;
+    let value = attach_first(record, &["AttachDef.Type", "AttachDef.type"])?.as_str()?;
     ARMOR_TYPES.contains(&value).then_some(value)
+}
+
+/// The localisation key for an item's display name.
+pub fn name_key(record: &Value) -> Option<&str> {
+    attach_first(record, &["AttachDef.Localization.Name"])?.as_str()
+}
+
+/// The localisation key for an item's description.
+pub fn description_key(record: &Value) -> Option<&str> {
+    attach_first(record, &["AttachDef.Localization.Description"])?.as_str()
 }
 
 #[cfg(test)]
