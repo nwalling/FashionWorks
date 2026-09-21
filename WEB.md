@@ -535,6 +535,32 @@ retargeted poses.
 render and pose correctly, and bone lists and bounds match the golden outputs.
 
 **Phase 3 — Materials on the GPU**
+
+*Started, and the ground is better than expected.* `starbreaker-3d`'s `mtl`
+module already parses the `MatLayers` block this phase depends on, exposing
+per-layer `path`, `tint_color`, `palette_tint`, `gloss_mult` and `uv_tiling`
+plus a snapshot of the referenced layer material's `diffuse`, `specular` and
+`shininess`. That is most of what `tint.py` reads, so the phase is a port of the
+*rules* rather than of the parsing.
+
+**`parse_mtl` wants binary CryXML, and that suits the browser better than the
+Python.** Our `data/raw` copies are plain XML because extraction runs
+`--convert cryxml`, and `parse_mtl` rejects those with "invalid magic: expected
+CryXmlB". Read straight from the archive the same file parses first time. So the
+browser path is *shorter* than the pipeline's: P4K bytes to `parse_mtl`, with no
+conversion step in between. A harness that reads `data/raw` is testing the wrong
+input.
+
+`layer_diff` exists to score the innermost step -- what linear colour each base
+layer resolves to, given the two rules that decide it -- against a 1944-row
+golden dumped from the Python. It does not produce a number yet: it needs to be
+pointed at archive-sourced materials rather than converted ones.
+
+**A note on instrumentation.** The first version of that harness collapsed
+"file not found", "unreadable" and "parse failed" into one counter, reported
+1944 of 1944 unresolved, and sent me looking at path handling while the files
+sat exactly where they should. Counting the failure modes apart named the real
+cause in one run.
 The LayerBlend shader: the settled blend table, `PaletteTint`, `TintMode`, metal
 texture normalisation, wear pairs, `_hal` occlusion and palette multiply, all on
 texture arrays.
