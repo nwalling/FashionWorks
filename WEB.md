@@ -365,9 +365,36 @@ Package, Next route, tokens, all four themes, accessibility.
 **Exit:** switching theme on the site restyles the page and the 3D view with no
 reload, and AA contrast passes in every theme.
 
-**Phase 6 — Launch hardening**
-Bundle-size and no-game-data checks in CI, a Vercel usage alert, a Discord beta,
-and an FAQ entry on the site.
+**Phase 6 — The female body, and launch hardening**
+
+*Female skeleton.* Deferred here deliberately: it is orthogonal to the web port
+and would otherwise block it. The assets exist and are confirmed in the archive
+— `female_v2/export/bhf_skeleton_v2.chr` (22,232 bytes) and **5,332 female
+armour mesh entries** against 7,004 male — and the pipeline already threads a
+`skeleton` argument through `select_wearables`, `geometry_for` and
+`scx rig --skeleton female`, with `setSkeleton` already in the viewer store. So
+the plumbing is there and nothing has ever run through it.
+
+Three things make this its own phase rather than a flag:
+
+- **Every one of the 2,458 GLBs is a male conversion.** A female catalogue is a
+  second full conversion run, and Collada intermediates are large.
+- **The binding question is open.** "Whether female meshes bind to the same bone
+  names as male ones" is in this repo's own unverified list. If they do not,
+  `binding.ts`'s name remap needs a second naming scheme, and that is a
+  different change from a build run.
+- **5,332 against 7,004 means some items are male-only.** The UI must not offer
+  a body type that silently drops pieces from a loadout.
+
+**Do the single-item spike first**: build the female rig, convert one set, and
+diff its joint list against the female armature. An hour, and it decides whether
+the rest is a build or a rewrite.
+**Exit:** a reference set renders and poses on the female skeleton with the same
+joint count and order its armature declares, and items with no female mesh are
+marked rather than missing.
+
+*Launch hardening.* Bundle-size and no-game-data checks in CI, a Vercel usage
+alert, a Discord beta, and an FAQ entry on the site.
 **Exit:** the traffic budget holds under beta traffic.
 
 ## Risks

@@ -355,6 +355,7 @@ name = "fashionworks-core"
 version = "0.1.0"
 dependencies = [
  "js-sys",
+ "serde_json",
  "starbreaker-common",
  "starbreaker-datacore",
  "starbreaker-dds",

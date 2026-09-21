@@ -11,6 +11,7 @@
 //! See `WEB.md` for the architecture and `WEB-INTEGRATION.md` for the contract
 //! the Hangarworks site consumes.
 
+pub mod catalog;
 mod p4k;
 mod range;
 

@@ -378,6 +378,15 @@ def geometry_for(
         # name, so sharing one across the pair is how the data already works.
         other = "female" if skeleton == "male" else "male"
         for node in select_wearables(nodes, other):
+            # Skinned only. The fallback is for the gendered-``.skin`` case, and
+            # a rigid piece has no gender split for it to help with -- but the
+            # carry crate is a ``.cgf`` in scope for *both* genders, so an
+            # unrestricted fallback would hand a backpack the crate's material
+            # and paint it as a storage box. No item in this build reaches that,
+            # so the guard is latent; it was found by a test written for the
+            # Rust port of this function and is kept here so the two agree.
+            if node.suffix not in SKINNED_SUFFIXES:
+                continue
             if node.material and node.material not in materials:
                 materials.append(node.material)
 
