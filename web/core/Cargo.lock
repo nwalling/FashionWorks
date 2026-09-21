@@ -354,6 +354,7 @@ dependencies = [
 name = "fashionworks-core"
 version = "0.1.0"
 dependencies = [
+ "crc32fast",
  "js-sys",
  "serde_json",
  "starbreaker-3d",

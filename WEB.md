@@ -473,6 +473,26 @@ guessed, **0 left unweighted, 0 failing to sum to 255**. The guess keeps side:
 which has no side -- a one-bone-per-mesh fallback would have collapsed all 759
 onto the spine, which is the shape of the Antium shoulderpad failure.
 
+*The animation path parses and its bones resolve.* `parse_dba` is not gated by
+the pipeline feature, so the `.dba` databases read in a web build directly.
+Channels are keyed by **CRC32 of the bone name**, which the armature's name list
+resolves. Four figures come back matching what this repo already records, each
+arrived at independently: `stand.dba` **189 clips**, `crouch.dba` **43**, and
+**145 channels in each of the two useful clips, all 145 resolving**.
+`nw_stand_idle_turn360_planted` and `nw_neutral_crouch_idle` are both present.
+
+Clip names are full paths ending `.caf`, not the bare names the pipeline refers
+to, so a lookup has to match on the stem. The `_add` clips -- 11 in stand, 3 in
+crouch -- are additive deltas layered at runtime and are no use alone, so they
+are counted separately rather than silently included.
+
+What is **not** done is the retarget itself. Three approaches were tried in the
+Python and only the third works: transferring each bone's delta from its own
+rig's bind pose, `world_clip · inverse(world_bind)`. Copying local rotations
+puts the character on its back, and copying world orientations points the arms
+at the ceiling. The port must do the same, and `data/out/poses.json` is the
+golden output to check it against.
+
 *The socket yaw does not port.* `normalize_armor.SOCKET_YAW` rotates a rigid
 prop 180 degrees before mounting it, and copying that into the port would mount
 every backpack backwards. The yaw corrects for **Blender's bone-axis
