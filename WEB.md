@@ -551,10 +551,28 @@ browser path is *shorter* than the pipeline's: P4K bytes to `parse_mtl`, with no
 conversion step in between. A harness that reads `data/raw` is testing the wrong
 input.
 
-`layer_diff` exists to score the innermost step -- what linear colour each base
-layer resolves to, given the two rules that decide it -- against a 1944-row
-golden dumped from the Python. It does not produce a number yet: it needs to be
-pointed at archive-sourced materials rather than converted ones.
+*The rules port.* Three harnesses score three levels, each against the Python:
+
+| harness | what it checks | result |
+| --- | --- | --- |
+| `layer_diff` | one layer's linear colour, and its metalness | **1944 of 1944, 100%** |
+| `blend.rs` tests | the eight-entry blend table | matches the Python's dict exactly |
+| `composite_diff` | per-submaterial mean albedo against the baked PNGs | **40 of 40** within 3 sRGB units, 35 within 1 |
+
+The 5 outside a single unit are **not a rule difference**, and the evidence says
+so: they have median effective tiling 144 against 60 for the rest. The pipeline
+tiles a layer texture by downsampling it with Lanczos to a quantised tile size,
+`tile_px = round(size / repeat)`, so at tiling 144 on a 1024 bake each tile is
+**7 pixels**, and reducing a detail texture that far shifts its mean. A shader
+sampling the full-resolution texture continuously gives a different and better
+answer, so this gap should not be closed by imitating the bake.
+
+One thing worth contradicting in advance, because the opposite sounds more
+sensible: **the blend mask is sampled bilinearly, not nearest.** It is a
+selector, so interpolating it seems to invent layer indices between two
+saturated colours -- but the pipeline resizes the mask bilinearly *then*
+thresholds each channel at half, so the interpolation precedes the selection,
+and a port that samples nearest disagrees along every boundary between layers.
 
 **A note on instrumentation.** The first version of that harness collapsed
 "file not found", "unreadable" and "parse failed" into one counter, reported
