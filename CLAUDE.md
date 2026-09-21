@@ -721,6 +721,53 @@ reporting, and is exactly how the palette-specular bug presented.
 looks for a whole family of four or more collapsing onto one colour. Lynx
 presented as *pairs* inside a family that otherwise varied fine.
 
+### Skinning comes in two forms, and reading one leaves armour unweighted
+
+A `.skinm` carries its bone maps as **either** `IVOBONEMAP32` (eight influences,
+24 bytes) **or** `IVOBONEMAP` (four, 12 bytes), and both are in use across the
+armour tree. The Sunchaser helmet uses the twelve-byte form.
+
+Reading only the eight-influence one is silent: an absent stream parses as
+`None`, not as an error, so the mesh comes out complete and **entirely
+unweighted** -- 16,930 of 16,930 vertices on that helmet. Nothing downstream
+complains either; the piece simply does not deform.
+
+Four influences is also what the renderer wants. glTF's `JOINTS_0`/`WEIGHTS_0`
+hold four, and the pipeline's Collada-and-Blender route limits to four as well,
+so the eight-wide form is reduced by keeping the four heaviest and
+renormalising -- with ties broken by joint index, so the result does not depend
+on the order the archive happened to store them in. A vertex with no influence
+at all is left at zero rather than pinned to joint 0: weighting it to whatever
+bone comes first is how a wrist cuff ends up across the body.
+
+### A mesh names no materials, and can reference one that does not exist
+
+The mesh carries a numeric material id per group plus one `MTL_NAME` chunk
+naming the `.mtl` **file**. The submaterial names -- `coated_metal_m`,
+`mouthplates_m` -- live in that file. The pipeline arrives at the same mapping
+via Collada, which derives its names from the same place.
+
+**The id can point past the end of the list.** The Sunchaser helmet declares
+seven groups against a `.mtl` with six submaterials; the seventh holds 28 of its
+27,938 triangles. The pipeline emits six primitives for this mesh, so it drops
+the orphan somewhere in Collada or Blender without saying so.
+
+### The archive is Z-up, and the mapping is (x, y, z) -> (x, z, -y)
+
+Checked against the pipeline rather than assumed: the Sunchaser helmet's GLB
+spans **y 1.578 to 1.872** and the raw mesh spans **z 1.578 to 1.872** -- the
+same numbers, on the axis the conversion relates, at head height on a 1.745 m
+skeleton.
+
+The negation matters and a bounding box cannot catch it. A plain `(x, z, y)`
+swap has identical extents and flips handedness, which turns a left glove into
+a right one.
+
+Blender's exporter does this inside the pipeline, so nothing downstream of it
+ever sees the conversion. A port has to do it explicitly, and doing it on the
+buffers rather than by rotating the object is what keeps the mesh, the skeleton
+and the socket transforms in one space.
+
 ### The catalogue held 140 phantom items, from tint palettes
 
 `catalog.build` iterated **every record in the DCB export**, and the export

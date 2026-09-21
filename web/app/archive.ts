@@ -13,7 +13,25 @@
  */
 
 import { validateArchive, type IndexedArchive } from './src/archive/validate';
-import type { FromWorker, ToWorker } from './src/worker/archive.worker';
+import type { FromWorker, MeshPayload, ToWorker } from './src/worker/archive.worker';
+
+/** What the existing pipeline produced for the same mesh, read out of its GLB.
+ *
+ * The comparison is not vertex-for-vertex and cannot be: the pipeline goes
+ * `.skin` -> Collada -> Blender -> glTF, and Blender splits a vertex wherever
+ * two faces disagree about a normal or a UV. **Triangles** are the invariant --
+ * nothing in that chain adds or removes one -- and so are the material groups
+ * and the bounding box, allowing for Z-up to Y-up.
+ */
+const PIPELINE = {
+  path: 'Objects/Characters/Human/male_v7/armor/slaver/m_slaver_heavy_armor_helmet_01.skin',
+  name: 'Defiance Helmet Sunchaser',
+  triangles: 27938,
+  materials: 6,
+  // glTF axes, from the GLB: y is the archive's z.
+  min: [-0.107, 1.578, -0.198],
+  max: [0.132, 1.872, 0.099],
+};
 
 const out = document.getElementById('out') as HTMLPreElement;
 const lines: string[] = [];
@@ -103,6 +121,12 @@ async function main(): Promise<void> {
               + `set ${String(sample.set ?? '-')}`);
           }
           say(`\nTOTAL     ${((performance.now() - started) / 1000).toFixed(1)}s from open to catalogue`);
+          // Now one mesh, against what the pipeline made of the same file.
+          worker.postMessage({ type: 'mesh', path: PIPELINE.path } satisfies ToWorker);
+          break;
+        }
+        case 'mesh': {
+          report(message.mesh, message.ms);
           resolve();
           break;
         }
@@ -118,6 +142,46 @@ async function main(): Promise<void> {
   worker.postMessage(open);
   await done;
   (window as unknown as { __archive: unknown }).__archive = { lines };
+}
+
+function report(mesh: MeshPayload, ms: number): void {
+  const vertices = mesh.positions.length / 3;
+  const triangles = mesh.indices.length / 3;
+  say(`\nMESH      ${PIPELINE.name}`);
+  say(`          ${vertices.toLocaleString()} vertices, ${triangles.toLocaleString()} triangles `
+    + `in ${ms.toFixed(0)}ms`);
+  say(`          pipeline: ${PIPELINE.triangles.toLocaleString()} triangles  `
+    + `${triangles === PIPELINE.triangles ? 'MATCH' : 'DIFFER'}`);
+  // The mesh names no materials: it carries a numeric id per group and one
+  // chunk naming the .mtl file. The names live in that file.
+  const drawn = mesh.submeshes.filter((s) => s.count > 0);
+  say(`          ${mesh.submeshes.length} material groups (${drawn.length} with triangles), `
+    + `pipeline ${PIPELINE.materials}  ${drawn.length === PIPELINE.materials ? 'MATCH' : 'DIFFER'}`);
+  say(`          ids ${mesh.submeshes.map((s) => `${s.materialId}:${s.count / 3}`).join(' ')}`);
+  say(`          material file ${mesh.materialFile ?? '(none)'}`);
+  say(`          ${mesh.bones.length} bones of its own, `
+    + `${mesh.bones.filter((b) => b.endsWith('_override')).length} attachment points`);
+  say(`          ${mesh.unweighted} unweighted vertices`);
+
+  const f = (v: number) => v.toFixed(3);
+  say(`          bounds  min [${[...mesh.min].map(f).join(' ')}]  `
+    + `max [${[...mesh.max].map(f).join(' ')}]`);
+  // The archive is Z-up and glTF is Y-up, so the pipeline's y is our z. That
+  // is the axis with the interesting number on a helmet: it should sit at head
+  // height on a 1.745 m skeleton rather than at the origin.
+  say(`          pipeline (glTF, y-up) min y ${f(PIPELINE.min[1]!)} max y ${f(PIPELINE.max[1]!)}`);
+  const dz = Math.abs(mesh.min[2]! - PIPELINE.min[1]!);
+  const dzMax = Math.abs(mesh.max[2]! - PIPELINE.max[1]!);
+  say(`          our z vs their y: ${f(dz)} and ${f(dzMax)} apart  `
+    + `${dz < 0.02 && dzMax < 0.02 ? 'MATCH' : 'DIFFER'}`);
+
+  let weighted = 0;
+  for (let v = 0; v < vertices; v += 1) {
+    const sum = mesh.weights[v * 4]! + mesh.weights[v * 4 + 1]!
+      + mesh.weights[v * 4 + 2]! + mesh.weights[v * 4 + 3]!;
+    if (Math.abs(sum - 1) < 1e-4) weighted += 1;
+  }
+  say(`          ${weighted.toLocaleString()} of ${vertices.toLocaleString()} vertices weighted to 1.0`);
 }
 
 void main().catch((error) => {

@@ -16,15 +16,40 @@
 import type { IndexStep } from '../onboarding';
 
 export type ToWorker =
-  | { type: 'open'; file: File; skeleton: 'male' | 'female' }
+  | { type: 'open'; file: File; skeleton: 'male' | 'female'; catalogue?: boolean }
   /** For verification only: read ranges over HTTP instead of from a File. */
-  | { type: 'open-url'; url: string; byteLength: number; skeleton: 'male' | 'female' };
+  | {
+      type: 'open-url';
+      url: string;
+      byteLength: number;
+      skeleton: 'male' | 'female';
+      /** Skip the DataCore parse. A page drawing one mesh does not need it. */
+      catalogue?: boolean;
+    }
+  /** Load one mesh from the already-open archive. */
+  | { type: 'mesh'; path: string };
+
+export interface MeshPayload {
+  positions: Float32Array;
+  normals: Float32Array;
+  uvs: Float32Array;
+  indices: Uint32Array;
+  joints: Uint16Array;
+  weights: Float32Array;
+  bones: string[];
+  submeshes: Array<{ materialId: number; start: number; count: number }>;
+  materialFile: string | null;
+  min: Float32Array;
+  max: Float32Array;
+  unweighted: number;
+}
 
 export type FromWorker =
   | { type: 'progress'; step: IndexStep; fraction: number }
   | { type: 'indexed'; entryCount: number; fingerprint: string; ms: number }
   | { type: 'catalogue'; json: string; itemCount: number; ms: number }
   | { type: 'stats'; reads: number; fetched: number }
+  | { type: 'mesh'; path: string; mesh: MeshPayload; ms: number }
   | { type: 'failed'; message: string };
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
@@ -102,7 +127,21 @@ function urlReader(url: string): (offset: number, length: number) => Uint8Array 
   };
 }
 
+/** The archive stays open between messages: re-indexing 1.37 M entries for
+ * every mesh would cost 15 seconds each. */
+let opened: { archive: { loadMesh(path: string): unknown }; } | undefined;
+
 async function run(message: ToWorker): Promise<void> {
+  if (message.type === 'mesh') {
+    if (!opened) {
+      say({ type: 'failed', message: 'no archive is open' });
+      return;
+    }
+    const started = performance.now();
+    const mesh = opened.archive.loadMesh(message.path) as MeshPayload;
+    say({ type: 'mesh', path: message.path, mesh, ms: performance.now() - started });
+    return;
+  }
   // The wasm is loaded here rather than at module scope so a worker that is
   // spun up and never used costs nothing.
   const wasm = await import('../../../core/pkg/fashionworks_core.js');
@@ -122,10 +161,15 @@ async function run(message: ToWorker): Promise<void> {
   progress('reading archive index');
   let started = performance.now();
   const archive = new wasm.Archive(read, byteLength);
+  opened = { archive: archive as unknown as { loadMesh(path: string): unknown } };
   const entryCount = archive.entryCount();
   const fingerprint = archive.fingerprint();
   say({ type: 'indexed', entryCount, fingerprint, ms: performance.now() - started });
   say({ type: 'stats', reads, fetched });
+
+  if (message.catalogue === false) {
+    return;
+  }
 
   progress('reading item database');
   started = performance.now();

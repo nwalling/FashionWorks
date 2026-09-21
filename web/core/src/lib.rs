@@ -16,6 +16,7 @@ pub mod blend;
 pub mod catalog;
 pub mod composite;
 pub mod gold;
+pub mod mesh;
 mod p4k;
 pub mod poses;
 pub mod rebind;
@@ -306,4 +307,97 @@ pub fn build_catalogue(dcb: &[u8], ini: &str, skeleton: &str) -> Result<String, 
         "items": items,
     }))
     .map_err(|e| JsValue::from_str(&format!("serialising the catalogue: {e}")))
+}
+
+#[wasm_bindgen]
+impl Archive {
+    /// Load one armour mesh into buffers a renderer can bind.
+    ///
+    /// `path` is the catalogue's geometry path, e.g.
+    /// `Objects/Characters/Human/male_v7/armor/cds/m_cds_light_helmet_01.skin`.
+    /// Slashes and case are normalised, and the `.skinm` half is found and read
+    /// alongside -- a caller that passes only what the catalogue gave it gets a
+    /// complete mesh, rather than geometry with no skeleton.
+    ///
+    /// Returns an object of typed arrays. They are plain copies rather than
+    /// views into wasm memory, because wasm memory moves when it grows and a
+    /// view taken before a later allocation can silently point at the wrong
+    /// bytes.
+    #[wasm_bindgen(js_name = loadMesh)]
+    pub fn load_mesh(&self, path: &str) -> Result<JsValue, JsValue> {
+        let skin_index = self
+            .find_asset(path)
+            .ok_or_else(|| JsValue::from_str(&format!("not in this archive: {path}")))?;
+        let skin = p4k::read_entry(self.reader.source(), &self.entries[skin_index])
+            .map_err(|e| JsValue::from_str(&e))?
+            .bytes;
+
+        // The vertex half sits beside the header half under the same name.
+        let skinm = self
+            .find_asset(&format!("{path}m"))
+            .and_then(|i| p4k::read_entry(self.reader.source(), &self.entries[i]).ok())
+            .map(|e| e.bytes)
+            .unwrap_or_default();
+
+        let loaded = mesh::load(&skin, &skinm).map_err(|e| JsValue::from_str(&e))?;
+        mesh_to_js(&loaded)
+    }
+
+    /// An entry index for an asset path, however it is spelled.
+    ///
+    /// The DataCore spells the same directory both `Objects/...` and
+    /// `objects/...`, and archive paths use backslashes. A case-sensitive
+    /// lookup matches nothing and fails silently -- which is how four items
+    /// once reached conversion with "no converted geometry" long after the
+    /// extraction that reported success.
+    fn find_asset(&self, path: &str) -> Option<usize> {
+        let wanted = normalise_asset(path);
+        self.entries
+            .iter()
+            .position(|e| normalise_asset(&e.name) == wanted)
+    }
+}
+
+/// `Data\Objects\...` and `objects/...` compare equal.
+fn normalise_asset(path: &str) -> String {
+    let lowered = path.replace('\\', "/").to_ascii_lowercase();
+    let trimmed = lowered.trim_start_matches('/');
+    trimmed.strip_prefix("data/").unwrap_or(trimmed).to_string()
+}
+
+fn mesh_to_js(loaded: &mesh::LoadedMesh) -> Result<JsValue, JsValue> {
+    let out = js_sys::Object::new();
+    let set = |key: &str, value: &JsValue| js_sys::Reflect::set(&out, &key.into(), value);
+
+    set("positions", &js_sys::Float32Array::from(&loaded.positions[..]).into())?;
+    set("normals", &js_sys::Float32Array::from(&loaded.normals[..]).into())?;
+    set("uvs", &js_sys::Float32Array::from(&loaded.uvs[..]).into())?;
+    set("indices", &js_sys::Uint32Array::from(&loaded.indices[..]).into())?;
+    set("joints", &js_sys::Uint16Array::from(&loaded.joints[..]).into())?;
+    set("weights", &js_sys::Float32Array::from(&loaded.weights[..]).into())?;
+
+    let bones = js_sys::Array::new();
+    for name in &loaded.bones {
+        bones.push(&JsValue::from_str(name));
+    }
+    set("bones", &bones.into())?;
+
+    let submeshes = js_sys::Array::new();
+    for sub in &loaded.submeshes {
+        let entry = js_sys::Object::new();
+        js_sys::Reflect::set(&entry, &"materialId".into(), &(sub.material_id as f64).into())?;
+        js_sys::Reflect::set(&entry, &"start".into(), &(sub.first_index as f64).into())?;
+        js_sys::Reflect::set(&entry, &"count".into(), &(sub.index_count as f64).into())?;
+        submeshes.push(&entry);
+    }
+    set("submeshes", &submeshes.into())?;
+
+    set(
+        "materialFile",
+        &loaded.material_file.as_deref().map_or(JsValue::NULL, JsValue::from_str),
+    )?;
+    set("min", &js_sys::Float32Array::from(&loaded.min[..]).into())?;
+    set("max", &js_sys::Float32Array::from(&loaded.max[..]).into())?;
+    set("unweighted", &(loaded.unweighted() as f64).into())?;
+    Ok(out.into())
 }
