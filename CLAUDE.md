@@ -1077,6 +1077,18 @@ taking it from 220 to 255 bones with 36 attachment points. Verified positions:
 | `backpack_attach_1_override` | `Spine3` | (0.000, -0.130, 1.440) |
 | `helmethook_attach_override` | `Spine` | (-0.098, -0.101, 1.055) |
 
+**One attachment bone in the canonical armature disagrees with the archive, and
+the archive is right.** `wep_sidearm_attach_override` parents to `RightUpLeg` in
+the raw `.skin`, in the converted `.dae` and in the converted `.gltf` -- all
+three agree -- but the armature `build_base_rig` produces says
+`RightUpLeg_Start_sIk1`, one level further down, and places the bone 27 mm away
+at (0.1968, 0.0178, 0.8932) instead of (0.2237, 0.0156, 0.9044). Blender's
+import introduced it; `graft_attachments` only copies whatever `donor.data.bones`
+reports. The other 34 grafted bones agree exactly on both parent and position.
+Nothing hangs off this point yet, so it has not shown, but a holstered sidearm
+would sit low and rotate with the wrong parent. Found by the Rust port's
+`graft_diff`, which follows the archive and lists this as expected divergence.
+
 **The prop's locator faces into the body, so the placement needs a 180 degree
 yaw.** Without it every backpack is mounted backwards. A bounding box will not
 catch this, since a pack's extents look much the same either way; the props'

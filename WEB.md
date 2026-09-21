@@ -454,6 +454,15 @@ attachment points, **35 are absent from the base and 1 is not**:
 carries no `_override` suffix. So 220 + 35 = 255, and `skeleton_diff` checks
 that arithmetic rather than assuming it.
 
+*The graft reconciles too, bar one bone where the golden file is wrong.* Of the
+donor's 35 attachment bones, **34 match the canonical armature on both parent
+and world position**, to within a millimetre. The 35th,
+`wep_sidearm_attach_override`, parents to `RightUpLeg` in the raw `.skin`, the
+`.dae` and the `.gltf` alike, while the armature says `RightUpLeg_Start_sIk1`
+and places it 27 mm away -- a divergence Blender's import introduced. The port
+follows the archive, so `graft_diff` lists it as expected rather than failing
+on it, and `CLAUDE.md` records it against the Python pipeline.
+
 `.skin` → three.js geometry; canonical skeleton with grafted attachment bones;
 per-vertex stray-weight redistribution; socket placement with its 180° yaw;
 retargeted poses.
