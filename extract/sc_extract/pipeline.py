@@ -371,7 +371,9 @@ def _material_by_class(settings: Settings, class_name: str) -> Path | None:
     return None
 
 
-def material_descriptors(settings: Settings, item: Item) -> list[dict]:
+def material_descriptors(
+    settings: Settings, item: Item, *, unworn: bool = True
+) -> list[dict]:
     """Parse an item's materials and bake its tint palette into textures.
 
     Armor's LayerBlend_V2 shader has no albedo: three palette layers are
@@ -402,17 +404,25 @@ def material_descriptors(settings: Settings, item: Item) -> list[dict]:
                 base = Path(resolved.get("blend", mtl.stem)).stem or mtl.stem
                 stem = f"{base}_{sub.name}"
                 if sub.base_layers:
-                    composed = tint.compose_layered(
-                        sub,
-                        palette,
-                        settings.interim_dir / "tint",
-                        stem,
+                    bake = dict(
                         resolved=resolved,
                         raw_root=settings.raw_dir,
                         gloss_cache=settings.interim_dir / "gloss",
                         p4k=settings.p4k_path,
                         starbreaker=Path(settings.starbreaker),
                     )
+                    tint_dir = settings.interim_dir / "tint"
+                    composed = tint.compose_layered(sub, palette, tint_dir, stem, **bake)
+                    if composed and unworn and any(w is not None for w in sub.wear_pairs):
+                        # Only worth a second bake where wear is actually live.
+                        # 15% of submaterials point every wear entry back at its
+                        # base material, and for those the two bakes would be
+                        # the same image under two names.
+                        clean = tint.compose_layered(
+                            sub, palette, tint_dir, stem, wear=False, **bake
+                        )
+                        for role, path in clean.items():
+                            composed[f"{role}_unworn"] = path
                 if not composed:
                     # No layer stack parsed: fall back to the flat palette
                     # composite rather than leaving the piece untextured.
@@ -535,7 +545,7 @@ def publish_textures(settings: Settings, descriptors: list[dict]) -> list[dict]:
     for descriptor in descriptors:
         composed = descriptor.get("composed") or {}
         entry = {"name": descriptor.get("name") or ""}
-        for role in ("base_color", "orm"):
+        for role in ("base_color", "orm", "base_color_unworn", "orm_unworn"):
             path = composed.get(role)
             if path:
                 entry[role] = f"{PUBLISHED_TINT_DIR}/{Path(path).name}"
@@ -544,7 +554,7 @@ def publish_textures(settings: Settings, descriptors: list[dict]) -> list[dict]:
     return out
 
 
-def variant_surfaces(settings: Settings, manifest: Manifest) -> int:
+def variant_surfaces(settings: Settings, manifest: Manifest, *, unworn: bool = True) -> int:
     """Bake the textures colour variants need, without re-converting geometry.
 
     A variant shares its canonical item's mesh, so the only thing that has to
@@ -571,7 +581,7 @@ def variant_surfaces(settings: Settings, manifest: Manifest) -> int:
 
     def work(item: Item) -> tuple[Item, list[dict] | None]:
         try:
-            return item, material_descriptors(settings, item)
+            return item, material_descriptors(settings, item, unworn=unworn)
         except Exception as exc:  # noqa: BLE001 - one bad item must not stop the run
             log.warning("variant surface failed for %s: %s", item.id, exc)
             return item, None

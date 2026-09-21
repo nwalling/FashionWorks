@@ -445,7 +445,7 @@ def _resample(path, size: int, mode: str = "RGB"):
     return arr
 
 
-def layered_key(sub, palette: list[Layer]) -> str:
+def layered_key(sub, palette: list[Layer], wear: bool = True) -> str:
     """Digest covering the layer stack *and* the palette it is tinted with.
 
     The palette's **specular** belongs in here as much as its colour does: a
@@ -463,6 +463,7 @@ def layered_key(sub, palette: list[Layer]) -> str:
     parts.append(
         f"wear:{WEAR_THRESHOLD}:{WEAR_FALLOFF}:metal:{METAL_F0_THRESHOLD}"
         f":diffuse:buckets:{sorted(BLEND_BUCKETS.items())}:tintmul:metalnorm:tintmode2:palspec"
+        f"{'' if wear else ':unworn'}"
     )
     return hashlib.sha1(";".join(parts).encode()).hexdigest()[:10]
 
@@ -479,11 +480,18 @@ def compose_layered(
     p4k: Path | None = None,
     starbreaker: Path | None = None,
     size: int = 1024,
+    wear: bool = True,
 ) -> dict[str, Path]:
     """Bake one LayerBlend_V2 submaterial to an albedo and a packed ORM.
 
     Returns the written paths, or ``{}`` when the material has no usable layer
     stack and the caller should fall back to :func:`compose`.
+
+    ``wear=False`` bakes the piece as it left the factory: the wear blend is
+    skipped entirely, so every pixel shows its base layer rather than the metal
+    underneath. 85% of armour submaterials have at least one live wear pair, so
+    this is a visibly different surface on most of the catalogue rather than a
+    subtle one. The flag is part of the cache key, so the two coexist.
     """
     from . import layers as layer_lib
 
@@ -495,7 +503,7 @@ def compose_layered(
         return {}
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    stem = f"{safe_stem(stem)}__{layered_key(sub, palette)}"
+    stem = f"{safe_stem(stem)}__{layered_key(sub, palette, wear)}"
     written = {
         "base_color": out_dir / f"{stem}_albedo.png",
         "orm": out_dir / f"{stem}_orm.png",
@@ -541,7 +549,7 @@ def compose_layered(
     # 0.72-0.90, and armour is mostly intact paint with scuffed patches, not
     # mostly bare metal. See WEAR_THRESHOLD for the remap.
     worn = None
-    if "wear" in resolved:
+    if wear and "wear" in resolved:
         sample = _resample(resolved["wear"], size, "L")
         if sample is not None:
             worn = np.clip((WEAR_THRESHOLD - sample) / WEAR_FALLOFF, 0.0, 1.0)

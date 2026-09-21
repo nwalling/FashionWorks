@@ -24,6 +24,9 @@ export function App() {
   const [capture, setCapture] = useState<Capture | null>(null);
   const [preset, setPreset] = useState<HdrPreset>('warehouse');
   const [backdrop, setBackdrop] = useState<BackdropChoice>('hangar');
+  // Armour ships scuffed; this shows it as it left the factory instead. Both
+  // surfaces are baked, so the toggle swaps textures rather than recomputing.
+  const [wear, setWear] = useState(true);
   const [customBackdrop, setCustomBackdrop] = useState<string | null>(null);
   const [pose, setPose] = useState<string>('idle');
 
@@ -105,6 +108,7 @@ export function App() {
             backdrop={backdrop}
             customBackdrop={customBackdrop}
             pose={pose}
+            wear={wear}
             onReady={onReady}
           />
         </div>
@@ -125,6 +129,8 @@ export function App() {
           onCustomBackdrop={onCustomBackdrop}
           pose={pose}
           onPose={setPose}
+          wear={wear}
+          onWear={setWear}
         />
       </footer>
     </div>

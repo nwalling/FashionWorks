@@ -429,8 +429,13 @@ def refresh(ctx: click.Context) -> None:
 
 
 @main.command(name="variants")
+@click.option(
+    "--unworn/--no-unworn",
+    default=True,
+    help="also bake each surface with the wear blend skipped (roughly doubles the cache)",
+)
 @click.pass_context
-def variants_cmd(ctx: click.Context) -> None:
+def variants_cmd(ctx: click.Context, unworn: bool) -> None:
     """Bake the textures colour variants need, and pick each item's swatch.
 
     Variants share their canonical item's mesh but not its surface, so only the
@@ -444,7 +449,7 @@ def variants_cmd(ctx: click.Context) -> None:
     if not settings.manifest_path().is_file():
         _fail(f"no manifest at {settings.manifest_path()}; run `scx catalog` first")
     manifest = Manifest.read(settings.manifest_path())
-    done = variant_surfaces(settings, manifest)
+    done = variant_surfaces(settings, manifest, unworn=unworn)
     manifest.write(settings.manifest_path())
     ready = refresh_assets(settings, manifest)
     manifest.write(settings.manifest_path())

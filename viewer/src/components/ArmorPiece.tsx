@@ -22,9 +22,17 @@ export function ArmorPiece({
   item,
   tint,
   socketOffset,
+  wear = true,
 }: {
   item: Item;
   tint?: string;
+  /**
+   * Show the piece worn, with its scuffs and bare-metal patches, or as it left
+   * the factory. The wear blend is baked, so this picks between two composited
+   * surfaces rather than changing anything at render time. A build made before
+   * the unworn bake existed has none, and falls back to the worn one.
+   */
+  wear?: boolean;
   /**
    * Shift for a rigid piece's mount point, supplied by whatever torso is worn.
    * Every piece carries its own copy of the attachment bones, positioned for
@@ -164,8 +172,11 @@ export function ArmorPiece({
           const copy = material.clone() as THREE.MeshStandardMaterial;
           const entry = bySlot.get(key(copy.name ?? ''));
 
-          if (entry?.base_color) {
-            const texture = await load(entry.base_color, copy.map, true);
+          const albedo = wear ? entry?.base_color : entry?.base_color_unworn ?? entry?.base_color;
+          const packed = wear ? entry?.orm : entry?.orm_unworn ?? entry?.orm;
+
+          if (albedo) {
+            const texture = await load(albedo, copy.map, true);
             if (texture) {
               copy.map = texture;
               // The composited albedo is the colour; a leftover multiply from
@@ -174,9 +185,9 @@ export function ArmorPiece({
               changed = true;
             }
           }
-          if (entry?.orm) {
+          if (packed) {
             const template = copy.roughnessMap ?? copy.metalnessMap ?? copy.aoMap;
-            const texture = await load(entry.orm, template, false);
+            const texture = await load(packed, template, false);
             if (texture) {
               // One packed image: occlusion in red, roughness green, metallic blue.
               copy.aoMap = texture;
@@ -217,7 +228,7 @@ export function ArmorPiece({
       }
       for (const texture of created) texture.dispose();
     };
-  }, [attached, tint, item.material_overrides]);
+  }, [attached, tint, item.material_overrides, wear]);
 
   // Hold this GLB in the cache for as long as the piece is mounted, and let the
   // byte budget evict it once it is not. Declared last on purpose: React runs

@@ -86,13 +86,17 @@ def test_material_overrides_survive_a_round_trip(tmp_path: Path) -> None:
     assert back.material_overrides[0].base_color == "tint/a_albedo.png"
 
 
-def test_schema_version_is_two() -> None:
-    """Bumped when material_overrides and swatch were added.
+def test_schema_version_is_three() -> None:
+    """Bumped when the unworn surface fields were added.
+
+    v2 added material_overrides and swatch; v3 adds base_color_unworn and
+    orm_unworn, so the viewer can show a piece factory-fresh.
 
     viewer/src/manifest.ts must carry the same number or the viewer refuses
-    the manifest.
+    the manifest. This test exists to make that a conscious edit rather than
+    something noticed after the viewer starts rejecting builds.
     """
-    assert SCHEMA_VERSION == 2
+    assert SCHEMA_VERSION == 3
 
 
 def test_write_restamps_the_schema_version(tmp_path: Path) -> None:

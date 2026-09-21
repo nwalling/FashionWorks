@@ -62,12 +62,15 @@ export function Scene({
   backdrop,
   customBackdrop,
   pose,
+  wear,
   onReady,
 }: {
   preset: HdrPreset;
   backdrop: BackdropChoice;
   customBackdrop: string | null;
   pose: string;
+  /** Show armour scuffed, or as it left the factory. */
+  wear: boolean;
   onReady: (state: { gl: THREE.WebGLRenderer; scene: THREE.Scene; camera: THREE.Camera }) => void;
 }) {
   const manifest = useStore((state) => state.manifest);
@@ -125,6 +128,7 @@ export function Scene({
                   key={item.id}
                   item={item}
                   tint={tint}
+                  wear={wear}
                   socketOffset={
                     offset && offset.length === 3
                       ? [offset[0], offset[1], offset[2]]

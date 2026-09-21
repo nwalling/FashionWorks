@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 Slot = Literal["helmet", "torso", "arms", "legs", "backpack", "undersuit"]
 SLOTS: tuple[str, ...] = ("helmet", "torso", "arms", "legs", "backpack", "undersuit")
@@ -48,6 +48,12 @@ class MaterialOverride:
     name: str
     base_color: str | None = None
     orm: str | None = None
+    # The same surface composited with the wear blend skipped, so the viewer can
+    # show a piece as it left the factory. Optional: a build made before this
+    # existed, or one run with --no-unworn, simply has none and the toggle is
+    # hidden rather than broken.
+    base_color_unworn: str | None = None
+    orm_unworn: str | None = None
 
 
 @dataclass

@@ -4,7 +4,7 @@ import { z } from 'zod';
  * Mirror of `extract/sc_extract/manifest.py`. Bump SCHEMA_VERSION on both
  * sides together; the loader refuses a manifest it was not written for.
  */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export const SLOTS = ['helmet', 'torso', 'arms', 'legs', 'backpack', 'undersuit'] as const;
 export type Slot = (typeof SLOTS)[number];
@@ -29,6 +29,12 @@ const materialOverrideSchema = z.object({
   name: z.string(),
   base_color: z.string().nullable().default(null),
   orm: z.string().nullable().default(null),
+  // The same surface with the wear blend skipped, so a piece can be shown as it
+  // left the factory. Optional: a build made before this existed, or one run
+  // with --no-unworn, simply has none and the toggle hides itself rather than
+  // rendering an untextured piece.
+  base_color_unworn: z.string().nullable().default(null),
+  orm_unworn: z.string().nullable().default(null),
 });
 
 const assetsSchema = z.object({

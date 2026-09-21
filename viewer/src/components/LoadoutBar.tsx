@@ -18,6 +18,8 @@ export function LoadoutBar({
   onCustomBackdrop,
   pose,
   onPose,
+  wear,
+  onWear,
 }: {
   capture: { gl: THREE.WebGLRenderer; scene: THREE.Scene; camera: THREE.Camera } | null;
   preset: HdrPreset;
@@ -28,6 +30,8 @@ export function LoadoutBar({
   onCustomBackdrop: (file: File) => void;
   pose: string;
   onPose: (pose: string) => void;
+  wear: boolean;
+  onWear: (wear: boolean) => void;
 }) {
   const fileInput = useRef<HTMLInputElement>(null);
   const manifest = useStore((state) => state.manifest);
@@ -77,6 +81,16 @@ export function LoadoutBar({
           </option>
         ))}
       </select>
+      {/*
+        Both surfaces are baked, so this swaps textures rather than
+        recompositing. Wear is scuffing and bare-metal patches rather than a
+        whole-surface change, so the difference is local: strong in the worn
+        patches, invisible across a clean plate.
+      */}
+      <label className="toggle" title="Show armour scuffed, or as it left the factory">
+        <input type="checkbox" checked={wear} onChange={(event) => onWear(event.target.checked)} />
+        wear
+      </label>
       <select
         value={backdrop}
         title="Backdrop behind the character"
