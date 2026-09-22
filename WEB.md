@@ -855,11 +855,25 @@ Package, Next route, tokens, all four themes, accessibility.
 **Exit:** switching theme on the site restyles the page and the 3D view with no
 reload, and AA contrast passes in every theme.
 
-**Status: met, measured at the pixel.** `web/app` builds `@fashionworks/web`:
-a `<FashionWorks />` component, ES and CJS, with types, and `react`/`react-dom`
-as its only peers. **107 KB brotli** against the 400 KB budget, plus a 2 KB
-stylesheet; the WebAssembly core stays a separate asset at 0.20 MB brotli
-against 2 MB.
+**Status: met as written, and the exit criterion was narrower than it looks.**
+`web/app` builds `@fashionworks/web`: a `<FashionWorks />` component, ES and
+CJS, with types. **110 KB brotli** against the 400 KB budget, plus 644 bytes of
+stylesheet.
+
+**"The WebAssembly core stays a separate asset" was the quiet part.** It is
+separate in the sense of being *absent*: the published package ships no `.wasm`
+and no worker at all. `archive.worker.ts` is reached from `index.ts` only by
+type-only imports, which Vite erases, so the built bundle has zero references
+to either, and the worker's own `import('../../../core/pkg/...')` points outside
+the package root at a gitignored directory. The component validates a dropped
+archive, advances to `indexing`, and never leaves it.
+
+The phase's exit criterion — "switching theme restyles the page and the 3D view
+with no reload, and AA contrast passes in every theme" — is genuinely met, and
+is about theming. It says nothing about the packaged component opening an
+archive, and so neither did this status until Hangarworks vendored the tarball
+and the gap became visible. Carrying the pipeline into the package is Phase 6
+work; `WEB-INTEGRATION-PLAN.md` §1 scopes it.
 
 Switching `data-theme` with no reload, reading the canvas back afterwards:
 

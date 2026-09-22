@@ -113,9 +113,21 @@ webpack: (config) => {
 ### 2.3 Layout requirements
 
 The component fills its container and manages its own internal scrolling.
-Give it a height — `min-height: 70vh` or a flex child that grows. **Do not**
-place it inside a container that scrolls vertically; the 3D view captures wheel
-events for camera zoom.
+
+**Give the parent a definite height, not a minimum.** The component's root
+carries `min-height: 100%` inline, and a percentage minimum resolves against a
+parent that has a *height* — against a parent that only has a `min-height` it
+resolves to nothing, so the root collapses to its content. Use
+`height: 72vh; min-height: 520px`, or a flex child with a resolved basis.
+
+> An earlier version of this section said "`min-height: 70vh` or a flex child
+> that grows", which is wrong and cost the Hangarworks side real debugging: the
+> panel collapsed to 243 px of welcome screen with a 3D viewport still to come.
+> Corrected here rather than left as folklore.
+
+**Do not** place it inside a container that scrolls vertically; the 3D view
+captures wheel events for camera zoom, and a scrolling ancestor fights it for
+every turn.
 
 ---
 
@@ -342,21 +354,31 @@ Built and verified in this repo:
   fork. `tools/build.sh` must apply it after `clone_or_update`.
 
 - `web/app/` — the `@fashionworks/web` package: the `<FashionWorks />`
-  component, ES and CJS with types, `react`/`react-dom` as its only peers.
-  **107 KB brotli** against the 400 KB budget, plus a 2 KB stylesheet. Contains
-  the catalogue reader, the canonical armature and rebinding, the LayerBlend
-  compositor, pose retargeting, onboarding, capability checks and the OPFS
-  cache.
-- `web/app/try.html` — a development page that exercises the whole thing
+  component, ES and CJS with types. **110 KB brotli** against the 400 KB
+  budget, plus 644 bytes of stylesheet. Onboarding, capability checks, archive
+  validation, error states and the themed 3D viewport.
+- `web/app/try.html` — a development page that exercises the **whole** pipeline
   against a real archive: 2,439 wearable pieces across six slots, colourways as
   swatches, equip-a-whole-set, poses, worn-versus-factory surfaces and a
   visitor-supplied backdrop.
 
-**What this means for §3:** the API is implemented, not merely specified.
-Phases 0 through 5 of `WEB.md` are closed with measured exit criteria. The
-remaining work is Phase 6 — the female skeleton, and launch hardening — and the
-Windows/Firefox half of the Phase 0 spike, which is the one open technical
-risk and is listed as such in §8.
+**The gap between those two lines is the current state of the project, and an
+earlier version of this section papered over it.** The pipeline works; the
+*package* does not carry it. `@fashionworks/web@0.1.0` ships no WebAssembly and
+no worker — `archive.worker.ts` is reached from `index.ts` only through
+type-only imports, which the bundler erases, and the built `dist/fashionworks.js`
+contains zero references to either. So the component validates a dropped
+`Data.p4k`, moves to `indexing`, and stops there forever, because nothing emits
+`indexed` and `stage === 'ready'` is unreachable.
+
+**What this means for §3:** the API surface is implemented and stable. The
+behaviour behind it is not, for the archive path. `WEB-INTEGRATION-PLAN.md` §1
+has the detail and is the thing to read before building against this.
+
+Phases 0 through 5 of `WEB.md` are closed against their stated exit criteria —
+which were about theming, bundle size and the mechanism, and did not include
+"the packaged component opens an archive". That is Phase 6 work, alongside the
+female skeleton and the Windows/Firefox half of the Phase 0 spike.
 
 The package is not published to a registry yet, so §2's snippets need a local
 install (`npm i file:../FashionWorks/web/app`) until it is. That is a release
