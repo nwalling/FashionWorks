@@ -1,94 +1,100 @@
 # `@fashionworks/web`
 
-Phase 4: getting a visitor from a landing page to a catalogue, and keeping what
-was built so the second visit is instant.
+A React component that lets a visitor browse and combine Star Citizen FPS
+armour **from their own `Data.p4k`**, entirely in their browser.
 
-| file | what it is |
-| --- | --- |
-| `src/capabilities.ts` | what the browser can do, split into blocking and warning |
-| `src/archive/validate.ts` | is this file a usable `Data.p4k`, and what to say when it is not |
-| `src/storage/db.ts` | IndexedDB: the catalogue, settings, a file handle |
-| `src/storage/cache.ts` | the OPFS piece cache, under a byte budget |
-| `src/onboarding.ts` | the flow, as a pure state machine |
-| `src/ui/Onboarding.tsx` | that state machine, rendered |
-| `demo.tsx` | every screen side by side, and the live flow |
-| `verify.ts` | the half a headless test cannot reach |
+The host serves no game data, runs no server code for this page, and stores
+nothing. `WEB-INTEGRATION.md` at the repository root is the contract this
+implements and the file to read first if you are building the Hangarworks side.
 
-```bash
-npm --prefix web/app test        # 37 tests
-npm --prefix web/app run verify  # then open /verify.html and /demo.html
+```tsx
+'use client';
+import { FashionWorks } from '@fashionworks/web';
+import '@fashionworks/web/style.css';
+
+export function Launcher() {
+  return <FashionWorks className="my-panel" supportHref="/support" />;
+}
 ```
 
-## Why the flow is a state machine
+`react` and `react-dom` are peer dependencies; nothing else is. Give the
+component a height — it fills its container and manages its own scrolling.
 
-The exit criterion is *"a first-time tester on a default install gets from
-landing to a rendered set without help"*, and what decides that is not the
-visuals. It is whether every way the flow can go wrong has somewhere to go.
+## Theming
 
-So the failures are states, and the machine is pure — events in, state out, no
-fetching, no IndexedDB, no workers. Every error path is then reachable in a test
-instead of being discovered by a visitor. `demo.html` puts all fifteen screens
-on one page for the same reason: the failure screens are rare by definition,
-which makes them the ones that ship broken.
+It owns **no colours**. Every one comes from the host's `--sc-*` custom
+properties, so a theme switch restyles it with no code and no reload.
 
-## Three things the platform dictates
+CSS gets that for free. The 3D view does not: a WebGL scene's background, grid
+and outlines are numbers held by a renderer, and nothing re-reads them when
+`data-theme` changes. So the tokens are read through `getComputedStyle` and
+re-read when a `MutationObserver` sees the attribute change.
 
-**Drag-and-drop is the primary path, not a nicety.** Chromium's blocklist
-refuses every File System Access picker under Program Files
-(`DIR_PROGRAM_FILES` with `kBlockAllChildren`), which is exactly where Star
-Citizen installs. `showOpenFilePicker()` therefore *fails on the default
-install*. Drag-and-drop and a plain `<input type="file">` are not subject to
-that list. The same fact makes "drop it again" the normal return visit for most
-people, so it is worded as normal rather than as a failure.
+Two things that has to survive, both of which are the normal case on the live
+site rather than edge cases:
 
-**Say it does not upload, before asking for the file.** A visitor asked to hand
-over a 158 GB file will assume an upload and stop. `File.slice()` reads ranges
-on demand; the promise is on the landing page and again under the drop zone.
+- **A token may be a `color-mix()` or a `var()` chain.** `--sc-surface` is
+  `color-mix(in srgb, var(--sc-card), var(--sc-text) 7%)`, and
+  `getComputedStyle` returns custom properties *unresolved*. Resolving one needs
+  the browser: assign it to a real colour property on a probe element and read
+  that back.
+- **A theme may define only some tokens.** `dolomite` overrides four and
+  inherits the rest, so anything missing falls back to the base value rather
+  than to black — which would render an invisible scene.
 
-**The fingerprint is the entry index, not the timestamp.** WEB.md suggested size
-plus `lastModified` plus a hash of the central directory. `lastModified` is a
-property of the *copy*: moving the archive, restoring a backup or a launcher
-touching the file would each throw the catalogue away and force a needless
-re-index. Size and the entry list are properties of the build. It is computed in
-Rust from the index already in memory, so it costs no extra read.
+Measured across four themes, switching with no reload, reading the canvas back:
 
-## The bug the browser found and the tests could not
+| theme | `--sc-dark` | canvas pixel | AA failures |
+| --- | --- | --- | --- |
+| hangarworks | rgb(10, 18, 25) | 10, 18, 25 | none |
+| dolomite (light) | rgb(244, 246, 248) | 244, 246, 248 | none |
+| keystone | rgb(23, 19, 15) | 23, 19, 15 | none |
+| navy | rgb(7, 13, 28) | 7, 13, 28 | none |
 
-`vitest` covers the flow, the validation and IndexedDB, because all three are
-pure or have a faithful fake. OPFS has neither, and the behaviours that matter —
-whether eviction really deletes files, whether a cleared directory handle still
-works — are the ones a fake gets wrong by construction.
+**Only `hangarworks` is the site's real palette.** It is public in full;
+`dolomite` exposes four tokens (enough to know it is light-leaning) and
+`keystone` and `navy` are names only. The other three above are representative
+stand-ins, so what this demonstrates is the *mechanism* across dark, light and
+tinted themes. `checkContrast` is exported so the host can re-run it against the
+real values.
 
-So `verify.ts` runs in a real browser, and on its first run it failed: **the
-cache index did not survive a reopen.**
+## Accessibility
 
-The cause was a race. `get()` touches an entry's timestamp and fired an
-*unawaited* index write on every read. `createWritable` truncates and commits on
-`close`, so one of those writes landing across `loadIndex`'s read leaves a
-half-written file; `JSON.parse` throws; and `loadIndex` responds to an
-unreadable index by **clearing the cache**, because it cannot budget entries
-whose sizes it does not know.
+- WCAG AA on every pairing the component draws: 4.5:1 for body text, 3:1 for
+  large text and the accent.
+- Keyboard focus is always visible, using the accent and falling back to the
+  text colour — which a theme guarantees is readable against its own background.
+- `prefers-reduced-motion` is respected.
 
-That is destructive out of all proportion to its cause — a visitor clicking
-through pieces quickly could lose everything they had cached. Index writes are
-now serialised through one promise chain, touch-on-read is debounced into a
-single write, and `flush()` exists for callers that need the index on disk
-before reopening.
+## Checks
 
-A second, quieter one came from the same page: `clear()` removed the pieces
-directory without replacing the handle, so every later write threw into its own
-`catch` and silently cached nothing. A cache that works until the visitor
-presses "Clear cache" once, and never again until they reload.
+```bash
+npm run check      # typecheck, stylelint (no hex allowed), unit tests
+npm run build      # the library
+npm run verify     # the dev server, for the browser-only checks
+```
 
-## What is not done
+The browser-only pages, which need a real GPU and a real archive:
 
-The index step is **stubbed**. Everything before it is real — the capability
-check, the drop, validation, the failure screens, the caches — but the worker
-that drives the WebAssembly core through indexing, catalogue, geometry and
-materials is not wired up yet. Until it is, the flow cannot actually reach a
-rendered set, so the exit criterion is not met however well the onboarding
-behaves.
+| page | what it proves |
+| --- | --- |
+| `/theme.html` | a theme switch restyles the page *and* the canvas, and AA passes |
+| `/verify.html` | OPFS eviction, storage quotas, capability detection |
+| `/demo.html` | every onboarding screen, including the failure ones |
+| `/archive.html` | index and catalogue a real `Data.p4k` |
+| `/render.html` | armour on screen: mesh, armature, materials, socket, pose |
 
-That assembly is the next piece of work, and it is what WEB.md's Phase 2 note
-meant by *"what remains for a renderable result is assembly rather than format
-work."*
+`/archive.html` and `/render.html` need an archive:
+
+```bash
+FW_ARCHIVE="/path/to/Data.p4k" npm run verify
+```
+
+That serves the file over HTTP byte ranges for the dev server only. The
+production path is `FileReaderSync` over a `File` the visitor drops, and no game
+data ever reaches a server.
+
+## Bundle
+
+107 KB brotli against the 400 KB budget in `WEB.md`, plus a 2 KB stylesheet.
+The WebAssembly core is a separate asset, 0.20 MB brotli against 2 MB.

@@ -23,6 +23,8 @@
     "test",
     "demo.tsx",
     "verify.ts",
-    "archive.ts"
+    "archive.ts",
+    "render.tsx",
+    "theme.tsx"
   ]
 }

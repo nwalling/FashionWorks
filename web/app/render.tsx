@@ -418,7 +418,7 @@ async function main(): Promise<void> {
     + `${(textureMs / 1000).toFixed(1)}s of it decoding textures`);
   // Only the skinned pieces have one. A mounted prop has no skeleton at all --
   // counting it would report two and read like a bug.
-  const skinned = bound.filter((m) => 'skeleton' in m && m.skeleton);
+  const skinned = bound.filter((m): m is SkinnedMesh => 'skeleton' in m);
   const skeletons = new Set(skinned.map((m) => m.skeleton));
   say(`\n${bound.length} pieces: ${skinned.length} skinned on `
     + `${skeletons.size} skeleton${skeletons.size === 1 ? '' : 's'}, `

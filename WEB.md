@@ -851,6 +851,53 @@ Package, Next route, tokens, all four themes, accessibility.
 **Exit:** switching theme on the site restyles the page and the 3D view with no
 reload, and AA contrast passes in every theme.
 
+**Status: met, measured at the pixel.** `web/app` builds `@fashionworks/web`:
+a `<FashionWorks />` component, ES and CJS, with types, and `react`/`react-dom`
+as its only peers. **107 KB brotli** against the 400 KB budget, plus a 2 KB
+stylesheet; the WebAssembly core stays a separate asset at 0.20 MB brotli
+against 2 MB.
+
+Switching `data-theme` with no reload, reading the canvas back afterwards:
+
+| theme | `--sc-dark` | canvas pixel | AA failures |
+| --- | --- | --- | --- |
+| hangarworks | rgb(10, 18, 25) | **10, 18, 25** | none |
+| dolomite (light) | rgb(244, 246, 248) | **244, 246, 248** | none |
+| keystone | rgb(23, 19, 15) | **23, 19, 15** | none |
+| navy | rgb(7, 13, 28) | **7, 13, 28** | none |
+
+**Only `hangarworks` is the site's real palette.** It is public in full;
+`dolomite` exposes four tokens — enough to know it is light-leaning, since its
+chip background is `rgb(255 255 255/0.75)` — and `keystone` and `navy` are names
+only, with no CSS in the public bundle. So the other three are representative
+stand-ins and what this proves is the **mechanism** across dark, light and
+tinted themes. `checkContrast` is exported so the host re-runs it against the
+real values.
+
+Three things the live tokens forced, none of which a simpler reading would
+survive:
+
+- **A token is often not a colour.** `--sc-surface` is
+  `color-mix(in srgb, var(--sc-card), var(--sc-text) 7%)`, and
+  `getComputedStyle` returns custom properties *unresolved*. Resolving one needs
+  the browser: assign it to a real colour property on a probe element and read
+  that back.
+- **A theme may define only part of the set**, so a missing token falls back to
+  the base value rather than to black, which would render an invisible scene.
+- **The attribute is the source of truth, not component state.** The site flips
+  `data-theme` from its own header; a component that tracks its own idea of the
+  theme ends up disagreeing with the page. The harness reported "hangarworks"
+  over a plainly white page until it read the attribute instead.
+
+No hex values anywhere in the package, enforced by stylelint `color-no-hex` and
+`color-named: never` in `npm run check`. Keyboard focus is visible in every
+theme and `prefers-reduced-motion` is respected.
+
+One bug worth recording: the contrast helper parsed only `rgb()`, so every hex
+token resolved to black and **every ratio came out at exactly 1.0**. A contrast
+suite can pass that way while measuring nothing at all; it was caught because a
+theme that should have been comfortable reported a failure.
+
 **Phase 6 — The female body, and launch hardening**
 
 *Female skeleton.* Deferred here deliberately: it is orthogonal to the web port

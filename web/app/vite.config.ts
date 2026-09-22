@@ -1,4 +1,6 @@
 import { createReadStream, statSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -57,13 +59,30 @@ function archiveRange(): Plugin {
   };
 }
 
-// Phase 5 turns this into a library build for `@fashionworks/web`. For now it
-// serves the verification pages: the parts of this phase that cannot be tested
-// headlessly -- OPFS, real storage quotas, a real drag-and-drop, and the wasm
-// core against the real archive -- need a real browser, and this is how they
-// get one.
+// Two jobs. `vite build` produces the `@fashionworks/web` library; `vite`
+// serves the verification pages, which is how the parts that cannot be tested
+// headlessly -- OPFS, real storage quotas, a real drag-and-drop, the wasm core
+// against the real archive, and a live theme switch -- get a real browser.
 export default defineConfig({
   plugins: [react(), archiveRange()],
+  build: {
+    lib: {
+      entry: resolve(dirname(fileURLToPath(import.meta.url)), 'src/index.ts'),
+      name: 'FashionWorks',
+      formats: ['es', 'cjs'],
+      fileName: (format) => `fashionworks.${format === 'es' ? 'js' : 'cjs'}`,
+    },
+    rollupOptions: {
+      // React is a peer dependency: bundling it would give the host two copies
+      // and break hooks.
+      external: ['react', 'react-dom', 'react/jsx-runtime'],
+      output: { assetFileNames: 'fashionworks.[ext]' },
+    },
+    // The host's budget is 400 KB brotli for app JavaScript, so an accidental
+    // dependency should fail the build rather than ship.
+    chunkSizeWarningLimit: 500,
+    sourcemap: true,
+  },
   server: {
     port: 5183,
     // The wasm core is built into `web/core/pkg`, one level above this

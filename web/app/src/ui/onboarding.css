@@ -1,47 +1,188 @@
-/* Minimal styling on the Hangarworks tokens, with fallbacks so the component
- * renders standalone. Phase 5 replaces this with the site's own primitives;
- * nothing here should survive that, which is why there are no hex values
- * outside the fallbacks. */
+/* Styling for the component, entirely on the host's tokens.
+ *
+ * **No colour literals.** Every colour here is a `--sc-*` custom property the
+ * host defines, which is what makes a theme switch restyle this with no
+ * reload and no code. Enforced by stylelint `color-no-hex` and
+ * `color-named: never`; the check is `npm run lint:css`.
+ *
+ * The fallbacks inside `var()` are deliberately *other tokens*, never literals,
+ * so a host that defines a partial theme -- `dolomite` overrides four tokens
+ * and inherits the rest -- still gets something coherent.
+ */
+
+[data-fashionworks] {
+  color: var(--sc-text);
+  font-family: var(--font-body, system-ui, sans-serif);
+}
+
 .fw-onboarding {
-  --fw-bg: var(--sc-card, #16292f);
-  --fw-text: var(--sc-text, #eaf2f6);
-  --fw-subtle: var(--sc-subtle, #9fb6c2);
-  --fw-border: var(--sc-border, #2c4e5d);
-  --fw-accent: var(--sc-accent, #ff8a34);
-  --fw-field: var(--sc-field, #1e3a44);
-  background: var(--fw-bg);
-  color: var(--fw-text);
-  font-family: system-ui, sans-serif;
+  background: var(--sc-card);
+  color: var(--sc-text);
   padding: 24px;
   border-radius: 12px;
   max-width: 640px;
 }
-.fw-onboarding h2 { font-family: var(--font-display, inherit); margin: 0 0 12px; font-size: 20px; }
-.fw-muted, .fw-fineprint { color: var(--fw-subtle); font-size: 13px; }
-.fw-promise { font-weight: 600; }
-.fw-requirements { color: var(--fw-subtle); font-size: 14px; }
+
+.fw-onboarding h2 {
+  font-family: var(--font-display, inherit);
+  margin: 0 0 12px;
+  font-size: 20px;
+  color: var(--sc-text);
+}
+
+.fw-muted,
+.fw-fineprint {
+  color: var(--sc-subtle);
+  font-size: 13px;
+}
+
+.fw-promise {
+  font-weight: 600;
+  color: var(--sc-text);
+}
+
+.fw-requirements {
+  color: var(--sc-subtle);
+  font-size: 14px;
+}
+
 .fw-onboarding button {
-  background: var(--fw-field); color: var(--fw-text);
-  border: 1px solid var(--fw-border); border-radius: 8px;
-  padding: 8px 14px; font: inherit; cursor: pointer; margin-right: 8px;
+  background: var(--sc-field);
+  color: var(--sc-text);
+  border: 1px solid var(--sc-border);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font: inherit;
+  cursor: pointer;
+  margin-right: 8px;
 }
-.fw-onboarding button.fw-primary { background: var(--fw-accent); color: #16110b; border-color: transparent; }
+
+.fw-onboarding button:hover {
+  border-color: var(--sc-border-bright, var(--sc-border));
+}
+
+/* Keyboard focus must be visible in every theme, so it uses the accent and
+ * falls back to the text colour -- which a theme always guarantees is readable
+ * against its own background. */
+.fw-onboarding button:focus-visible,
+.fw-onboarding summary:focus-visible,
+.fw-onboarding select:focus-visible {
+  outline: 2px solid var(--sc-accent, var(--sc-text));
+  outline-offset: 2px;
+}
+
+.fw-onboarding button.fw-primary {
+  background: var(--sc-accent);
+  color: var(--sc-accent-ink, var(--sc-dark));
+  border-color: transparent;
+}
+
 .fw-drop {
-  border: 2px dashed var(--fw-border); border-radius: 18px;
-  padding: 32px; text-align: center; margin: 16px 0;
+  border: 2px dashed var(--sc-border);
+  border-radius: 18px;
+  padding: 32px;
+  text-align: center;
+  margin: 16px 0;
 }
-.fw-drop-active { border-color: var(--fw-accent); }
-.fw-droptitle { font-size: 18px; margin: 0 0 8px; }
+
+.fw-drop-active {
+  border-color: var(--sc-accent);
+}
+
+.fw-droptitle {
+  font-size: 18px;
+  margin: 0 0 8px;
+  color: var(--sc-text);
+}
+
 .fw-problem {
-  border: 1px solid var(--fw-accent); border-radius: 8px;
-  padding: 12px 16px; margin: 12px 0;
+  border: 1px solid var(--sc-accent);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 12px 0;
 }
-.fw-notice { background: var(--fw-field); border-radius: 8px; padding: 10px 14px; font-size: 14px; }
-.fw-checks { list-style: none; padding: 0; font-size: 14px; }
-.fw-checks .fw-blocking { color: var(--fw-accent); }
-.fw-steps { color: var(--fw-subtle); font-size: 14px; }
-.fw-steps .fw-done { color: var(--fw-text); }
-.fw-steps .fw-current { color: var(--fw-accent); font-weight: 600; }
-.fw-onboarding progress { width: 100%; height: 8px; }
-.fw-path { display: block; background: var(--fw-field); padding: 8px; border-radius: 6px; margin: 8px 0; font-size: 13px; word-break: break-all; }
-.fw-help { margin-top: 16px; font-size: 14px; }
+
+.fw-problem a {
+  color: var(--sc-accent);
+}
+
+.fw-notice {
+  background: var(--sc-field);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 14px;
+}
+
+.fw-checks {
+  list-style: none;
+  padding: 0;
+  font-size: 14px;
+}
+
+.fw-checks .fw-blocking {
+  color: var(--sc-accent);
+}
+
+.fw-steps {
+  color: var(--sc-subtle);
+  font-size: 14px;
+}
+
+.fw-steps .fw-done {
+  color: var(--sc-text);
+}
+
+.fw-steps .fw-current {
+  color: var(--sc-accent);
+  font-weight: 600;
+}
+
+.fw-onboarding progress {
+  width: 100%;
+  height: 8px;
+}
+
+.fw-path {
+  display: block;
+  background: var(--sc-field);
+  color: var(--sc-text);
+  padding: 8px;
+  border-radius: 6px;
+  margin: 8px 0;
+  font-size: 13px;
+  font-family: ui-monospace, monospace;
+  word-break: break-all;
+}
+
+.fw-help {
+  margin-top: 16px;
+  font-size: 14px;
+}
+
+/* An animation is a nicety; motion sickness is not. */
+@media (prefers-reduced-motion: reduce) {
+  [data-fashionworks] *,
+  [data-fashionworks] *::before,
+  [data-fashionworks] *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* The 3D view fills whatever the host gives it. Its own colours come from the
+ * scene, not from here -- CSS cannot reach inside a WebGL canvas, which is the
+ * whole reason `sceneTheme` exists. */
+.fw-view {
+  flex: 1 1 auto;
+  min-height: 320px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--sc-dark);
+}
+
+.fw-view canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}

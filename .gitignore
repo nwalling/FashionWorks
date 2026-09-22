@@ -43,3 +43,6 @@ web/app/node_modules/
 
 # wasm-bindgen output, rebuilt by web/spike/build.sh.
 web/core/pkg/
+
+# The library build output.
+web/app/dist/
