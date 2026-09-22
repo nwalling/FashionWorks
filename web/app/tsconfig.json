@@ -25,6 +25,7 @@
     "verify.ts",
     "archive.ts",
     "render.tsx",
-    "theme.tsx"
+    "theme.tsx",
+    "try.tsx"
   ]
 }

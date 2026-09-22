@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en" data-theme="hangarworks">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FashionWorks — try it</title>
+<style>
+  /* Stands in for the Hangarworks stylesheet: same token names, per theme. */
+  :root, [data-theme="hangarworks"] {
+    --sc-dark:#0a1219; --sc-card:#16292f;
+    --sc-surface: color-mix(in srgb, var(--sc-card), var(--sc-text) 7%);
+    --sc-surface-2:#1e3a44; --sc-field:#1e3a44; --sc-border:#2c4e5d;
+    --sc-border-bright: color-mix(in srgb, var(--sc-border), var(--sc-text) 42%);
+    --sc-text:#eaf2f6; --sc-subtle:#9fb6c2;
+    --sc-accent:#ff8a34; --sc-accent-ink:#0a1219; --sc-badge:#5ad1e6;
+  }
+  [data-theme="dolomite"] {
+    --sc-dark:#f4f6f8; --sc-card:#ffffff;
+    --sc-surface: color-mix(in srgb, var(--sc-card), var(--sc-text) 7%);
+    --sc-surface-2:#ecf0f3; --sc-field:#ecf0f3; --sc-border:#c6d0d8;
+    --sc-border-bright: color-mix(in srgb, var(--sc-border), var(--sc-text) 42%);
+    --sc-text:#101c26; --sc-subtle:#4e606e;
+    --sc-accent:#a64a08; --sc-accent-ink:#ffffff; --sc-badge:#0e6476;
+  }
+  [data-theme="keystone"] {
+    --sc-dark:#17130f; --sc-card:#241d17;
+    --sc-surface: color-mix(in srgb, var(--sc-card), var(--sc-text) 7%);
+    --sc-surface-2:#33291f; --sc-field:#33291f; --sc-border:#5a4938;
+    --sc-border-bright: color-mix(in srgb, var(--sc-border), var(--sc-text) 42%);
+    --sc-text:#f5ece1; --sc-subtle:#c2ae97;
+    --sc-accent:#e0a145; --sc-accent-ink:#17130f; --sc-badge:#7fc8a9;
+  }
+  [data-theme="navy"] {
+    --sc-dark:#070d1c; --sc-card:#101a33;
+    --sc-surface: color-mix(in srgb, var(--sc-card), var(--sc-text) 7%);
+    --sc-surface-2:#172547; --sc-field:#172547; --sc-border:#2a3d66;
+    --sc-border-bright: color-mix(in srgb, var(--sc-border), var(--sc-text) 42%);
+    --sc-text:#e6ecfa; --sc-subtle:#97a6c8;
+    --sc-accent:#6f8dff; --sc-accent-ink:#070d1c; --sc-badge:#57d2c0;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--sc-dark); color:var(--sc-text);
+         font-family: system-ui, -apple-system, sans-serif; height:100vh;
+         display:flex; flex-direction:column; }
+  header { padding:10px 16px; border-bottom:1px solid var(--sc-border);
+           display:flex; gap:18px; align-items:center; flex-wrap:wrap; }
+  header strong { font-size:15px; letter-spacing:.2px; }
+  .group { display:flex; gap:6px; align-items:center; }
+  .group > span { color:var(--sc-subtle); font-size:12px; margin-right:2px; }
+  button { background:var(--sc-field); color:var(--sc-text);
+           border:1px solid var(--sc-border); border-radius:8px;
+           padding:6px 11px; font:inherit; font-size:13px; cursor:pointer; }
+  button:hover { border-color:var(--sc-border-bright); }
+  button[aria-pressed="true"] { background:var(--sc-accent);
+                                color:var(--sc-accent-ink); border-color:transparent; }
+  button:focus-visible { outline:2px solid var(--sc-accent); outline-offset:2px; }
+  main { flex:1; position:relative; min-height:0; }
+  #view { position:absolute; inset:0; }
+  #view canvas { display:block; width:100%; height:100%; }
+  #status { position:absolute; left:14px; bottom:12px; font:12px/1.55 ui-monospace,monospace;
+            color:var(--sc-subtle); background:color-mix(in srgb, var(--sc-dark), transparent 18%);
+            padding:8px 12px; border-radius:8px; pointer-events:none; white-space:pre-wrap; }
+  #hint { position:absolute; right:14px; bottom:12px; font-size:12px; color:var(--sc-subtle);
+          pointer-events:none; }
+</style>
+</head>
+<body>
+<header>
+  <strong>FashionWorks</strong>
+  <div class="group" id="themes"><span>theme</span></div>
+  <div class="group" id="poses"><span>pose</span></div>
+  <div class="group" id="opts"><span>surface</span></div>
+</header>
+<main>
+  <div id="view"></div>
+  <pre id="status">opening your archive…</pre>
+  <div id="hint">drag to orbit · wheel to zoom</div>
+</main>
+<script type="module" src="/try.tsx"></script>
+</body>
+</html>
