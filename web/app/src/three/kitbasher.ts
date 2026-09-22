@@ -49,6 +49,14 @@ export const DONORS = [
   'Objects/Characters/Human/male_v7/armor/slaver/m_slaver_heavy_armor_01_core.skin',
 ];
 
+/** How much room to leave around a framed loadout. Enough that a pauldron or a
+ * backpack does not touch the edge, not so much that the figure swims. */
+const FRAME_MARGIN = 1.12;
+
+/** Never get closer than this, whatever the bounds say. A single glove would
+ * otherwise put the camera inside its own near plane. */
+const MIN_FRAME_DISTANCE = 0.6;
+
 export interface Pose {
   readonly label: string;
   readonly dba: string | null;
@@ -390,7 +398,21 @@ export class Kitbasher {
     return items.length;
   }
 
-  /** Point the camera at whatever is on the body. */
+  /** Point the camera at whatever is on the body, filling the panel.
+   *
+   * **Fit both axes, not the largest extent against one.** `camera.fov` is the
+   * *vertical* field of view; the horizontal one follows from the aspect. The
+   * first version took `max(x, y, z)` and fitted that against the vertical fov
+   * alone, which for a standing figure means fitting its **width** to its
+   * *height's* field -- and a `.skin`'s bounding box is its **bind pose**, arms
+   * out, so the width is 1.45 m against a 1.88 m height. Measured on a full
+   * Sunchaser set in a 636x477 panel, that left the character 276 px tall: 58%
+   * of the canvas, with the rest empty, and still clipped by the page fold.
+   *
+   * The ground-plane extent is taken as a radius rather than per axis, because
+   * x and z swap roles as the camera orbits and a fit that changes with the
+   * angle is worse than one that is slightly loose.
+   */
   frameLoadout(): void {
     const bounds = new Box3();
     let any = false;
@@ -404,12 +426,31 @@ export class Kitbasher {
     const { camera, controls } = this.view;
     const centre = bounds.getCenter(new Vector3());
     const size = bounds.getSize(new Vector3());
-    const reach = Math.max(size.x, size.y, size.z, 0.4);
-    const distance = ((reach / 2) / Math.tan((camera.fov * Math.PI) / 360)) * 1.6;
+
+    const halfVertical = Math.tan((camera.fov * Math.PI) / 360);
+    const halfHorizontal = halfVertical * Math.max(camera.aspect, 0.01);
+    const radius = Math.hypot(size.x, size.z) / 2;
+    const distance = Math.max(
+      size.y / 2 / halfVertical,
+      radius / halfHorizontal,
+      MIN_FRAME_DISTANCE,
+    ) * FRAME_MARGIN;
+
+    // **Keep whichever way the visitor is looking.** Re-framing on every equip
+    // is right -- a backpack changes the silhouette -- but swinging the camera
+    // back to a fixed three-quarter view each time would fight someone who has
+    // orbited round to look at the back, and equipping a colourway fires this
+    // too. Only the distance and the target move. The opening direction comes
+    // from `Viewer`'s initial camera, which faces the visor: negative z is the
+    // character's front, since the archive is Z-up with +y forward.
+    const direction = new Vector3().subVectors(camera.position, controls.target);
+    if (direction.lengthSq() < 1e-6) direction.set(0.5, 0.18, -1);
+    direction.normalize();
+
     controls.target.copy(centre);
-    // Negative z is the character's front: the archive is Z-up with +y forward,
-    // and the conversion puts the visor at -z.
-    camera.position.set(centre.x + distance * 0.5, centre.y + distance * 0.18, centre.z - distance);
+    camera.position.copy(centre).addScaledVector(direction, distance);
+    camera.updateProjectionMatrix();
+    controls.update();
   }
 
   dispose(): void {

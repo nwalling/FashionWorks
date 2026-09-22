@@ -27,6 +27,15 @@ import './dist/fashionworks.css';
 const log = document.getElementById('log')!;
 const say = (line: string) => { log.textContent = line; };
 
+// A/B the host's box against the proposed one, to measure rather than guess.
+const tallButton = document.getElementById('tall') as HTMLButtonElement;
+tallButton.onclick = () => {
+  const mount = document.getElementById('mount')!;
+  const tall = mount.classList.toggle('tall');
+  tallButton.textContent = `box: ${tall ? '100dvh - 5.5rem' : '72vh'}`;
+  if (tall) mount.scrollIntoView({ block: 'start', behavior: 'auto' });
+};
+
 const themeButton = document.getElementById('theme') as HTMLButtonElement;
 themeButton.onclick = () => {
   const html = document.documentElement;

@@ -20,26 +20,56 @@
   body { margin:0; background:var(--sc-dark); color:var(--sc-text);
          font:14px/1.5 ui-sans-serif, system-ui, sans-serif; }
   header { display:flex; gap:12px; align-items:center; padding:10px 16px;
-           border-bottom:1px solid var(--sc-border); }
+           border-bottom:1px solid var(--sc-border); position:sticky; top:0;
+           background:var(--sc-dark); z-index:2; }
   header b { font-size:15px; }
   header button { background:var(--sc-field); color:var(--sc-text);
                   border:1px solid var(--sc-border); border-radius:8px; padding:4px 10px; }
   #log { color:var(--sc-subtle); font-size:12px; margin-left:auto;
-         white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:60%; }
-  /* A DEFINITE height, as the contract now says: the component's root is
-     min-height:100%, and a percentage minimum needs a parent with a height. */
-  #mount { height: calc(100vh - 46px); min-height: 520px; display:flex; }
-  #mount > [data-fashionworks] { flex: 1 1 auto; }
+         white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:50%; }
+
+  /* ── The host page, mimicked ────────────────────────────────────────────
+     Hangarworks puts a heading block, an intro and the fan-site notice above
+     the tool -- 391px of it on a 1024x768 screen -- and then gives the tool
+     72vh. So 176px of the panel starts below the fold, which is the bug this
+     page exists to reproduce. Sizes copied from the live measurement. */
+  article { max-width: 56rem; margin: 0 auto; padding: 0 24px 64px; }
+  .mimic-head { border-bottom:1px solid var(--sc-border); padding-bottom:12px; }
+  .mimic-head h1 { font-size:28px; margin:16px 0 8px; }
+  .mimic-head p { color:var(--sc-subtle); max-width:62ch; margin:8px 0; }
+  .mimic-notice { margin-top:16px; border:1px solid var(--sc-border);
+                  background:var(--sc-card); border-radius:10px; padding:12px 16px;
+                  color:var(--sc-subtle); font-size:13px; }
+  /* The tool's box, exactly as the host sets it. `.tall` is the proposed fix. */
+  #mount { margin-top:24px; height:72vh; min-height:520px; display:flex; }
+  #mount.tall { height: calc(100dvh - 5.5rem); min-height: 560px; }
+  #mount > [data-fashionworks] { flex: 1 1 auto; min-width: 0; }
 </style>
 </head>
 <body>
 <header>
   <b>FashionWorks</b>
-  <span>the built package, rendering the kitbasher</span>
+  <span>the built package, in a mimic of the host page</span>
   <button id="theme">theme: hangarworks</button>
+  <button id="tall">box: 72vh</button>
   <span id="log">starting…</span>
 </header>
-<div id="mount"></div>
+<article>
+  <div class="mimic-head">
+    <h1>FashionWorks</h1>
+    <p>Browse every piece of FPS armour in Star Citizen, mix sets together, and
+      try colourways, all from the game you already have installed. Nothing is
+      uploaded: your browser reads your own copy of the game, on your own
+      computer.</p>
+    <p>You need Star Citizen installed on the desktop computer you are reading
+      this on, and a few GB of free disk space for a cache that makes return
+      visits instant. Chrome or Edge is recommended, and Firefox is supported.
+      No installs, no command line, and no account.</p>
+  </div>
+  <aside class="mimic-notice">Hangarworks is an unofficial fan tool and is not
+    affiliated with or endorsed by Cloud Imperium Games.</aside>
+  <div id="mount"></div>
+</article>
 <script type="module" src="./kitbasher.ts"></script>
 </body>
 </html>

@@ -94,10 +94,25 @@
   min-height: 0;
 }
 
+/* Stacked, the body comes first.
+ *
+ * With the listing on top it pushes the 3D view down past the bottom of the
+ * screen, so the thing someone opened the page to look at is the thing they
+ * have to scroll to find. */
 @media (max-width: 720px) {
   .fw-kit-body {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(0, 40%) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(0, 45%);
+  }
+
+  .fw-kit-stage {
+    grid-row: 1;
+  }
+
+  .fw-kit-side {
+    grid-row: 2;
+    border-right: 0;
+    border-top: 1px solid var(--sc-border);
   }
 }
 
@@ -218,5 +233,26 @@
   border-top: 1px solid var(--sc-border);
   white-space: nowrap;
   overflow: hidden;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.fw-kit-status > span:first-child {
+  overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Never shrinks away and never wraps: it is the attribution. On a narrow
+ * screen the status text ellipsises instead, since that is the disposable
+ * half of this line. */
+.fw-kit-attribution {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 560px) {
+  .fw-kit-attribution {
+    font-size: 11px;
+  }
 }

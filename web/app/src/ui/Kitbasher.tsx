@@ -265,8 +265,16 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
 
         <div className="fw-kit-stage">
           <Viewer tokens={tokens} onScene={onScene} className="fw-view fw-kit-view" />
-          <p className="fw-kit-status" aria-live="polite">
-            {state?.status ?? 'starting…'}
+          <p className="fw-kit-status">
+            <span aria-live="polite">{state?.status ?? 'starting…'}</span>
+            {/* The host's fan-site notice sits above the tool, and the tool now
+                takes the whole window -- so that notice is scrolled out of
+                sight for as long as anyone actually uses this. Carrying the
+                attribution here keeps it on screen. It is a condition of the
+                fan-content go-ahead (WEB-LEGAL.md), not decoration. */}
+            <span className="fw-kit-attribution">
+              Not affiliated with or endorsed by Cloud Imperium Games.
+            </span>
           </p>
         </div>
       </div>
