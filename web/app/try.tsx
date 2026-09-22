@@ -35,7 +35,24 @@ import type {
   FromWorker, MaterialPayload, MeshPayload, PropPayload, TexturePayload, ToWorker,
 } from './src/worker/archive.worker';
 
-const THEMES = ['hangarworks', 'dolomite', 'keystone', 'navy'] as const;
+/** Hangarworks' real themes, with their tiers.
+ *
+ * **In the product this is not a picker.** The site's `ThemeProvider` resolves
+ * the account's saved theme and its owned premium themes on sign-in, writes the
+ * palette onto `<html>`, and FashionWorks follows. The buttons here stand in for
+ * that, because this page has no account behind it -- which is also why the
+ * premium ones are shown as locked rather than hidden: that is what a signed-out
+ * or non-owning visitor sees.
+ */
+const THEMES = [
+  { id: 'hangarworks', name: 'Hangarworks', tier: 'free' },
+  { id: 'dark', name: 'Night', tier: 'free' },
+  { id: 'dolomite', name: 'Dolomite', tier: 'free' },
+  { id: 'nightrunner', name: 'Nightbreak', tier: 'free' },
+  { id: 'keystone', name: 'Keystone', tier: 'free' },
+  { id: 'navy', name: '2950 IAE', tier: 'premium' },
+  { id: 'lovestruck', name: 'Lovestruck', tier: 'premium' },
+] as const;
 const SLOTS = ['helmet', 'torso', 'arms', 'legs', 'undersuit', 'backpack'] as const;
 type Slot = (typeof SLOTS)[number];
 
@@ -78,6 +95,36 @@ const HIDDEN = ['npc', 'placeholder', 'not_wearable', 'test'];
  */
 const MAX_ROWS = 400;
 
+/** What a family of colourways is called.
+ *
+ * **Not the canonical member's name.** The canonical item is whichever the
+ * catalogue happened to make the root, and it is often an *edition*: the
+ * Defiance legs group is rooted on "Defiance Legs (Modified)", so titling the
+ * row with it hides "Defiance Legs Sunchaser" as a swatch under a name it does
+ * not share. Titling with the words the members actually have in common gives
+ * "Defiance Legs", with every colourway including Sunchaser underneath.
+ */
+export function sharedName(names: string[]): string {
+  if (names.length === 0) return '';
+  if (names.length === 1) return names[0]!;
+  const split = names.map((n) => n.split(/\s+/).filter(Boolean));
+  const shared: string[] = [];
+  for (let i = 0; i < split[0]!.length; i += 1) {
+    const word = split[0]![i]!;
+    if (split.every((words) => words[i] === word)) shared.push(word);
+    else break;
+  }
+  // A family whose names diverge from the first word has nothing to share; the
+  // canonical name is still better than an empty row.
+  return shared.length ? shared.join(' ') : names[0]!;
+}
+
+/** What distinguishes one colourway from its family. */
+export function colourwayName(name: string, shared: string): string {
+  const rest = name.startsWith(shared) ? name.slice(shared.length).trim() : name;
+  return rest || 'Standard';
+}
+
 interface CatalogueItem {
   id: string;
   class_name: string;
@@ -116,7 +163,12 @@ const replaceLast = (line: string) => {
 // ── scene ───────────────────────────────────────────────────────────────────
 const scene = new Scene();
 scene.background = new Color(0x000000);
-const renderer = new WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+// `alpha` so a backdrop photograph can show through where the scene is empty;
+// `preserveDrawingBuffer` so the canvas can be read back after compositing,
+// which is how a check confirms the scene followed a theme change.
+const renderer = new WebGLRenderer({
+  antialias: true, preserveDrawingBuffer: true, alpha: true,
+});
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 viewEl.appendChild(renderer.domElement);
 
@@ -157,23 +209,29 @@ new ResizeObserver(resize).observe(viewEl);
 
 // ── theme ───────────────────────────────────────────────────────────────────
 function paint(tokens: Tokens): void {
-  applyTheme({ scene, renderer, grid }, tokens);
+  // With a backdrop up there is no scene background to tint; the grid is
+  // hidden too, so only the lighting balance still applies.
+  applyTheme({ scene, renderer, grid: grid.visible ? grid : undefined }, tokens);
   ambient.intensity = isLight(tokens) ? 0.85 : 1.3;
 }
 paint(readTokens());
 watchTheme(paint);
 
 const themeBar = document.getElementById('themes')!;
-for (const name of THEMES) {
+for (const entry of THEMES) {
   const button = document.createElement('button');
-  button.textContent = name;
-  button.onclick = () => document.documentElement.setAttribute('data-theme', name);
+  button.dataset.theme = entry.id;
+  button.textContent = entry.tier === 'premium' ? `${entry.name} \u2022` : entry.name;
+  button.title = entry.tier === 'premium'
+    ? `${entry.name} — premium; the account has to own it`
+    : entry.name;
+  button.onclick = () => document.documentElement.setAttribute('data-theme', entry.id);
   themeBar.appendChild(button);
 }
 const syncThemes = () => {
   const current = document.documentElement.getAttribute('data-theme');
   themeBar.querySelectorAll('button').forEach((b) => {
-    b.setAttribute('aria-pressed', String(b.textContent === current));
+    b.setAttribute('aria-pressed', String(b.dataset.theme === current));
   });
 };
 syncThemes();
@@ -414,7 +472,8 @@ async function main(): Promise<void> {
       const button = document.createElement('button');
       button.className = 'item';
       const title = document.createElement('span');
-      title.textContent = item.name ?? item.class_name;
+      const names = family.map((f) => f.name ?? f.class_name);
+      title.textContent = sharedName(names);
       const meta = document.createElement('span');
       meta.className = 'meta';
       const maker = item.manufacturer?.code ?? '';
@@ -449,7 +508,8 @@ async function main(): Promise<void> {
       swatch.className = 'way';
       const colour = variant.tint?.layers?.[0]?.color;
       if (colour) swatch.style.background = colour;
-      swatch.title = variant.name ?? variant.class_name;
+      const shared = sharedName(family.map((f) => f.name ?? f.class_name));
+      swatch.title = colourwayName(variant.name ?? variant.class_name, shared);
       swatch.setAttribute('aria-pressed', String(onBody?.id === variant.id));
       swatch.onclick = () => void equip(variant);
       waysEl.appendChild(swatch);
@@ -504,6 +564,63 @@ async function main(): Promise<void> {
   optionBar.appendChild(wearButton);
 
   const actions = document.getElementById('acts')!;
+
+  /** Equip a whole set around whatever is already on the torso.
+   *
+   * **Set first, then edition, then palette.** Scoring palette above the
+   * product line is how equipping from "Defiance Core (Modified)" once put
+   * *ADP Arms (Modified)* on the arms -- a different product line that happened
+   * to share a colour. One set key can cover nearly two hundred items across
+   * many lines, and the pieces of one edition do not necessarily share a
+   * palette among themselves, so neither alone is enough.
+   */
+  const setButton = document.createElement('button');
+  setButton.textContent = 'equip set';
+  setButton.title = 'Fill the empty slots to match the piece on the torso';
+  setButton.onclick = async () => {
+    const anchor = wearing.get('torso') ?? [...wearing.values()][0];
+    if (!anchor) return say('equip something first, then match a set to it');
+    setButton.disabled = true;
+
+    const anchorName = anchor.name ?? anchor.class_name;
+    const anchorFamily = families.get(familyRoot(anchor)) ?? [anchor];
+    const anchorShared = sharedName(anchorFamily.map((f) => f.name ?? f.class_name));
+    // The words after the slot -- "(Modified)", "Tactical" -- are the edition.
+    const edition = colourwayName(anchorName, anchorShared);
+    const paletteKey = anchor.tint?.layers?.[0]?.color ?? '';
+
+    const score = (item: CatalogueItem): number => {
+      let points = 0;
+      if (anchor.set && item.set === anchor.set) points += 8;
+      const itemFamily = families.get(familyRoot(item)) ?? [item];
+      const itemShared = sharedName(itemFamily.map((f) => f.name ?? f.class_name));
+      // The manufacturer and the leading word of the name stand in for the
+      // product line, which the catalogue does not name directly.
+      if (item.manufacturer?.code && item.manufacturer.code === anchor.manufacturer?.code) points += 3;
+      if (itemShared.split(' ')[0] === anchorShared.split(' ')[0]) points += 4;
+      if (colourwayName(item.name ?? item.class_name, itemShared) === edition) points += 3;
+      if (paletteKey && item.tint?.layers?.[0]?.color === paletteKey) points += 2;
+      if (item.weight_class === anchor.weight_class) points += 1;
+      return points;
+    };
+
+    let filled = 0;
+    for (const name of SLOTS) {
+      if (wearing.has(name)) continue;
+      const candidates = (bySlot.get(name) ?? [])
+        .map((item) => ({ item, points: score(item) }))
+        .filter((entry) => entry.points >= 8)
+        .sort((a, b) => b.points - a.points);
+      const best = candidates[0];
+      if (!best) continue;
+      await equip(best.item);
+      filled += 1;
+    }
+    setButton.disabled = false;
+    say(filled ? `set: filled ${filled} slot${filled === 1 ? '' : 's'}`
+      : 'no matching pieces for the empty slots');
+  };
+  actions.appendChild(setButton);
   const clear = document.createElement('button');
   clear.textContent = 'clear';
   clear.onclick = () => {
@@ -515,6 +632,62 @@ async function main(): Promise<void> {
     say('cleared');
   };
   actions.appendChild(clear);
+
+  // ── backdrop ──────────────────────────────────────────────────────────────
+  //
+  // A photograph behind the character, cropped to cover rather than stretched.
+  // **Lighting still comes from the scene**: a screenshot is a perspective
+  // image, not an equirectangular map, so using one to light the armour would
+  // be wrong. The grid goes away while a backdrop is up, because it reads as
+  // floating debris over a photo.
+  const backdropBar = document.getElementById('backdrop')!;
+  const picker = document.createElement('input');
+  picker.type = 'file';
+  picker.accept = 'image/*';
+  picker.hidden = true;
+  let backdropUrl: string | null = null;
+
+  const setBackdrop = (url: string | null) => {
+    if (backdropUrl) URL.revokeObjectURL(backdropUrl);
+    backdropUrl = url;
+    if (url) {
+      viewEl.style.backgroundImage = `url(${url})`;
+      viewEl.classList.add('has-backdrop');
+      // The canvas has to stop painting the theme colour over the photo.
+      scene.background = null;
+      renderer.setClearAlpha(0);
+      grid.visible = false;
+    } else {
+      viewEl.style.backgroundImage = '';
+      viewEl.classList.remove('has-backdrop');
+      scene.background = new Color(0x000000);
+      renderer.setClearAlpha(1);
+      grid.visible = true;
+      paint(readTokens());
+    }
+    clearBackdrop.disabled = !url;
+  };
+
+  picker.onchange = () => {
+    const file = picker.files?.[0];
+    if (file) {
+      setBackdrop(URL.createObjectURL(file));
+      say(`backdrop: ${file.name}`);
+    }
+  };
+
+  const chooseBackdrop = document.createElement('button');
+  chooseBackdrop.textContent = 'choose…';
+  chooseBackdrop.onclick = () => picker.click();
+  const clearBackdrop = document.createElement('button');
+  clearBackdrop.textContent = 'none';
+  clearBackdrop.disabled = true;
+  clearBackdrop.onclick = () => { setBackdrop(null); say('backdrop cleared'); };
+  backdropBar.append(chooseBackdrop, clearBackdrop, picker);
+
+  // A backdrop is the visitor's own file and never leaves the page; the object
+  // URL is released when it is replaced or cleared.
+  addEventListener('beforeunload', () => { if (backdropUrl) URL.revokeObjectURL(backdropUrl); });
 
   // Open on something rather than an empty grid.
   const opener = (bySlot.get('torso') ?? []).find((i) => (i.name ?? '').includes('Sunchaser'))

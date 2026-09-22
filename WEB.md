@@ -303,8 +303,12 @@ Each phase ends on an exit criterion, not a date.
   the visitor's own game files and hosts none of them. Add the non-affiliation
   notice. StarBreaker is MIT, so redistributing a WebAssembly build needs only
   its notice. cgf-converter is not shipped.
-  **Exit:** a written go/no-go. **Status: not started, and it blocks everything
-  else.**
+  **Exit:** a written go/no-go. **Status: done, and the answer is go.**
+  `WEB-LEGAL.md` records the review and the conditions it comes with: the
+  fan-site notice verbatim and prominent, a link to the official site, no ads,
+  no paywall, no accounts, and no game data served from the host. Advertising
+  or a paid tier would make this Commercial use, which CIG prohibits outright,
+  and would be a new decision rather than an extension of this one.
 - *Feasibility spike:* compile `starbreaker-p4k`, `-datacore` and `-dds` to
   `wasm32`. In a bare page on Windows, in both Chrome and Firefox, open the real
   158 GB `Data.p4k` through `<input>` and drag-and-drop, read the central
@@ -866,13 +870,31 @@ Switching `data-theme` with no reload, reading the canvas back afterwards:
 | keystone | rgb(23, 19, 15) | **23, 19, 15** | none |
 | navy | rgb(7, 13, 28) | **7, 13, 28** | none |
 
-**Only `hangarworks` is the site's real palette.** It is public in full;
-`dolomite` exposes four tokens — enough to know it is light-leaning, since its
-chip background is `rgb(255 255 255/0.75)` — and `keystone` and `navy` are names
-only, with no CSS in the public bundle. So the other three are representative
-stand-ins and what this proves is the **mechanism** across dark, light and
-tinted themes. `checkContrast` is exported so the host re-runs it against the
-real values.
+**The table above was measured against stand-ins, and the real palettes have
+since replaced them.** Only `hangarworks` was public in full; `dolomite` exposed
+four tokens and `keystone` and `navy` were names only, so three of the four rows
+proved the *mechanism* rather than the site's own colours.
+
+All seven real palettes are now in hand, read from the Hangarworks source, and
+the suite runs against every one of them: `hangarworks`, `dark`, `navy`,
+`dolomite`, `nightrunner`, `lovestruck`, `keystone`. **Three of the seven are
+light**, so a light theme is the common case rather than the edge case, and two
+properties of the real registry changed the checks:
+
+- **`--sc-accent-text` is a separate token from `--sc-accent`**, because a fill
+  colour that works is often unreadable as type: Dolomite's orange is 2.65:1 on
+  its own page. Holding the fill to a type threshold reports a failure the site
+  has already solved, and darkening the single accent to fix the type turns the
+  buttons brown. Type is checked against `--sc-accent-text`, fills against
+  `--sc-accent-ink` on `--sc-accent`.
+- **Several tokens are translucent** — `--sc-field` is
+  `rgba(255, 255, 255, 0.07)` on the dark themes. Read at face value that is
+  white, and white text on it scores 1.0:1; composited over the card it is a
+  lifted navy and passes comfortably. `over()` does the compositing and
+  `alphaOf()` finds the alpha.
+
+`checkContrast` stays exported so the host can re-run it in its own tests
+against whatever the values are on the day.
 
 Three things the live tokens forced, none of which a simpler reading would
 survive:

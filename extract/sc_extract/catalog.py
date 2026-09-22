@@ -666,11 +666,46 @@ def link_variants(items: list[Item]) -> None:
 
     Items with no geometry fall back to a stripped class name so that
     placeholder records still collapse instead of flooding the list.
+
+    **The mesh alone is too loose in the other direction.** Product lines reuse
+    each other's meshes -- `Defiance Legs Sunchaser` and `ADP-mk4 Legs Woodland`
+    are both `m_cds_heavy_armor_01_legs.skin`, which is genuine reuse and not a
+    fault -- so keying on geometry alone merged them into one family of eleven
+    spanning two lines. The viewer then titled the row with whichever member
+    sorted first, and every Defiance colourway disappeared under *ADP-mk4 Legs
+    Woodland*.
+
+    So the product name joins the key. Not the ``set``: that separates
+    ``citadel`` from ``citadel-se`` and splits Aves across four keys, which
+    over-splits families that are genuinely one line with several editions.
+    ``product_key`` is everything before the slot word, which is exactly the
+    line. Measured across the catalogue it takes families spanning more than one
+    product from **71 to 0** while leaving Citadel, Aves and Odyssey intact.
+
+    **An unnamed item's name is its class name**, not ``None`` -- that is what
+    the ``unnamed`` flag records, and ``flags_for`` sets both together. So the
+    fallback has to key on the flag, exactly as :func:`set_key` already does.
+    Testing ``item.name`` for emptiness instead finds nothing to fall back on,
+    and ``product_key`` of a class name is the whole class name, colour index
+    and all -- which gives every unnamed colourway a key of its own and splits
+    the family it was meant to hold together. The stripped class name is the
+    right fallback, because that is what drops the index.
+
+    Measured on the 2615-item catalogue: families whose members share no name
+    prefix, which is exactly the case that titles a row after an unrelated
+    member, go from **53 to 19**, and the 19 that remain are all unnamed items
+    whose "name" is a class name and so share no words by construction.
     """
     groups: dict[tuple, list[Item]] = defaultdict(list)
     for item in items:
         key = geometry_key(item)
-        groups[(item.slot, key or ("name", canonical_key(item.class_name)))].append(item)
+        unnamed = "unnamed" in (item.flags or [])
+        product = "" if unnamed else product_key(item.name or "")
+        groups[(
+            item.slot,
+            product or canonical_key(item.class_name),
+            key or ("name", canonical_key(item.class_name)),
+        )].append(item)
 
     for group in groups.values():
         for member in group:

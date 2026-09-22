@@ -35,6 +35,11 @@ export const TOKENS = [
   '--sc-text',
   '--sc-subtle',
   '--sc-accent',
+  // The accent as *type*, which is not the same colour as the accent as a
+  // fill. Hangarworks separates them because a fill that works can read at
+  // 1.71:1 as a heading on its own card -- darkening the one accent fixes the
+  // type and turns the buttons brown. `--sc-accent` fills, this one is text.
+  '--sc-accent-text',
   '--sc-accent-ink',
   '--sc-badge',
 ] as const;
@@ -59,6 +64,7 @@ export const FALLBACK: Tokens = {
   '--sc-text': '#eaf2f6',
   '--sc-subtle': '#9fb6c2',
   '--sc-accent': '#ff8a34',
+  '--sc-accent-text': '#ff8a34',
   '--sc-accent-ink': '#0a1219',
   '--sc-badge': '#5ad1e6',
 };
@@ -109,7 +115,15 @@ export function readTokens(from: Element = document.documentElement): Tokens {
 export function watchTheme(onChange: (tokens: Tokens) => void): () => void {
   const target = document.documentElement;
   const observer = new MutationObserver(() => onChange(readTokens()));
-  observer.observe(target, { attributes: true, attributeFilter: ['data-theme', 'class'] });
+  // `style` as well as `data-theme`: Hangarworks applies a theme by writing the
+  // palette straight onto `<html>` with `style.setProperty`, and only then sets
+  // the attribute. Watching the attribute alone works today because of that
+  // ordering, and would silently stop working if a preview ever set the vars
+  // without it.
+  observer.observe(target, {
+    attributes: true,
+    attributeFilter: ['data-theme', 'class', 'style'],
+  });
   return () => observer.disconnect();
 }
 
@@ -143,6 +157,31 @@ export function toRgb(colour: string): [number, number, number] {
 export function toHex(colour: string): number {
   const [r, g, b] = toRgb(colour);
   return (Math.round(r) << 16) | (Math.round(g) << 8) | Math.round(b);
+}
+
+/** A colour's alpha, 0-1. Opaque unless it says otherwise. */
+export function alphaOf(colour: string): number {
+  const match = colour.trim().match(
+    /^rgba?\(\s*[\d.]+[,\s]+[\d.]+[,\s]+[\d.]+[,\s/]+([\d.]+)\s*\)$/i,
+  );
+  return match ? Math.min(1, Math.max(0, Number(match[1]))) : 1;
+}
+
+/** Composite a possibly-translucent colour over its backing.
+ *
+ * **Several real tokens are translucent.** Hangarworks defines `--sc-field` as
+ * `rgba(255, 255, 255, 0.07)` on its dark themes: taken at face value that is
+ * white, and a contrast check then reports a dark input as near-white and
+ * passes text that is actually unreadable on it. What the eye sees is the
+ * composite over whatever sits behind.
+ */
+export function over(colour: string, backing: string): string {
+  const alpha = alphaOf(colour);
+  if (alpha >= 1) return colour;
+  const [fr, fg, fb] = toRgb(colour);
+  const [br, bg, bb] = toRgb(backing);
+  const blend = (f: number, b: number) => Math.round(f * alpha + b * (1 - alpha));
+  return `rgb(${blend(fr, br)}, ${blend(fg, bg)}, ${blend(fb, bb)})`;
 }
 
 /** Relative luminance, per WCAG 2.1. */
@@ -182,19 +221,30 @@ export interface ContrastCheck {
  * failures for combinations nothing ever draws.
  */
 export function checkContrast(tokens: Tokens): ContrastCheck[] {
-  const pairs: Array<[string, TokenName, TokenName, number]> = [
-    ['body text on the page', '--sc-text', '--sc-dark', AA_TEXT],
-    ['body text on a card', '--sc-text', '--sc-card', AA_TEXT],
-    ['body text on a field', '--sc-text', '--sc-field', AA_TEXT],
-    ['secondary text on a card', '--sc-subtle', '--sc-card', AA_TEXT],
-    ['secondary text on the page', '--sc-subtle', '--sc-dark', AA_TEXT],
-    ['accent heading on a card', '--sc-accent', '--sc-card', AA_LARGE],
-    ['accent button label', '--sc-accent-ink', '--sc-accent', AA_TEXT],
-    ['badge on a card', '--sc-badge', '--sc-card', AA_LARGE],
-    ['border against the page', '--sc-border', '--sc-dark', 1.2],
+  // `[label, foreground, background, behind the background, required]`.
+  //
+  // The fourth entry matters because a background token can itself be
+  // translucent: a field sits on a card, and `rgba(255,255,255,0.07)` over a
+  // dark card is a dark grey, not white.
+  const pairs: Array<[string, TokenName, TokenName, TokenName, number]> = [
+    ['body text on the page', '--sc-text', '--sc-dark', '--sc-dark', AA_TEXT],
+    ['body text on a card', '--sc-text', '--sc-card', '--sc-dark', AA_TEXT],
+    ['body text on a field', '--sc-text', '--sc-field', '--sc-card', AA_TEXT],
+    ['secondary text on a card', '--sc-subtle', '--sc-card', '--sc-dark', AA_TEXT],
+    ['secondary text on the page', '--sc-subtle', '--sc-dark', '--sc-dark', AA_TEXT],
+    // The accent as *type* is `--sc-accent-text`, never `--sc-accent`. Checking
+    // the fill colour as type reports failures the site has already solved.
+    ['accent heading on a card', '--sc-accent-text', '--sc-card', '--sc-dark', AA_LARGE],
+    ['accent heading on the page', '--sc-accent-text', '--sc-dark', '--sc-dark', AA_LARGE],
+    // And the fill is checked the other way round: the ink that sits on it.
+    ['accent button label', '--sc-accent-ink', '--sc-accent', '--sc-card', AA_TEXT],
+    ['badge on a card', '--sc-badge', '--sc-card', '--sc-dark', AA_LARGE],
+    ['border against the page', '--sc-border', '--sc-dark', '--sc-dark', 1.2],
   ];
-  return pairs.map(([label, fore, back, required]) => {
-    const ratio = contrast(tokens[fore], tokens[back]);
+  return pairs.map(([label, fore, back, behind, required]) => {
+    const background = over(tokens[back], tokens[behind]);
+    const foreground = over(tokens[fore], background);
+    const ratio = contrast(foreground, background);
     return { label, ratio, required, passes: ratio >= required };
   });
 }

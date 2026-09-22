@@ -25,7 +25,7 @@ def test_descriptors_become_a_valid_manifest(tmp_path: Path) -> None:
                     {
                         "id": "a",
                         "class_name": "set_helmet_slate",
-                        "name": "A",
+                        "name": "Aegis Vanguard Helmet (Slate)",
                         "slot": "helmet",
                         "weight_class": "light",
                         "manufacturer": {"code": "AEG", "name": "Aegis"},
@@ -39,7 +39,7 @@ def test_descriptors_become_a_valid_manifest(tmp_path: Path) -> None:
                     {
                         "id": "b",
                         "class_name": "set_helmet_sand",
-                        "name": "B",
+                        "name": "Aegis Vanguard Helmet (Sand)",
                         "slot": "helmet",
                         "weight_class": "light",
                         "manufacturer": {"code": "AEG", "name": "Aegis"},
@@ -53,7 +53,7 @@ def test_descriptors_become_a_valid_manifest(tmp_path: Path) -> None:
                     {
                         "id": "c",
                         "class_name": "set_backpack_slate",
-                        "name": "C",
+                        "name": "Aegis Vanguard Backpack (Slate)",
                         "slot": "backpack",
                         "weight_class": "light",
                         "manufacturer": {"code": "AEG", "name": "Aegis"},

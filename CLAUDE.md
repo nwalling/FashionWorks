@@ -13,6 +13,8 @@ Data.p4k -> catalog (JSON) -> geometry/textures -> Blender normalize -> .glb + m
 Fandom FAQ actually say, and the options. The go/no-go is still open.
 `WEB.md` holds the plan for a public web front end on sc-hangarworks.org.
 `WEB-INTEGRATION.md` is the contract the Hangarworks site builds against.
+`WEB-INTEGRATION-PLAN.md` is the ordered plan handed to the agent that builds
+that site: the same boundary, as steps rather than as a spec.
 
 `PLAN.md` is the design document. This file is the operational one: what is
 decided, what is verified, and what to run. When the two disagree, this file wins

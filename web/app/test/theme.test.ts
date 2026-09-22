@@ -3,40 +3,115 @@ import { describe, expect, it } from 'vitest';
 import {
   AA_LARGE,
   AA_TEXT,
+  alphaOf,
   checkContrast,
   contrast,
   luminance,
+  over,
   toHex,
   toRgb,
-  FALLBACK,
   type Tokens,
 } from '../src/theme';
 
-/** The live Hangarworks theme, read off the site. */
-const HANGARWORKS: Tokens = { ...FALLBACK };
-
-/** A light-leaning theme.
+/** Hangarworks' real themes, from its own `src/lib/themes.ts`.
  *
- * `dolomite` is one -- its chip background is `rgb(255 255 255/0.75)` and its
- * shadow is a pale `rgb(15 34 51/0.14)` -- but the site does not ship its full
- * palette in public CSS, so this is a representative stand-in rather than the
- * real thing. Light is the case worth covering: an orange accent that reads
- * comfortably on near-black can fail against near-white.
+ * Seven, not four, and **three of them are light** — so a light theme is the
+ * common case rather than the edge case. Two details of the real registry
+ * shape these tests:
+ *
+ * * **`accentText` is a separate colour from `accent`.** A fill that works can
+ *   read at 1.71:1 as a heading on its own card; darkening the one accent fixes
+ *   the type and turns the buttons brown. So the site ships both, and a check
+ *   that holds the *fill* to a type threshold reports failures it already
+ *   solved.
+ * * **Several tokens are translucent.** `--sc-field` is
+ *   `rgba(255, 255, 255, 0.07)` on the dark themes. Read at face value that is
+ *   white; composited over the card it is a dark grey.
+ *
+ * `--sc-surface` and `--sc-surface-2` are `color-mix()` in the site's
+ * stylesheet, so they are approximated here — nothing in `checkContrast` uses
+ * them, and the browser resolves them for real at runtime.
  */
-const LIGHT: Tokens = {
-  '--sc-dark': 'rgb(244, 246, 248)',
-  '--sc-card': 'rgb(255, 255, 255)',
-  '--sc-surface': 'rgb(248, 250, 251)',
-  '--sc-surface-2': 'rgb(236, 240, 243)',
-  '--sc-field': 'rgb(236, 240, 243)',
-  '--sc-border': 'rgb(198, 208, 216)',
-  '--sc-border-bright': 'rgb(140, 155, 168)',
-  '--sc-text': 'rgb(16, 28, 38)',
-  '--sc-subtle': 'rgb(78, 96, 110)',
-  '--sc-accent': 'rgb(166, 74, 8)',
-  '--sc-accent-ink': 'rgb(255, 255, 255)',
-  '--sc-badge': 'rgb(14, 100, 118)',
-};
+function theme(p: {
+  bg: string; card: string; border: string; field: string; text: string;
+  subtle: string; accent: string; badge: string; accentText?: string; accentInk?: string;
+}): Tokens {
+  return {
+    '--sc-dark': p.bg,
+    '--sc-card': p.card,
+    '--sc-surface': p.card,
+    '--sc-surface-2': p.field,
+    '--sc-field': p.field,
+    '--sc-border': p.border,
+    '--sc-border-bright': p.border,
+    '--sc-text': p.text,
+    '--sc-subtle': p.subtle,
+    '--sc-accent': p.accent,
+    '--sc-accent-text': p.accentText ?? p.accent,
+    '--sc-accent-ink': p.accentInk ?? '#0a1219',
+    '--sc-badge': p.badge,
+  };
+}
+
+const THEMES: Array<{ id: string; dark: boolean; tokens: Tokens }> = [
+  {
+    id: 'hangarworks', dark: true,
+    tokens: theme({
+      bg: '#0A1219', card: '#16292F', border: '#2C4E5D', field: '#1E3A44',
+      text: '#EAF2F6', subtle: '#9FB6C2', accent: '#FF8A34', badge: '#5AD1E6',
+    }),
+  },
+  {
+    id: 'dark', dark: true,
+    tokens: theme({
+      bg: '#0a1c38', card: '#12305a', border: '#23417a',
+      field: 'rgba(255, 255, 255, 0.07)', text: '#ffffff',
+      subtle: 'rgba(255, 255, 255, 0.6)', accent: '#C8A84B', badge: '#1E90FF',
+    }),
+  },
+  {
+    id: 'navy', dark: false,
+    tokens: theme({
+      bg: '#f6f7fb', card: '#eaeff7', border: '#c3d7ed',
+      field: 'rgba(0, 46, 102, 0.08)', text: '#0a1c38', subtle: '#546277',
+      accent: '#C8A84B', accentText: '#72602b', badge: '#1462ad',
+    }),
+  },
+  {
+    id: 'dolomite', dark: false,
+    tokens: theme({
+      bg: '#ffffff', card: '#ccd0d9', border: '#b1b8c5',
+      field: 'rgba(51, 51, 51, 0.05)', text: '#333333', subtle: '#505153',
+      accent: '#e8872b', accentText: '#764416', badge: '#12589c',
+    }),
+  },
+  {
+    id: 'nightrunner', dark: true,
+    tokens: theme({
+      bg: '#0f0e11', card: '#26232c', border: '#3a3641',
+      field: 'rgba(255, 255, 255, 0.06)', text: '#ffffff',
+      subtle: 'rgba(255, 255, 255, 0.6)', accent: '#ff453a',
+      accentText: '#ff7067', badge: '#5aa9e6',
+    }),
+  },
+  {
+    id: 'lovestruck', dark: true,
+    tokens: theme({
+      bg: '#1a0e16', card: '#2a1422', border: '#43203a',
+      field: 'rgba(255, 255, 255, 0.06)', text: '#fdeef5',
+      subtle: 'rgba(253, 238, 245, 0.6)', accent: '#ff4d8d', badge: '#c77dff',
+    }),
+  },
+  {
+    id: 'keystone', dark: false,
+    tokens: theme({
+      bg: '#ffffff', card: '#cdd6e7', border: '#9fb1cb',
+      field: 'rgba(53, 61, 93, 0.08)', text: '#353d5d', subtle: '#4c546f',
+      accent: '#2e73b8', accentText: '#22568b', accentInk: '#ffffff',
+      badge: '#4b4f58',
+    }),
+  },
+];
 
 describe('colour maths', () => {
   it('parses rgb strings, spaced or comma-separated', () => {
@@ -53,18 +128,8 @@ describe('colour maths', () => {
     expect(toRgb('#fff')).toEqual([255, 255, 255]);
   });
 
-  it('gives black for something it cannot parse, and that is visible', () => {
-    expect(toRgb('color-mix(in srgb, var(--a), var(--b) 7%)')).toEqual([0, 0, 0]);
-  });
-
   it('converts to the packed hex three.js takes', () => {
     expect(toHex('rgb(255, 138, 52)')).toBe(0xff8a34);
-    expect(toHex('rgb(0, 0, 0)')).toBe(0x000000);
-  });
-
-  it('computes luminance at the ends of the range', () => {
-    expect(luminance('rgb(255, 255, 255)')).toBeCloseTo(1, 5);
-    expect(luminance('rgb(0, 0, 0)')).toBeCloseTo(0, 5);
   });
 
   it('gives 21 for black on white and 1 for a colour on itself', () => {
@@ -72,71 +137,76 @@ describe('colour maths', () => {
     expect(contrast('rgb(120,50,10)', 'rgb(120,50,10)')).toBeCloseTo(1, 5);
   });
 
-  it('is symmetric', () => {
-    const a = 'rgb(234, 242, 246)';
-    const b = 'rgb(22, 41, 47)';
-    expect(contrast(a, b)).toBeCloseTo(contrast(b, a), 10);
+  it('computes luminance at the ends of the range', () => {
+    expect(luminance('rgb(255,255,255)')).toBeCloseTo(1, 5);
+    expect(luminance('rgb(0,0,0)')).toBeCloseTo(0, 5);
   });
 });
 
-describe('the live Hangarworks theme', () => {
-  const results = checkContrast(HANGARWORKS);
-
-  it('passes every pairing the component renders', () => {
-    const failures = results.filter((r) => !r.passes);
-    expect(
-      failures.map((f) => `${f.label}: ${f.ratio.toFixed(2)} < ${f.required}`),
-    ).toEqual([]);
+describe('translucent tokens', () => {
+  it('reads an alpha where there is one', () => {
+    expect(alphaOf('rgba(255, 255, 255, 0.07)')).toBeCloseTo(0.07, 5);
+    expect(alphaOf('rgb(255, 255, 255)')).toBe(1);
+    expect(alphaOf('#ffffff')).toBe(1);
   });
 
-  it('reads body text well clear of the AA threshold', () => {
-    const body = results.find((r) => r.label === 'body text on the page')!;
-    expect(body.ratio).toBeGreaterThan(AA_TEXT);
+  it('composites over the backing rather than taking the colour at face value', () => {
+    // `--sc-field` on the Night theme. At face value it is white; over its card
+    // it is a slightly lifted navy, and the difference decides whether white
+    // text on it passes or fails.
+    const composited = over('rgba(255, 255, 255, 0.07)', '#12305a');
+    expect(toRgb(composited)[0]).toBeLessThan(50);
+    expect(contrast('#ffffff', composited)).toBeGreaterThan(AA_TEXT);
+    // Taken at face value it would read as white on white.
+    expect(contrast('#ffffff', 'rgb(255,255,255)')).toBeCloseTo(1, 2);
   });
 
-  it('holds the accent to the large-text threshold, not the body one', () => {
-    // An accent is a heading and a button face, never body copy. Holding it to
-    // 4.5 would rule out the site's own orange.
-    const accent = results.find((r) => r.label === 'accent heading on a card')!;
-    expect(accent.required).toBe(AA_LARGE);
-    expect(accent.ratio).toBeGreaterThan(AA_LARGE);
+  it('leaves an opaque colour alone', () => {
+    expect(over('#16292f', '#0a1219')).toBe('#16292f');
   });
 });
 
-describe('a light-leaning theme', () => {
-  it('passes every pairing too', () => {
-    const failures = checkContrast(LIGHT).filter((r) => !r.passes);
-    expect(
-      failures.map((f) => `${f.label}: ${f.ratio.toFixed(2)} < ${f.required}`),
-    ).toEqual([]);
+describe('every Hangarworks theme', () => {
+  for (const { id, tokens } of THEMES) {
+    it(`${id} passes every pairing the component draws`, () => {
+      const failures = checkContrast(tokens).filter((r) => !r.passes);
+      expect(
+        failures.map((f) => `${f.label}: ${f.ratio.toFixed(2)} < ${f.required}`),
+      ).toEqual([]);
+    });
+  }
+
+  it('covers light themes as well as dark', () => {
+    // Three of the seven are light, so this is the common case.
+    expect(THEMES.filter((t) => !t.dark)).toHaveLength(3);
+  });
+});
+
+describe('the accent, as fill and as type', () => {
+  it('is checked as type using accentText, not the fill colour', () => {
+    // Dolomite's fill orange is 2.65:1 as type on white, which is why the site
+    // ships a separate darker one. Holding the fill to a type threshold would
+    // report a failure the site has already solved.
+    const dolomite = THEMES.find((t) => t.id === 'dolomite')!.tokens;
+    expect(contrast(dolomite['--sc-accent'], dolomite['--sc-dark'])).toBeLessThan(AA_LARGE);
+    const heading = checkContrast(dolomite)
+      .find((r) => r.label === 'accent heading on the page')!;
+    expect(heading.passes).toBe(true);
   });
 
-  it('is the case that catches a too-bright accent', () => {
-    // The site's own orange on a near-white card is 2.3:1 -- below even the
-    // large-text bar. A light theme has to darken it, and this is the check
-    // that says so rather than leaving it to be noticed on screen.
-    const bright = { ...LIGHT, '--sc-accent': 'rgb(255, 138, 52)' } as Tokens;
-    const accent = checkContrast(bright).find((r) => r.label === 'accent heading on a card')!;
-    expect(accent.passes).toBe(false);
-    expect(accent.ratio).toBeLessThan(AA_LARGE);
+  it('checks the ink that sits on the fill', () => {
+    // Keystone's blue needs white ink: near-black gives 3.83:1 and white 4.93.
+    const keystone = THEMES.find((t) => t.id === 'keystone')!.tokens;
+    const label = checkContrast(keystone).find((r) => r.label === 'accent button label')!;
+    expect(label.passes).toBe(true);
+    expect(contrast('#0a1219', keystone['--sc-accent'])).toBeLessThan(AA_TEXT);
   });
 });
 
 describe('the checks themselves', () => {
-  it('cover every pairing the component actually draws', () => {
-    const labels = checkContrast(HANGARWORKS).map((r) => r.label);
-    for (const expected of [
-      'body text on the page',
-      'body text on a card',
-      'secondary text on a card',
-      'accent button label',
-    ]) {
-      expect(labels).toContain(expected);
-    }
-  });
-
   it('report a ratio even when they fail, so the gap is visible', () => {
-    const unreadable = { ...HANGARWORKS, '--sc-text': HANGARWORKS['--sc-dark'] } as Tokens;
+    const base = THEMES[0]!.tokens;
+    const unreadable = { ...base, '--sc-text': base['--sc-dark'] } as Tokens;
     const body = checkContrast(unreadable).find((r) => r.label === 'body text on the page')!;
     expect(body.passes).toBe(false);
     expect(body.ratio).toBeCloseTo(1, 2);

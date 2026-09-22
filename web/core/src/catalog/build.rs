@@ -241,9 +241,42 @@ pub fn build_item(
 /// loose: a set can contain several genuinely different backpacks, and merging
 /// them hid real items behind one entry.
 pub fn link_variants(items: &mut [Value]) {
-    let mut groups: HashMap<(String, Vec<String>), Vec<usize>> = HashMap::new();
+    // Keyed on slot, **product line** and mesh. The mesh alone is too loose:
+    // product lines reuse each other's meshes -- `Defiance Legs Sunchaser` and
+    // `ADP-mk4 Legs Woodland` are both `m_cds_heavy_armor_01_legs.skin`, which
+    // is genuine reuse -- so geometry alone merged them into one family of
+    // eleven across two lines, and every Defiance colourway disappeared under
+    // an ADP-mk4 name.
+    //
+    // The product name, not the `set`: `set` separates `citadel` from
+    // `citadel-se` and splits Aves across four keys, over-splitting lines that
+    // are one product with several editions. Across the catalogue this takes
+    // families spanning more than one product from 71 to 0.
+    //
+    // An unnamed item's `name` **is** its class name -- `build_item` writes
+    // `name.unwrap_or(&class_name)` and `flags_for` records the `unnamed` flag
+    // at the same time -- so the fallback keys on the flag, exactly as
+    // `sets::set_key` already does. Testing the name for emptiness finds
+    // nothing to fall back on, and `product_key` of a class name is the whole
+    // class name, colour index and all, which gives every unnamed colourway a
+    // key of its own. The stripped class name drops the index.
+    //
+    // Measured on the 2615-item catalogue: families sharing no name prefix --
+    // exactly the case that titles a row after an unrelated member -- go from
+    // 53 to 19, and all 19 that remain are unnamed items whose "name" is a
+    // class name and so share no words by construction.
+    let mut groups: HashMap<(String, String, Vec<String>), Vec<usize>> = HashMap::new();
     for (index, item) in items.iter().enumerate() {
         let slot = item["slot"].as_str().unwrap_or("").to_string();
+        let class_name = item["class_name"].as_str().unwrap_or("");
+        let unnamed = item["flags"]
+            .as_array()
+            .is_some_and(|f| f.iter().any(|v| v.as_str() == Some("unnamed")));
+        let product = match item["name"].as_str().filter(|_| !unnamed) {
+            Some(display) => sets::product_key(display),
+            None => String::new(),
+        };
+        let product = if product.is_empty() { sets::canonical_key(class_name) } else { product };
         let sources: Vec<String> = item["geometry"]
             .as_array()
             .map(|a| a.iter().filter_map(|g| g["source"].as_str()).map(str::to_string).collect())
@@ -251,14 +284,11 @@ pub fn link_variants(items: &mut [Value]) {
         let key = if sources.is_empty() {
             // Items with no geometry fall back to a stripped class name, so
             // placeholder records collapse instead of flooding the list.
-            vec![
-                "name".to_string(),
-                sets::canonical_key(item["class_name"].as_str().unwrap_or("")),
-            ]
+            vec!["name".to_string(), sets::canonical_key(class_name)]
         } else {
             sets::geometry_key(&sources)
         };
-        groups.entry((slot, key)).or_default().push(index);
+        groups.entry((slot, product, key)).or_default().push(index);
     }
 
     for item in items.iter_mut() {
@@ -391,5 +421,47 @@ mod tests {
         assert_eq!(items[0]["variant_of"], "b");
         assert_eq!(items[2]["variant_of"], Value::Null);
         assert_eq!(items[2]["variants"], json!([]));
+    }
+
+    #[test]
+    fn two_product_lines_sharing_a_mesh_stay_two_families() {
+        // The real case: `Defiance Legs Sunchaser` and `ADP-mk4 Legs Woodland`
+        // are both `m_cds_heavy_armor_01_legs.skin`. That reuse is genuine, so
+        // the mesh alone put all of them in one family under an ADP-mk4 name
+        // and the Defiance colourways vanished from the listing.
+        let mesh = json!([{ "source": "m_cds_heavy_armor_01_legs.skin" }]);
+        let mut items = vec![
+            json!({ "id": "d1", "class_name": "cds_heavy_legs_01_01_01", "slot": "legs",
+                    "name": "Defiance Legs Sunchaser", "tags": ["Color_01"], "geometry": mesh }),
+            json!({ "id": "d2", "class_name": "cds_heavy_legs_01_01_02", "slot": "legs",
+                    "name": "Defiance Legs Tactical", "tags": ["Color_02"], "geometry": mesh }),
+            json!({ "id": "a1", "class_name": "adp_mk4_legs_01_01_01", "slot": "legs",
+                    "name": "ADP-mk4 Legs Woodland", "tags": ["Color_01"], "geometry": mesh }),
+        ];
+        link_variants(&mut items);
+        assert_eq!(items[0]["variants"], json!(["d2"]));
+        assert_eq!(items[1]["variant_of"], "d1");
+        // The ADP-mk4 piece keeps its own identity rather than swallowing them.
+        assert_eq!(items[2]["variant_of"], Value::Null);
+        assert_eq!(items[2]["variants"], json!([]));
+    }
+
+    #[test]
+    fn an_unnamed_item_keys_on_its_stripped_class_name() {
+        // An unnamed item's `name` is its class name, so `product_key` of it is
+        // the class name, colour index and all -- one key per colourway, and
+        // the family splits into singletons. The flag is what says so.
+        let mesh = json!([{ "source": "m_vgl.skin" }]);
+        let mut items = vec![
+            json!({ "id": "u1", "class_name": "vgl_flightsuit_helmet_01_03_01", "slot": "helmet",
+                    "name": "vgl_flightsuit_helmet_01_03_01", "flags": ["unnamed"],
+                    "tags": ["Color_01"], "geometry": mesh }),
+            json!({ "id": "u2", "class_name": "vgl_flightsuit_helmet_01_04_01", "slot": "helmet",
+                    "name": "vgl_flightsuit_helmet_01_04_01", "flags": ["unnamed"],
+                    "tags": ["Color_02"], "geometry": mesh }),
+        ];
+        link_variants(&mut items);
+        assert_eq!(items[0]["variants"], json!(["u2"]));
+        assert_eq!(items[1]["variant_of"], "u1");
     }
 }

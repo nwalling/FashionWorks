@@ -169,7 +169,44 @@ custom properties at runtime, including inside the 3D view (canvas background,
 grid, selection outline, shadow tint), and re-reads them when `data-theme`
 changes on `<html>`. Switching theme restyles it live, with no reload.
 
-Tokens consumed (all already defined on the live site):
+### 4.1 The theme is the account's, and FashionWorks never asks
+
+**There is no theme prop and no theme picker in this component, by design.**
+`FashionWorksProps` has no `theme` field and never will. The visitor's theme is
+whatever `ThemeProvider` has already put on `<html>`, which on a signed-in
+session is the theme saved against their account together with the premium
+themes they own — `syncFromProfile(themeId, ownedIds)` applies both in one
+update. FashionWorks reads the resulting tokens and follows.
+
+This matters beyond tidiness, because **the premium tier is an entitlement**.
+A picker inside FashionWorks would be a second path to applying a theme, one
+that does not know what the account owns, and `canUse` would not be guarding
+it. Reading tokens off `<html>` means there is exactly one place a theme
+becomes visible, `ThemeProvider`'s pre-paint layout effect, and one place the
+entitlement is enforced. A visitor who does not own Lovestruck cannot reach it
+through FashionWorks, because FashionWorks has no way to apply a theme at all.
+
+Two consequences for the Hangarworks side:
+
+* **The preview path works for free.** `previewTheme` sets `appliedId` without
+  persisting, and the palette and `data-theme` both change, so a theme being
+  previewed in the settings drawer restyles the 3D view live along with
+  everything else.
+* **Tokens arrive as inline style on `<html>`**, written with
+  `root.style.setProperty`, not as a stylesheet keyed off `data-theme`. The
+  component's `watchTheme` observes `data-theme`, `class` *and* `style` for
+  that reason. If the provider ever moves to a stylesheet, or applies the
+  palette to `<body>` rather than `<html>`, tell us — it is a one-line change
+  here and a silently unthemed viewport if it goes unmentioned.
+
+The `try.html` development page does have theme buttons. They are a stand-in
+for an account that page does not have, and they render the two premium themes
+as locked rather than hiding them, because that is what a signed-out visitor
+sees. Nothing in `src/` has an equivalent.
+
+### 4.2 Tokens consumed
+
+All already defined on the live site:
 
 | token | used for |
 | --- | --- |
@@ -199,8 +236,22 @@ Tokens consumed (all already defined on the live site):
 3. Tabler Icons is assumed available (the site already loads it). The component
    ships no icon font of its own.
 
-It is tested against `hangarworks`, `dolomite`, `keystone` and `navy`, at
-WCAG AA contrast, with keyboard navigation and `prefers-reduced-motion`.
+It is tested against **all seven** registered themes — `hangarworks`, `dark`,
+`navy`, `dolomite`, `nightrunner`, `lovestruck` and `keystone` — at WCAG AA
+contrast, with keyboard navigation and `prefers-reduced-motion`. Three of the
+seven are light, so a light theme is the common case here rather than the edge
+case, and two details of the real registry shape the checks:
+
+* **`--sc-accent-text` is a separate colour from `--sc-accent`.** Dolomite's
+  fill orange reads 2.65:1 as type on its page, which is why the site ships
+  both. Holding the *fill* to a type threshold reports a failure the site has
+  already solved; darkening the one accent to fix the type turns the buttons
+  brown. The checks use `--sc-accent-text` for type and `--sc-accent-ink` on
+  `--sc-accent` for fills.
+* **Several tokens are translucent.** `--sc-field` is
+  `rgba(255, 255, 255, 0.07)` on the dark themes. Taken at face value that is
+  white, and white text on it "fails" at 1.0:1; composited over the card it is
+  a lifted navy and passes. The checks composite first.
 
 ---
 
@@ -290,12 +341,26 @@ Built and verified in this repo:
   internally. Additive and MIT; it should go upstream rather than live as a
   fork. `tools/build.sh` must apply it after `clone_or_update`.
 
-Not built yet: DataCore/catalogue port, geometry, the GPU material shader,
-onboarding UI, and the `@fashionworks/web` package itself. `WEB.md` has the
-phase plan and exit criteria. **The API in §3 is a contract to code against,
-not a description of shipped code.**
+- `web/app/` — the `@fashionworks/web` package: the `<FashionWorks />`
+  component, ES and CJS with types, `react`/`react-dom` as its only peers.
+  **107 KB brotli** against the 400 KB budget, plus a 2 KB stylesheet. Contains
+  the catalogue reader, the canonical armature and rebinding, the LayerBlend
+  compositor, pose retargeting, onboarding, capability checks and the OPFS
+  cache.
+- `web/app/try.html` — a development page that exercises the whole thing
+  against a real archive: 2,439 wearable pieces across six slots, colourways as
+  swatches, equip-a-whole-set, poses, worn-versus-factory surfaces and a
+  visitor-supplied backdrop.
 
-Nothing in §2's snippets will run until the package is published.
+**What this means for §3:** the API is implemented, not merely specified.
+Phases 0 through 5 of `WEB.md` are closed with measured exit criteria. The
+remaining work is Phase 6 — the female skeleton, and launch hardening — and the
+Windows/Firefox half of the Phase 0 spike, which is the one open technical
+risk and is listed as such in §8.
+
+The package is not published to a registry yet, so §2's snippets need a local
+install (`npm i file:../FashionWorks/web/app`) until it is. That is a release
+step, not a build one.
 
 ---
 
@@ -304,8 +369,12 @@ Nothing in §2's snippets will run until the package is published.
 1. **Route and name.** `/fashionworks`, `/tools/fashionworks`, or something
    else? Is it called FashionWorks on the site?
 2. **Placement.** Main nav, or linked from Features only?
-3. **Paid themes.** The component follows `data-theme` automatically, so owners
-   of paid themes get them here too. Intended?
+3. ~~**Paid themes.** The component follows `data-theme` automatically, so
+   owners of paid themes get them here too. Intended?~~ **Answered: yes, and
+   it is the design.** The theme is the account's, resolved by `ThemeProvider`
+   on sign-in; FashionWorks has no theme prop and no picker, so an account that
+   owns Lovestruck sees Lovestruck here and one that does not cannot reach it
+   through this page at all. §4.1 has the reasoning.
 4. **Distribution.** Public npm, GitHub Packages, or a git dependency?
 5. **Later:** save loadouts to a Hangarworks account? That is a few kilobytes of
    JSON per loadout and the only thing that would ever need server storage.

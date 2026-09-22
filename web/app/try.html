@@ -5,37 +5,64 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FashionWorks — try it</title>
 <style>
-  :root, [data-theme="hangarworks"] {
-    --sc-dark:#0a1219; --sc-card:#16292f;
-    --sc-surface: color-mix(in srgb, var(--sc-card), var(--sc-text) 7%);
-    --sc-surface-2:#1e3a44; --sc-field:#1e3a44; --sc-border:#2c4e5d;
-    --sc-border-bright: color-mix(in srgb, var(--sc-border), var(--sc-text) 42%);
-    --sc-text:#eaf2f6; --sc-subtle:#9fb6c2;
-    --sc-accent:#ff8a34; --sc-accent-ink:#0a1219; --sc-badge:#5ad1e6;
+  /* Hangarworks' real palettes, from its own src/lib/themes.ts. The live site
+     writes these onto <html> with style.setProperty when the account's theme
+     resolves; here they are per-theme rules with the same token names, which
+     the component cannot tell apart.
+
+     **Scoped to `html`, and it has to be.** A bare `[data-theme="dolomite"]`
+     matches *any* element carrying that attribute, and the theme chips in the
+     header carry exactly that -- so each chip inherited the whole palette of
+     the theme it names and painted itself in that theme's text colour on the
+     current page's background. The three light themes came out at about 1.3:1,
+     which reads as a disabled button rather than a bug. The live site never
+     hits this, because ThemeProvider writes to document.documentElement and
+     nothing else. */
+  :root, html[data-theme="hangarworks"] {
+    --sc-dark:#0A1219; --sc-card:#16292F; --sc-border:#2C4E5D; --sc-field:#1E3A44;
+    --sc-text:#EAF2F6; --sc-subtle:#9FB6C2; --sc-accent:#FF8A34; --sc-badge:#5AD1E6;
+    --sc-accent-text:#FF8A34; --sc-accent-ink:#0a1219;
   }
-  [data-theme="dolomite"] {
-    --sc-dark:#f4f6f8; --sc-card:#ffffff;
-    --sc-surface: color-mix(in srgb, var(--sc-card), var(--sc-text) 7%);
-    --sc-surface-2:#ecf0f3; --sc-field:#ecf0f3; --sc-border:#c6d0d8;
-    --sc-border-bright: color-mix(in srgb, var(--sc-border), var(--sc-text) 42%);
-    --sc-text:#101c26; --sc-subtle:#4e606e;
-    --sc-accent:#a64a08; --sc-accent-ink:#ffffff; --sc-badge:#0e6476;
+  html[data-theme="dark"] {
+    --sc-dark:#0a1c38; --sc-card:#12305a; --sc-border:#23417a;
+    --sc-field:rgba(255,255,255,.07); --sc-text:#ffffff;
+    --sc-subtle:rgba(255,255,255,.6); --sc-accent:#C8A84B; --sc-badge:#1E90FF;
+    --sc-accent-text:#C8A84B; --sc-accent-ink:#0a1219;
   }
-  [data-theme="keystone"] {
-    --sc-dark:#17130f; --sc-card:#241d17;
-    --sc-surface: color-mix(in srgb, var(--sc-card), var(--sc-text) 7%);
-    --sc-surface-2:#33291f; --sc-field:#33291f; --sc-border:#5a4938;
-    --sc-border-bright: color-mix(in srgb, var(--sc-border), var(--sc-text) 42%);
-    --sc-text:#f5ece1; --sc-subtle:#c2ae97;
-    --sc-accent:#e0a145; --sc-accent-ink:#17130f; --sc-badge:#7fc8a9;
+  html[data-theme="navy"] {
+    --sc-dark:#f6f7fb; --sc-card:#eaeff7; --sc-border:#c3d7ed;
+    --sc-field:rgba(0,46,102,.08); --sc-text:#0a1c38; --sc-subtle:#546277;
+    --sc-accent:#C8A84B; --sc-accent-text:#72602b; --sc-badge:#1462ad;
+    --sc-accent-ink:#0a1219;
   }
-  [data-theme="navy"] {
-    --sc-dark:#070d1c; --sc-card:#101a33;
+  html[data-theme="dolomite"] {
+    --sc-dark:#ffffff; --sc-card:#ccd0d9; --sc-border:#b1b8c5;
+    --sc-field:rgba(51,51,51,.05); --sc-text:#333333; --sc-subtle:#505153;
+    --sc-accent:#e8872b; --sc-accent-text:#764416; --sc-badge:#12589c;
+    --sc-accent-ink:#0a1219;
+  }
+  html[data-theme="nightrunner"] {
+    --sc-dark:#0f0e11; --sc-card:#26232c; --sc-border:#3a3641;
+    --sc-field:rgba(255,255,255,.06); --sc-text:#ffffff;
+    --sc-subtle:rgba(255,255,255,.6); --sc-accent:#ff453a;
+    --sc-accent-text:#ff7067; --sc-badge:#5aa9e6; --sc-accent-ink:#0a1219;
+  }
+  html[data-theme="lovestruck"] {
+    --sc-dark:#1a0e16; --sc-card:#2a1422; --sc-border:#43203a;
+    --sc-field:rgba(255,255,255,.06); --sc-text:#fdeef5;
+    --sc-subtle:rgba(253,238,245,.6); --sc-accent:#ff4d8d;
+    --sc-accent-text:#ff4d8d; --sc-badge:#c77dff; --sc-accent-ink:#0a1219;
+  }
+  html[data-theme="keystone"] {
+    --sc-dark:#ffffff; --sc-card:#cdd6e7; --sc-border:#9fb1cb;
+    --sc-field:rgba(53,61,93,.08); --sc-text:#353d5d; --sc-subtle:#4c546f;
+    --sc-accent:#2e73b8; --sc-accent-text:#22568b; --sc-badge:#4b4f58;
+    --sc-accent-ink:#ffffff;
+  }
+  :root, [data-theme] {
     --sc-surface: color-mix(in srgb, var(--sc-card), var(--sc-text) 7%);
-    --sc-surface-2:#172547; --sc-field:#172547; --sc-border:#2a3d66;
+    --sc-surface-2: color-mix(in srgb, var(--sc-card), var(--sc-text) 14%);
     --sc-border-bright: color-mix(in srgb, var(--sc-border), var(--sc-text) 42%);
-    --sc-text:#e6ecfa; --sc-subtle:#97a6c8;
-    --sc-accent:#6f8dff; --sc-accent-ink:#070d1c; --sc-badge:#57d2c0;
   }
   * { box-sizing: border-box; }
   body { margin:0; background:var(--sc-dark); color:var(--sc-text);
@@ -77,7 +104,12 @@
   .way[aria-pressed="true"] { outline:2px solid var(--sc-accent); outline-offset:1px; }
   #stage { flex:1; position:relative; min-width:0; }
   #view { position:absolute; inset:0; }
-  #view canvas { display:block; width:100%; height:100%; }
+  #view canvas { display:block; width:100%; height:100%; position:relative; z-index:1; }
+  /* A backdrop is a photograph behind the character, cropped to cover rather
+     than stretched. Lighting still comes from the scene: a screenshot is a
+     perspective image, not an equirectangular map, so using it to light the
+     scene would be wrong. */
+  #view.has-backdrop { background-size:cover; background-position:center; }
   #status { position:absolute; left:14px; bottom:12px; font:12px/1.5 ui-monospace,monospace;
             color:var(--sc-subtle); background:color-mix(in srgb, var(--sc-dark), transparent 20%);
             padding:7px 11px; border-radius:8px; pointer-events:none; white-space:pre-wrap;
@@ -89,10 +121,11 @@
 <body>
 <header>
   <strong>FashionWorks</strong>
-  <div class="group" id="themes"><span>theme</span></div>
+  <div class="group" id="themes"><span title="In the product this comes from the signed-in account, not a picker">account theme</span></div>
   <div class="group" id="poses"><span>pose</span></div>
   <div class="group" id="opts"><span>surface</span></div>
   <div class="group" id="acts"></div>
+  <div class="group" id="backdrop"><span>backdrop</span></div>
 </header>
 <main>
   <aside id="panel">
