@@ -12,61 +12,56 @@ done more carefully than the plan asked for. What follows is only what remains.
 
 ---
 
-## 1. The blocker: the package cannot read an archive
+## 1. ~~The blocker~~ — fixed in 0.2.0
 
-**This is ours, not theirs, and everything else waits behind it.**
+`@fashionworks/web@0.1.0` shipped **no WebAssembly and no worker**. The worker
+was reachable from `index.ts` only through type-only imports, which the bundler
+erases, so a dropped `Data.p4k` validated, moved to `indexing`, and stayed
+there forever: a spinner with nothing behind it.
 
-`@fashionworks/web@0.1.0` — the tarball vendored at
-`vendor/fashionworks-web-0.1.0.tgz` — ships no WebAssembly and no worker. Not a
-broken one: none.
+**0.2.0 carries the pipeline.** Measured from the built package against the
+real 147.59 GB archive:
 
-Verified against the vendored tarball and the source it was built from:
-
-| check | result |
+| | |
 | --- | --- |
-| `.wasm` anywhere in the package | **none** |
-| `new Worker(` anywhere in `web/app/src/` | **none** |
-| `archive.worker` / `fashionworks_core` in `dist/fashionworks.js` | **0 references** |
-| how `archive.worker.ts` is reached from `index.ts` | **type-only imports**, which Vite erases |
-| `files` in `package.json` | `["dist", "README.md"]` — `dist` is JS, CSS and `.d.ts` |
+| entries indexed | 1,365,842 |
+| catalogue | 2,475 items, 2,439 wearable |
+| app JavaScript | 122 KB brotli (budget 400) |
+| core, separate asset | 203 KB brotli (budget 2048) |
 
-The worker loads the core from `'../../../core/pkg/fashionworks_core.js'`, a
-path **outside the package root** that is gitignored and was never in `files`.
+Three things had to be true at once, and each failed differently before it was:
 
-**What a visitor gets.** `FashionWorks.tsx:100` reads:
+* **The worker is inlined** (`?worker&inline`), so no consumer bundler has to
+  resolve a worker URL out of `node_modules`.
+* **The wasm-bindgen glue is a static import.** As a dynamic one, Rollup split
+  it into its own chunk and the blob worker tried to
+  `import('./fashionworks_core-<hash>.js')` against a blob URL, which is
+  nothing.
+* **Every URL crossing into the worker is absolute.** This is the one that
+  would have shipped: webpack rewrites the core's asset reference to a
+  *root-relative* path, and a blob URL has an opaque path, so `fetch` rejects
+  with "Failed to parse URL" before a byte is requested. Under Vite the URL is
+  already absolute, so no amount of local verification would have shown it —
+  it took a real Next production build.
 
-```ts
-// Indexing is the worker's job; this is the seam it plugs into.
-emit({ type: 'validated', fingerprint: '' });
-```
+**Verified in a Next 15 production build**, not only under Vite: webpack emits
+the core to `static/media/fashionworks_core_bg.<hash>.wasm`, and a blob module
+worker fetches and compiles it (657,794 bytes, 31 exports).
 
-That moves the state machine to `indexing`. Nothing ever emits `indexed`, so
-`ready` is unreachable — and `Viewer` only mounts at `stage === 'ready'`. So
-someone who drags their `Data.p4k` onto the page reaches a progress screen that
-**never completes**, and `onReady` never fires. It is a dead end with a spinner,
-which is worse than a clean error.
+`npm run build` is now gated on `scripts/check-package.mjs` — twelve assertions
+about the built artefact, including both budgets and the absolutisation above.
 
-Everything that genuinely works — 2,439 wearable pieces, colourway swatches,
-equip-a-set, poses, backdrops — lives in `web/app/try.tsx`, a **development
-page**, and none of it is in the packaged component.
-
-**The README over-promises twice**, and should be corrected in the same pass: it
-says the component lets a visitor browse armour from their own `Data.p4k`, and
-it says "`react` and `react-dom` are peer dependencies; nothing else is" when
-`three` is a real runtime dependency.
-
-**The work:** move what `try.tsx` does into the component — construct the
-worker, ship the wasm as a bundled asset, wire `indexed` and `catalogue` back
-into the state machine — then cut a new tarball. Until that lands, `/fashionworks`
-cannot do anything a visitor came for, on any platform.
+**For Hangarworks:** vendor the new tarball and the route works unchanged. No
+code change on your side; §2.3's layout advice was the only thing that was
+wrong, and you had already worked around it.
 
 ---
 
 ## 2. Then: Windows and Firefox, on a default install
 
 The old step 5, still open, and still the one nobody has run. It was described
-as the top blocker; it is now the second, because it cannot be tested through a
-package that never finishes indexing.
+as the top blocker; with the package fixed it is now the first, and the only
+thing between this and going public.
 
 Everything to date was verified on macOS against a 147.59 GB archive on an
 external volume. What every actual visitor will have is Windows, a default
@@ -105,9 +100,10 @@ and off the sitemap, and the page comment says exactly what it waits on.
   fallback, so nothing is needed on the Hangarworks side. Listed because the
   contract's token table did not previously mention it.
 - **The launcher's comment says the package is "~600 KB".** That is the raw
-  size; over the wire it is **110 KB brotli** (plus 644 bytes of CSS). The click
-  gate is still right, but the number understates how well the budget is being
-  met.
+  size; over the wire 0.2.0 is **122 KB brotli** (plus 644 bytes of CSS), with
+  the 203 KB core fetched separately and only once the visitor drops an
+  archive. The click gate is still right, but the number understates how well
+  the budget is being met.
 
 ---
 
@@ -115,7 +111,9 @@ and off the sitemap, and the page comment says exactly what it waits on.
 
 Unchanged, except that the first one is new and dominates:
 
-- [ ] The package can actually open an archive, and a new tarball is vendored.
+- [x] The package can actually open an archive — 0.2.0, measured against the
+      real archive and inside a Next production build.
+- [ ] The 0.2.0 tarball is vendored into the Hangarworks repo.
 - [ ] Windows passes in Chrome and Firefox from a default install, or its
       failures are understood and the copy reflects them.
 - [ ] `robots: noindex` dropped, route added to `src/app/sitemap.ts`, linked

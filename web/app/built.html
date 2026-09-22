@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en" data-theme="hangarworks">
+<head>
+<meta charset="utf-8">
+<title>FashionWorks — the built package</title>
+<style>
+  :root, html[data-theme="hangarworks"] {
+    --sc-dark:#0A1219; --sc-card:#16292F; --sc-border:#2C4E5D; --sc-field:#1E3A44;
+    --sc-text:#EAF2F6; --sc-subtle:#9FB6C2; --sc-accent:#FF8A34; --sc-badge:#5AD1E6;
+    --sc-accent-text:#FF8A34; --sc-accent-ink:#0a1219;
+  }
+  body { margin:0; background:var(--sc-dark); color:var(--sc-text);
+         font:14px/1.5 ui-sans-serif, system-ui, sans-serif; padding:20px; }
+  h1 { font-size:16px; margin:0 0 4px; }
+  p { color:var(--sc-subtle); margin:0 0 14px; }
+  pre { background:var(--sc-card); border:1px solid var(--sc-border);
+        border-radius:8px; padding:12px; white-space:pre-wrap; margin:0; }
+  .ok { color:#7fd18a; } .bad { color:#ff7b72; }
+</style>
+</head>
+<body>
+<h1>The built package, against the real archive</h1>
+<p>Imports <code>dist/fashionworks.js</code> — not the source — so the worker
+   and the WebAssembly core are the ones a host would receive.</p>
+<pre id="log">starting…</pre>
+<script type="module" src="./built.ts"></script>
+</body>
+</html>

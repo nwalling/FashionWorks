@@ -14,9 +14,26 @@
  */
 
 import type { IndexStep } from '../onboarding';
+// Static, not dynamic: see the note beside `wasm.default` below.
+import * as wasm from '../../../core/pkg/fashionworks_core.js';
 
 export type ToWorker =
-  | { type: 'open'; file: File; skeleton: 'male' | 'female'; catalogue?: boolean }
+  | {
+      type: 'open';
+      file: File;
+      skeleton: 'male' | 'female';
+      catalogue?: boolean;
+      /** Where to fetch the WebAssembly core from.
+       *
+       * Passed in rather than resolved here, because the published worker is a
+       * **blob**: its own `import.meta.url` is the blob URL, so a relative path
+       * resolved inside it points at nothing. The main thread knows where the
+       * host's bundler put the asset; this worker cannot. Omitted by the
+       * verification pages, which run the worker from source where the
+       * bundler's own default resolution works.
+       */
+      coreUrl?: string;
+    }
   /** For verification only: read ranges over HTTP instead of from a File. */
   | {
       type: 'open-url';
@@ -25,6 +42,7 @@ export type ToWorker =
       skeleton: 'male' | 'female';
       /** Skip the DataCore parse. A page drawing one mesh does not need it. */
       catalogue?: boolean;
+      coreUrl?: string;
     }
   /** Load one mesh from the already-open archive. */
   | { type: 'mesh'; path: string }
@@ -337,10 +355,16 @@ async function run(message: ToWorker): Promise<void> {
     say({ type: 'mesh', path: message.path, mesh, ms: performance.now() - started });
     return;
   }
-  // The wasm is loaded here rather than at module scope so a worker that is
-  // spun up and never used costs nothing.
-  const wasm = await import('../../../core/pkg/fashionworks_core.js');
-  await wasm.default();
+  // An explicit URL where the caller gave one. wasm-bindgen's glue defaults to
+  // `new URL('..._bg.wasm', import.meta.url)`, which is right when the worker
+  // is a real module served from a real path and wrong when it is a blob.
+  //
+  // Only the *instantiation* is lazy. The glue is a static import at module
+  // scope (see the top of this file) because a dynamic one makes Rollup split
+  // it into its own chunk, which the published worker -- a blob -- then cannot
+  // resolve: `import('./fashionworks_core-<hash>.js')` from a blob URL is a
+  // fetch against nothing. Statically imported, it rides inside the worker.
+  await wasm.default(message.coreUrl ? message.coreUrl : undefined);
 
   const skeleton = message.skeleton;
   const base = message.type === 'open' || message.type === 'open-url'

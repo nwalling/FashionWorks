@@ -14,6 +14,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { checkCapabilities } from './capabilities';
+import { ArchiveClient } from './archive/client';
+import { readCatalogue, type Catalogue } from './archive/catalogue';
 import { inspectFile } from './archive/validate';
 import { initial, next, type Event, type State } from './onboarding';
 import { Onboarding } from './ui/Onboarding';
@@ -91,14 +93,58 @@ export function FashionWorks(props: FashionWorksProps): JSX.Element {
     emit({ type: 'checked', report });
   }, [emit]);
 
+  // The worker, and the catalogue it builds. One client per mounted component,
+  // created on the first file rather than at mount, so a visitor who never gets
+  // that far never pays for a worker or for the core it fetches.
+  const client = useRef<ArchiveClient | null>(null);
+  const [catalogue, setCatalogue] = useState<Catalogue | null>(null);
+
+  useEffect(() => () => {
+    client.current?.close();
+    client.current = null;
+  }, []);
+
   const onFile = useCallback((file: File) => {
     const problem = inspectFile(file);
     if (problem) {
       emit({ type: 'file-rejected', failure: problem });
       return;
     }
-    // Indexing is the worker's job; this is the seam it plugs into.
+    // The archive is the worker's job from here. `validated` carries no
+    // fingerprint yet -- the archive has not been read -- and the real one
+    // arrives with `onIndexed`, a second or so later.
     emit({ type: 'validated', fingerprint: '' });
+
+    client.current ??= new ArchiveClient();
+    void client.current
+      .open(file, 'male', {
+        onProgress: ({ step, fraction }) => {
+          emit({ type: 'progress', progress: { step, fraction } });
+        },
+        onIndexed: ({ fingerprint }) => {
+          setState((current) => (current.stage === 'indexing'
+            ? { ...current, fingerprint }
+            : current));
+        },
+      })
+      .then((opened) => {
+        setCatalogue(readCatalogue(opened.catalogueJson));
+        emit({ type: 'indexed', itemCount: opened.itemCount });
+      })
+      .catch((error: unknown) => {
+        // A failure here is the archive, not the file's shape: `inspectFile`
+        // already passed it. Reported as unreadable so the visitor is told to
+        // check the file rather than told their browser is at fault.
+        emit({
+          type: 'file-rejected',
+          failure: {
+            code: 'incomplete',
+            title: 'That archive could not be read',
+            detail: error instanceof Error ? error.message : String(error),
+            reportable: true,
+          },
+        });
+      });
   }, [emit]);
 
   // Report state changes outward once, not on every render.

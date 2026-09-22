@@ -362,18 +362,26 @@ Built and verified in this repo:
   swatches, equip-a-whole-set, poses, worn-versus-factory surfaces and a
   visitor-supplied backdrop.
 
-**The gap between those two lines is the current state of the project, and an
-earlier version of this section papered over it.** The pipeline works; the
-*package* does not carry it. `@fashionworks/web@0.1.0` ships no WebAssembly and
-no worker — `archive.worker.ts` is reached from `index.ts` only through
-type-only imports, which the bundler erases, and the built `dist/fashionworks.js`
-contains zero references to either. So the component validates a dropped
-`Data.p4k`, moves to `indexing`, and stops there forever, because nothing emits
-`indexed` and `stage === 'ready'` is unreachable.
+**0.1.0 shipped with no archive reader at all**, and this section used to
+paper over it: no WebAssembly, no worker, `archive.worker.ts` reachable from
+`index.ts` only through type-only imports that the bundler erased. A dropped
+`Data.p4k` validated, moved to `indexing`, and stopped there forever.
 
-**What this means for §3:** the API surface is implemented and stable. The
-behaviour behind it is not, for the archive path. `WEB-INTEGRATION-PLAN.md` §1
-has the detail and is the thing to read before building against this.
+**Fixed in 0.2.0.** The worker is bundled and inlined, the core ships as
+`dist/fashionworks_core_bg.wasm`, and the component drives the state machine
+through to `ready`. Measured from the *built* package against the real
+147.59 GB archive: **1,365,842 entries indexed, 2,475 items, 2,439 wearable**,
+and verified again inside a real Next 15 production build, where webpack emits
+the core to `static/media/` and a blob worker fetches and compiles it.
+
+`npm run build` now fails if any of that stops being true —
+`scripts/check-package.mjs`, twelve assertions about the built artefact,
+including both budgets.
+
+**What this means for §3:** the API surface and the archive path behind it are
+both implemented. What remains untested is the *drag-and-drop* itself on
+Windows and Firefox, which is §8's open risk and step 2 of
+`WEB-INTEGRATION-PLAN.md`.
 
 Phases 0 through 5 of `WEB.md` are closed against their stated exit criteria —
 which were about theming, bundle size and the mechanism, and did not include

@@ -1,7 +1,7 @@
 {
   "name": "@fashionworks/web",
   "private": false,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "Browse and combine Star Citizen FPS armour, entirely in the visitor's browser, from their own Data.p4k.",
   "scripts": {
@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "dev": "vite",
     "verify": "vite --port 5183",
-    "build": "vite build && tsc -p tsconfig.build.json",
+    "build": "vite build && tsc -p tsconfig.build.json && node scripts/check-package.mjs",
     "lint:css": "stylelint \"src/**/*.css\"",
     "check": "npm run typecheck && npm run lint:css && npm run test"
   },

@@ -25,3 +25,19 @@ export {
   AA_LARGE,
 } from './theme';
 export type { Tokens, TokenName, ContrastCheck } from './theme';
+
+// The archive worker and the catalogue it builds. Exported so a host can drive
+// the pipeline itself, and so the built package can be exercised end to end by
+// a verification page rather than only from source.
+export { ArchiveClient, coreUrl } from './archive/client';
+export type { OpenResult, OpenHandlers } from './archive/client';
+export {
+  readCatalogue,
+  familyRoot,
+  sharedName,
+  colourwayName,
+  displayName,
+  SLOTS,
+  HIDDEN_FLAGS,
+} from './archive/catalogue';
+export type { Catalogue, CatalogueItem, Slot } from './archive/catalogue';

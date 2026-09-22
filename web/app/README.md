@@ -17,8 +17,27 @@ export function Launcher() {
 }
 ```
 
-`react` and `react-dom` are peer dependencies; nothing else is. Give the
-component a height — it fills its container and manages its own scrolling.
+`react` and `react-dom` are the peer dependencies; `three` is a runtime
+dependency and installs with the package.
+
+**Give the parent a definite height, not a minimum.** The component's root
+carries `min-height: 100%`, and a percentage minimum resolves against a parent
+that has a *height* — against one that only has a `min-height` it resolves to
+nothing and the root collapses to its content. `height: 72vh; min-height: 520px`
+works. Do not put it inside a vertically scrolling container: the 3D view
+captures the wheel for camera zoom.
+
+## The WebAssembly core
+
+The package ships `dist/fashionworks_core_bg.wasm` and resolves it with
+`new URL('./fashionworks_core_bg.wasm', import.meta.url)`, which webpack 5,
+Turbopack and Vite all recognise as "emit this asset". Nothing to configure, and
+nothing to copy into `public/`.
+
+**Use the ESM build for the archive path.** The CJS entry exists for older
+bundlers, but Vite polyfills `import.meta.url` there in a form webpack does not
+recognise as an asset reference, so the core is not emitted. Next's App Router
+takes the ESM build for client components, which is the supported path.
 
 ## Theming
 

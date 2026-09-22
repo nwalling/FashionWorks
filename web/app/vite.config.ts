@@ -1,4 +1,4 @@
-import { createReadStream, statSync } from 'node:fs';
+import { createReadStream, readFileSync, statSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vite';
@@ -59,12 +59,88 @@ function archiveRange(): Plugin {
   };
 }
 
+/** Put the WebAssembly core in the published package.
+ *
+ * It is built into `web/core/pkg`, one directory above this package's root, so
+ * nothing in `src/` imports it as an asset and `vite build` would otherwise
+ * emit a library that references a `.wasm` it does not ship. That is exactly
+ * what 0.1.0 did: no core, no worker, and an indexing screen that never
+ * finished.
+ *
+ * Emitted with its name fixed, because `src/archive/client.ts` resolves it as
+ * `new URL('./fashionworks_core_bg.wasm', import.meta.url)` and a content hash
+ * would break that. The file is immutable per release anyway, and the host
+ * serves it from its own hashed asset pipeline.
+ */
+/** Stop the core being base64'd into the bundle.
+ *
+ * wasm-bindgen's glue ends its argument handling with
+ *
+ *   if (module_or_path === undefined) {
+ *     module_or_path = new URL('fashionworks_core_bg.wasm', import.meta.url);
+ *   }
+ *
+ * and Vite resolves that reference and inlines the target. `assetsInlineLimit`
+ * does not reach the worker sub-build, so the 657 KB core came back as a 906 KB
+ * data URL **inside the inlined worker** -- a 1.8 MB bundle against a 400 KB
+ * budget, with the core no longer separately cacheable.
+ *
+ * The branch is dead in the published package: `ArchiveClient` always passes an
+ * explicit URL, because a blob worker cannot resolve a relative one anyway.
+ * Removing it leaves wasm-bindgen's own "expected a URL" error for anyone who
+ * calls init with nothing, which is a better failure than a silent 906 KB.
+ *
+ * Build only. The dev server serves the glue as-is, so the verification pages
+ * keep working without passing a URL.
+ */
+function unbundleCore(): Plugin {
+  const NEEDLE = "new URL('fashionworks_core_bg.wasm', import.meta.url)";
+  return {
+    name: 'fashionworks-unbundle-core',
+    apply: 'build',
+    enforce: 'pre',
+    transform(code, id) {
+      if (!id.includes('fashionworks_core.js') || !code.includes(NEEDLE)) return null;
+      return { code: code.replace(NEEDLE, 'undefined'), map: null };
+    },
+  };
+}
+
+function emitCore(): Plugin {
+  const source = resolve(
+    dirname(fileURLToPath(import.meta.url)),
+    '../core/pkg/fashionworks_core_bg.wasm',
+  );
+  return {
+    name: 'fashionworks-emit-core',
+    apply: 'build',
+    buildStart() {
+      if (!statSync(source, { throwIfNoEntry: false })) {
+        // Failing the build is the point: a package without the core is the
+        // bug this plugin exists to prevent, and it is invisible at runtime
+        // until someone drops a 158 GB file on it.
+        this.error(
+          `the WebAssembly core is missing at ${source}. Build it first:\n`
+            + '  cd web/core && cargo build --release --target wasm32-unknown-unknown\n'
+            + '  wasm-bindgen --target web --out-dir pkg '
+            + 'target/wasm32-unknown-unknown/release/fashionworks_core.wasm',
+        );
+      }
+      this.emitFile({
+        type: 'asset',
+        fileName: 'fashionworks_core_bg.wasm',
+        source: readFileSync(source),
+      });
+    },
+  };
+}
+
 // Two jobs. `vite build` produces the `@fashionworks/web` library; `vite`
 // serves the verification pages, which is how the parts that cannot be tested
 // headlessly -- OPFS, real storage quotas, a real drag-and-drop, the wasm core
 // against the real archive, and a live theme switch -- get a real browser.
 export default defineConfig({
-  plugins: [react(), archiveRange()],
+  plugins: [react(), archiveRange(), unbundleCore(), emitCore()],
   build: {
     lib: {
       entry: resolve(dirname(fileURLToPath(import.meta.url)), 'src/index.ts'),
@@ -80,6 +156,12 @@ export default defineConfig({
     },
     // The host's budget is 400 KB brotli for app JavaScript, so an accidental
     // dependency should fail the build rather than ship.
+    // Never turn an asset into a data URL. Vite's default inlines anything
+    // under 4 KB, but wasm-bindgen's glue resolves the core with
+    // `new URL('..._bg.wasm', import.meta.url)`, and left to itself Vite
+    // base64'd the whole 657 KB core into the chunk -- which both blew the
+    // budget and put the core somewhere the host could not cache separately.
+    assetsInlineLimit: 0,
     chunkSizeWarningLimit: 500,
     sourcemap: true,
   },
@@ -89,7 +171,14 @@ export default defineConfig({
     // package's root, and Vite refuses to serve outside the root by default.
     fs: { allow: ['..'] },
   },
-  worker: { format: 'es' },
+  worker: {
+    format: 'es',
+    // Vite 5 builds the worker with its OWN plugin list, not the one above, so
+    // a plugin registered only in `plugins` never sees worker modules. That is
+    // why the core kept being inlined even with `unbundleCore` in place: the
+    // glue is imported by the worker, and the worker is a separate build.
+    plugins: () => [unbundleCore()],
+  },
   // The wasm lives outside this package's root, so Vite needs permission to
   // serve it in dev.
   optimizeDeps: { exclude: ['../core/pkg/fashionworks_core.js'] },
