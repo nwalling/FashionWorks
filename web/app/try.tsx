@@ -1,27 +1,28 @@
-/** Something to actually try.
+/** The kitbasher: the whole catalogue, equippable.
  *
- * Everything the port can do, in one page: a loadout read out of a real
- * `Data.p4k`, skinned onto the canonical armature, surfaced with the LayerBlend
- * shader, a prop on its socket, poses out of the game's own animation data, and
- * the theme switch that restyles both the page and the scene.
+ * Everything the port does, wired together. The catalogue is built from the
+ * visitor's own `Data.p4k` -- every wearable piece across six slots -- and
+ * clicking one loads its mesh, resolves its material and its own tint palette,
+ * composites the surfaces with the LayerBlend shader, and binds it to the
+ * shared armature.
  *
  * The verification pages next door each prove one thing and report numbers.
- * This one is for looking at.
+ * This one is for using.
  */
 
 import {
   AmbientLight,
+  Box3,
   Color,
   DirectionalLight,
   GridHelper,
   Mesh,
+  Object3D,
   PerspectiveCamera,
   Scene,
-  Box3,
   SkinnedMesh,
   Vector3,
   WebGLRenderer,
-  type Object3D,
 } from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
@@ -35,6 +36,8 @@ import type {
 } from './src/worker/archive.worker';
 
 const THEMES = ['hangarworks', 'dolomite', 'keystone', 'navy'] as const;
+const SLOTS = ['helmet', 'torso', 'arms', 'legs', 'undersuit', 'backpack'] as const;
+type Slot = (typeof SLOTS)[number];
 
 const POSES = [
   { label: 'rest', dba: null, clip: null },
@@ -53,87 +56,87 @@ const POSES = [
 const BASE_SKELETON = 'Objects/Characters/Human/male_v7/export/bhm_skeleton_v7.chr';
 
 /** Two donors exactly: 220 base bones + 34 + 1 reaches the pipeline's canonical
- * armature of 255 with 35 attachment points, no bone missing and none extra. */
+ * armature of 255 with 35 attachment points, none missing and none extra. */
 const DONORS = [
   'Objects/Characters/Human/male_v7/armor/cds/m_cds_undersuit_armor_02.skin',
   'Objects/Characters/Human/male_v7/armor/slaver/m_slaver_heavy_armor_01_core.skin',
 ];
 
-const PIECES = [
-  {
-    name: 'Defiance Helmet Sunchaser',
-    path: 'Objects/Characters/Human/male_v7/armor/slaver/m_slaver_heavy_armor_helmet_01.skin',
-    mtl: 'Objects/Characters/Human/male_v7/armor/slaver/m_slaver_heavy_armor_helmet_01_01_01.mtl',
-    materials: 6,
-  },
-  {
-    name: 'Defiance Core Sunchaser',
-    path: 'Objects/Characters/Human/male_v7/armor/slaver/m_slaver_heavy_armor_01_core.skin',
-    mtl: 'Objects/Characters/Human/male_v7/armor/slaver/m_slaver_heavy_armor_core_01_01_01.mtl',
-    materials: 8,
-  },
-];
+/** Flags that keep a record out of the listing.
+ *
+ * Shop displays, the loot containers armour drops into and outright
+ * placeholders all carry an armour attach type without being wearable.
+ * `unnamed` is deliberately *not* here: that is a real piece whose localisation
+ * key did not resolve, and it stays visible under its class name.
+ */
+const HIDDEN = ['npc', 'placeholder', 'not_wearable', 'test'];
 
-const PROP = {
-  name: 'BUL-H4 Ammo Carrier',
-  path: 'Objects/Characters/Human/backpack/cds/m_cds_combat_superheavy_backpack_01.cga',
-  mtl: 'Objects/Characters/Human/backpack/cds/m_cds_combat_superheavy_backpack_01_05.mtl',
-  socket: 'backpack_attach_1_override',
-  materials: 4,
-};
+/** How many rows to draw before asking for a search term.
+ *
+ * The listing is plain DOM, and a slot can hold hundreds of canonical pieces.
+ * A virtual list would be the real answer; this is the honest placeholder.
+ */
+const MAX_ROWS = 400;
 
-function hex(value: string): [number, number, number] {
-  return [1, 3, 5].map((i) => parseInt(value.slice(i, i + 2), 16) / 255) as [number, number, number];
+interface CatalogueItem {
+  id: string;
+  class_name: string;
+  name: string | null;
+  slot: string;
+  set: string | null;
+  variant_of: string | null;
+  bind_mode: string;
+  socket: string | null;
+  flags: string[];
+  weight_class: string | null;
+  manufacturer?: { code?: string | null; name?: string | null };
+  tint?: { layers?: Array<{ color: string; spec: string; glossiness: number }> } | null;
+  geometry: Array<{ source: string; side: string | null }>;
+  materials: string[];
 }
-
-/** `slaver_heavy_01_01_03` — the Sunchaser palette. entryA is the gold every
- * measurement in this repo is anchored to. */
-const PALETTE: PaletteEntry[] = [
-  { color: hex('#f9b541'), spec: hex('#f9b541'), glossiness: 0.62 },
-  { color: hex('#5e5e5c'), spec: hex('#5e5e5c'), glossiness: 0.55 },
-  { color: hex('#575757'), spec: hex('#575757'), glossiness: 0.55 },
-];
 
 const statusEl = document.getElementById('status') as HTMLPreElement;
 const viewEl = document.getElementById('view') as HTMLDivElement;
+const itemsEl = document.getElementById('items') as HTMLDivElement;
+const waysEl = document.getElementById('ways') as HTMLDivElement;
+const slotsEl = document.getElementById('slots') as HTMLDivElement;
+const searchEl = document.getElementById('search') as HTMLInputElement;
+
 const lines: string[] = [];
 const say = (line: string) => {
   lines.push(line);
-  statusEl.textContent = lines.slice(-7).join('\n');
+  statusEl.textContent = lines.slice(-6).join('\n');
 };
 const replaceLast = (line: string) => {
-  lines[lines.length - 1] = line;
-  statusEl.textContent = lines.slice(-7).join('\n');
+  if (lines.length === 0) lines.push(line);
+  else lines[lines.length - 1] = line;
+  statusEl.textContent = lines.slice(-6).join('\n');
 };
 
 // ── scene ───────────────────────────────────────────────────────────────────
 const scene = new Scene();
 scene.background = new Color(0x000000);
-// `preserveDrawingBuffer` so the canvas can be read back after compositing,
-// which is how a check confirms the scene followed a theme change rather than
-// taking the page's word for it.
 const renderer = new WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 viewEl.appendChild(renderer.domElement);
 
 const camera = new PerspectiveCamera(35, 1, 0.01, 60);
-camera.position.set(1.4, 1.5, 1.9);
-
+camera.position.set(1.1, 1.5, -2.2);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.set(0, 1.2, 0);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
-controls.minDistance = 0.5;
-controls.maxDistance = 8;
+controls.minDistance = 0.4;
+controls.maxDistance = 9;
 
 const grid = new GridHelper(4, 16);
 scene.add(grid);
-const key = new DirectionalLight(0xffffff, 2.2);
-key.position.set(1.2, 2.0, 1.6);
-scene.add(key);
-const rim = new DirectionalLight(0xffffff, 0.6);
-rim.position.set(-1.6, 1.0, -1.4);
-scene.add(rim);
+const keyLight = new DirectionalLight(0xffffff, 2.2);
+keyLight.position.set(1.2, 2.0, 1.6);
+scene.add(keyLight);
+const rimLight = new DirectionalLight(0xffffff, 0.6);
+rimLight.position.set(-1.6, 1.0, -1.4);
+scene.add(rimLight);
 const ambient = new AmbientLight(0xffffff, 1.3);
 scene.add(ambient);
 
@@ -146,13 +149,11 @@ function resize(): void {
 }
 resize();
 new ResizeObserver(resize).observe(viewEl);
-
-function frame(): void {
+(function frame() {
   requestAnimationFrame(frame);
   controls.update();
   renderer.render(scene, camera);
-}
-frame();
+})();
 
 // ── theme ───────────────────────────────────────────────────────────────────
 function paint(tokens: Tokens): void {
@@ -169,43 +170,69 @@ for (const name of THEMES) {
   button.onclick = () => document.documentElement.setAttribute('data-theme', name);
   themeBar.appendChild(button);
 }
-const syncThemeButtons = () => {
+const syncThemes = () => {
   const current = document.documentElement.getAttribute('data-theme');
   themeBar.querySelectorAll('button').forEach((b) => {
     b.setAttribute('aria-pressed', String(b.textContent === current));
   });
 };
-syncThemeButtons();
-new MutationObserver(syncThemeButtons).observe(document.documentElement, {
+syncThemes();
+new MutationObserver(syncThemes).observe(document.documentElement, {
   attributes: true, attributeFilter: ['data-theme'],
 });
 
-// ── the worker, as a request/response ───────────────────────────────────────
+// ── the worker ──────────────────────────────────────────────────────────────
 function rpc(worker: Worker) {
   const waiting = new Map<string, Array<(value: FromWorker) => void>>();
   worker.onmessage = (event: MessageEvent<FromWorker>) => {
     const message = event.data;
-    if (message.type === 'progress') {
-      replaceLast(`${message.step}…`);
-      return;
-    }
-    if (message.type === 'failed') {
-      say(`failed: ${message.message}`);
-      return;
-    }
+    if (message.type === 'progress') return replaceLast(`${message.step}…`);
+    if (message.type === 'failed') return say(`failed: ${message.message}`);
     waiting.get(message.type)?.shift()?.(message);
   };
-  return <T extends FromWorker['type']>(request: ToWorker, expect: T) =>
+  /** Wait for a message the worker sends unprompted -- the catalogue arrives
+   * as part of opening the archive, not in answer to a request. */
+  const waitFor = <T extends FromWorker['type']>(expect: T) =>
     new Promise<Extract<FromWorker, { type: T }>>((resolve) => {
       const queue = waiting.get(expect) ?? [];
       queue.push(resolve as (value: FromWorker) => void);
       waiting.set(expect, queue);
-      worker.postMessage(request);
     });
+  const ask = <T extends FromWorker['type']>(request: ToWorker, expect: T) => {
+    const answer = waitFor(expect);
+    worker.postMessage(request);
+    return answer;
+  };
+  return { ask, waitFor };
+}
+
+/** A tint palette from the catalogue.
+ *
+ * **The specular matters and is not the colour.** A metal has no diffuse
+ * albedo -- its appearance *is* its F0 -- so a metal layer takes the entry's
+ * specular. The Sunchaser's entryA is gold `#f9b541` against a specular of
+ * `#b1b0ad`, and using the colour for both is how ten Lynx colourways once
+ * rendered as the same grey arm.
+ */
+function paletteOf(item: CatalogueItem): PaletteEntry[] {
+  const hex = (value: string): [number, number, number] =>
+    [1, 3, 5].map((i) => parseInt(value.slice(i, i + 2), 16) / 255) as [number, number, number];
+  return (item.tint?.layers ?? []).slice(0, 3).map((layer) => ({
+    color: hex(layer.color),
+    spec: hex(layer.spec),
+    // The palette stores glossiness 0-255 and armour entries are routinely the
+    // full 255, which taken literally is a mirror.
+    glossiness: Math.min(1, Math.max(0.05, layer.glossiness)),
+  }));
 }
 
 let rig: BuiltRig | undefined;
-const loaded: Object3D[] = [];
+let wear = true;
+const equipped = new Map<Slot, Object3D[]>();
+const wearing = new Map<Slot, CatalogueItem>();
+/** Loaded pieces, so re-equipping is instant. Keyed by item *and* wear,
+ * because the two surfaces are genuinely different bakes. */
+const cache = new Map<string, Object3D[]>();
 
 async function main(): Promise<void> {
   const head = await fetch('/__p4k', { method: 'HEAD' });
@@ -213,6 +240,7 @@ async function main(): Promise<void> {
   if (!total) {
     say('No archive is being served.');
     say('Restart the dev server with FW_ARCHIVE set to your Data.p4k.');
+    itemsEl.textContent = 'no archive';
     return;
   }
   say(`archive ${(total / 1024 ** 3).toFixed(2)} GB`);
@@ -221,85 +249,219 @@ async function main(): Promise<void> {
   const worker = new Worker(new URL('./src/worker/archive.worker.ts', import.meta.url), {
     type: 'module',
   });
-  const ask = rpc(worker);
+  const { ask, waitFor } = rpc(worker);
 
+  // The catalogue arrives on its own once the archive is open, so its waiter is
+  // registered before the open rather than in answer to it.
+  const catalogueSoon = waitFor('catalogue');
   const indexed = await ask({
-    type: 'open-url', url: '/__p4k', byteLength: total, skeleton: 'male', catalogue: false,
+    type: 'open-url', url: '/__p4k', byteLength: total, skeleton: 'male', catalogue: true,
   }, 'indexed');
-  replaceLast(`${indexed.entryCount.toLocaleString()} entries indexed in ${(indexed.ms / 1000).toFixed(1)}s`);
+  replaceLast(`${indexed.entryCount.toLocaleString()} entries in ${(indexed.ms / 1000).toFixed(1)}s`);
+
+  const catalogue = await catalogueSoon;
+  const all = (JSON.parse(catalogue.json) as { items: CatalogueItem[] }).items
+    .filter((item) => item.geometry.length > 0 && !item.flags.some((f) => HIDDEN.includes(f)));
+  say(`${all.length.toLocaleString()} wearable pieces`);
 
   const rigMessage = await ask({ type: 'rig', base: BASE_SKELETON, donors: DONORS }, 'rig');
   rig = buildRig(rigMessage.bones);
   scene.add(rig.root);
-  say(`rig ${rigMessage.summary.bones} bones, ${rigMessage.summary.attachments} sockets`);
 
   const fetchTexture = async (path: string, maxSize: number): Promise<TexturePayload | null> =>
     (await ask({ type: 'texture', path, maxSize }, 'texture')).texture;
 
-  const build = async (
-    piece: { name: string; mtl: string; materials: number },
-    payload: MeshPayload,
-    wear: boolean,
-  ) => {
-    const material = await ask({ type: 'material', path: piece.mtl }, 'material');
-    const composited = await compositeSurfaces(
-      material.material as MaterialPayload, PALETTE, fetchTexture, wear,
+  async function load(item: CatalogueItem): Promise<Object3D[]> {
+    const key = `${item.id}:${wear}`;
+    const hit = cache.get(key);
+    if (hit) return hit;
+
+    const mtl = item.materials[0];
+    const material = mtl
+      ? ((await ask({ type: 'material', path: mtl }, 'material')).material as MaterialPayload)
+      : ({ submaterials: [], library: {} } as MaterialPayload);
+    const composited = await compositeSurfaces(material, paletteOf(item), fetchTexture, wear);
+    const count = Math.max(1, material.submaterials.length);
+    const materials = material.submaterials.length
+      ? material.submaterials.map((sub) => materialFor(sub.name, composited))
+      : [materialFor('', composited)];
+
+    const objects: Object3D[] = [];
+    // A piece can be several meshes: arms ship a left and a right.
+    for (const geometry of item.geometry) {
+      if (item.bind_mode === 'socket') {
+        const socket = item.socket ?? 'backpack_attach_1_override';
+        const prop = (await ask(
+          { type: 'prop', path: geometry.source, socket }, 'prop',
+        )).prop as PropPayload;
+        const object = new Mesh(buildGeometry(prop, count).geometry, materials);
+        object.frustumCulled = false;
+        if (prop.mount) {
+          object.matrixAutoUpdate = false;
+          object.matrix.copy(mountMatrix(prop.mount));
+        }
+        objects.push(object);
+      } else {
+        const mesh = (await ask({ type: 'mesh', path: geometry.source }, 'mesh')).mesh as MeshPayload;
+        const object = new SkinnedMesh(buildGeometry(mesh, count).geometry, materials);
+        object.frustumCulled = false;
+        objects.push(object);
+      }
+    }
+    cache.set(key, objects);
+    return objects;
+  }
+
+  async function equip(item: CatalogueItem): Promise<void> {
+    const slot = item.slot as Slot;
+    say(`${item.name ?? item.class_name}…`);
+    let objects: Object3D[];
+    try {
+      objects = await load(item);
+    } catch (error) {
+      replaceLast(`${item.name ?? item.class_name}: ${
+        error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+
+    // The old piece comes out first, so a slot never holds two.
+    for (const previous of equipped.get(slot) ?? []) previous.removeFromParent();
+
+    for (const object of objects) {
+      if (object instanceof SkinnedMesh) {
+        scene.add(object);
+        object.bind(rig!.skeleton, object.matrixWorld);
+      } else {
+        const bone = rig!.byName.get(item.socket ?? 'backpack_attach_1_override');
+        (bone ?? scene).add(object);
+      }
+    }
+    equipped.set(slot, objects);
+    wearing.set(slot, item);
+
+    const triangles = objects.reduce(
+      (sum, o) => sum + ((o as Mesh).geometry?.getIndex()?.count ?? 0) / 3, 0,
     );
-    const { geometry } = buildGeometry(payload, piece.materials);
-    const materials = (material.material as MaterialPayload).submaterials
-      .map((sub) => materialFor(sub.name, composited));
-    return { geometry, materials };
-  };
-
-  for (const piece of PIECES) {
-    say(`${piece.name}…`);
-    const mesh = await ask({ type: 'mesh', path: piece.path }, 'mesh');
-    const { geometry, materials } = await build(piece, mesh.mesh, true);
-    const object = new SkinnedMesh(geometry, materials);
-    object.frustumCulled = false;
-    scene.add(object);
-    object.bind(rig.skeleton, object.matrixWorld);
-    loaded.push(object);
-    replaceLast(`${piece.name}  ${(mesh.mesh.indices.length / 3).toLocaleString()} triangles`);
+    replaceLast(`${item.name ?? item.class_name}  ${triangles.toLocaleString()} triangles`);
+    frameLoadout();
+    renderList();
   }
 
-  say(`${PROP.name}…`);
-  const prop = await ask({ type: 'prop', path: PROP.path, socket: PROP.socket }, 'prop');
-  const propPayload = prop.prop as PropPayload;
-  const built = await build(PROP, propPayload, true);
-  const packObject = new Mesh(built.geometry, built.materials);
-  packObject.frustumCulled = false;
-  const bone = rig.byName.get(PROP.socket);
-  if (bone && propPayload.mount) {
-    packObject.matrixAutoUpdate = false;
-    packObject.matrix.copy(mountMatrix(propPayload.mount));
-    bone.add(packObject);
-  } else {
-    scene.add(packObject);
+  function frameLoadout(): void {
+    const bounds = new Box3();
+    let any = false;
+    for (const objects of equipped.values()) {
+      for (const object of objects) {
+        bounds.expandByObject(object);
+        any = true;
+      }
+    }
+    if (!any) return;
+    const centre = bounds.getCenter(new Vector3());
+    const size = bounds.getSize(new Vector3());
+    const reach = Math.max(size.x, size.y, size.z, 0.4);
+    const distance = (reach / 2) / Math.tan((camera.fov * Math.PI) / 360) * 1.6;
+    controls.target.copy(centre);
+    // Negative z is the character's front: the archive is Z-up with +y forward,
+    // and the conversion puts the visor at -z.
+    camera.position.set(centre.x + distance * 0.5, centre.y + distance * 0.18, centre.z - distance);
   }
-  loaded.push(packObject);
-  replaceLast(`${PROP.name}  mounted on its socket`);
 
-  // Frame the whole thing, measured rather than guessed: the loadout spans
-  // roughly y 1.0 to 1.9, so aim at its middle and stand back far enough for a
-  // 35-degree lens to hold it.
-  const bounds = new Box3();
-  for (const object of loaded) bounds.expandByObject(object);
-  const centre = bounds.getCenter(new Vector3());
-  const size = bounds.getSize(new Vector3());
-  const reach = Math.max(size.x, size.y, size.z);
-  const distance = (reach / 2) / Math.tan((camera.fov * Math.PI) / 360) * 1.5;
-  controls.target.copy(centre);
-  // Negative z, because that is the character's *front*: the archive is Z-up
-  // with +y forward, and `(x, y, z) -> (x, z, -y)` puts the visor at -z. Facing
-  // the other way frames the backpack and hides the armour.
-  camera.position.set(centre.x + distance * 0.55, centre.y + distance * 0.2, centre.z - distance);
+  // ── the listing ───────────────────────────────────────────────────────────
+  let slot: Slot = 'torso';
+  const bySlot = new Map<Slot, CatalogueItem[]>(
+    SLOTS.map((name) => [name, all.filter((item) => item.slot === name)]),
+  );
+  const familyRoot = (item: CatalogueItem) => item.variant_of ?? item.id;
+  const families = new Map<string, CatalogueItem[]>();
+  for (const item of all) {
+    const root = familyRoot(item);
+    families.set(root, [...(families.get(root) ?? []), item]);
+  }
 
-  // ── poses ────────────────────────────────────────────────────────────────
+  for (const name of SLOTS) {
+    const button = document.createElement('button');
+    button.dataset.slot = name;
+    button.textContent = `${name} ${bySlot.get(name)!.length}`;
+    button.onclick = () => { slot = name; renderList(); };
+    slotsEl.appendChild(button);
+  }
+  searchEl.placeholder = `Search ${all.length.toLocaleString()} pieces…`;
+  searchEl.oninput = () => renderList();
+
+  function renderList(): void {
+    slotsEl.querySelectorAll('button').forEach((b) => {
+      b.setAttribute('aria-pressed', String(b.dataset.slot === slot));
+    });
+
+    const needle = searchEl.value.trim().toLowerCase();
+    // Canonical pieces only: a family's colourways appear as swatches below,
+    // rather than as twenty near-identical rows.
+    const pool = (bySlot.get(slot) ?? []).filter((item) => {
+      if (item.variant_of) return false;
+      if (!needle) return true;
+      return `${item.name ?? ''} ${item.class_name}`.toLowerCase().includes(needle);
+    });
+
+    itemsEl.textContent = '';
+    if (pool.length === 0) {
+      itemsEl.textContent = needle ? 'nothing matches' : 'nothing in this slot';
+      return;
+    }
+    const onBody = wearing.get(slot);
+    for (const item of pool.slice(0, MAX_ROWS)) {
+      const family = families.get(familyRoot(item)) ?? [item];
+      const button = document.createElement('button');
+      button.className = 'item';
+      const title = document.createElement('span');
+      title.textContent = item.name ?? item.class_name;
+      const meta = document.createElement('span');
+      meta.className = 'meta';
+      const maker = item.manufacturer?.code ?? '';
+      const parts = [maker, item.weight_class ?? '', family.length > 1 ? `${family.length} colourways` : '']
+        .filter(Boolean);
+      meta.textContent = parts.join(' · ');
+      button.append(title, meta);
+      button.setAttribute(
+        'aria-pressed',
+        String(Boolean(onBody && familyRoot(onBody) === familyRoot(item))),
+      );
+      button.onclick = () => { void equip(item); renderWays(item); };
+      itemsEl.appendChild(button);
+    }
+    if (pool.length > MAX_ROWS) {
+      const note = document.createElement('div');
+      note.className = 'meta';
+      note.style.padding = '6px 8px';
+      note.textContent = `…and ${pool.length - MAX_ROWS} more; search to narrow`;
+      itemsEl.appendChild(note);
+    }
+    if (onBody) renderWays(onBody);
+  }
+
+  function renderWays(item: CatalogueItem): void {
+    const family = families.get(familyRoot(item)) ?? [];
+    waysEl.textContent = '';
+    if (family.length <= 1) return;
+    const onBody = wearing.get(item.slot as Slot);
+    for (const variant of family) {
+      const swatch = document.createElement('button');
+      swatch.className = 'way';
+      const colour = variant.tint?.layers?.[0]?.color;
+      if (colour) swatch.style.background = colour;
+      swatch.title = variant.name ?? variant.class_name;
+      swatch.setAttribute('aria-pressed', String(onBody?.id === variant.id));
+      swatch.onclick = () => void equip(variant);
+      waysEl.appendChild(swatch);
+    }
+  }
+
+  renderList();
+
+  // ── poses ─────────────────────────────────────────────────────────────────
   const poseBar = document.getElementById('poses')!;
   const restRotations = new Map(rig.bones.map((b) => [b.name, b.quaternion.clone()]));
   let activePose = 'rest';
-
   const setPose = async (entry: (typeof POSES)[number]) => {
     if (!rig) return;
     activePose = entry.label;
@@ -307,9 +469,7 @@ async function main(): Promise<void> {
       b.setAttribute('aria-pressed', String(b.textContent === activePose));
     });
     if (!entry.dba || !entry.clip) {
-      for (const boneObject of rig.bones) {
-        boneObject.quaternion.copy(restRotations.get(boneObject.name)!);
-      }
+      for (const bone of rig.bones) bone.quaternion.copy(restRotations.get(bone.name)!);
       rig.root.updateMatrixWorld(true);
       rig.skeleton.update();
       say('rest pose');
@@ -319,7 +479,6 @@ async function main(): Promise<void> {
     applyClip(rig, posed.pose.locals);
     say(`${entry.label}: ${posed.pose.animated} of ${posed.pose.clipBones} clip bones`);
   };
-
   for (const entry of POSES) {
     const button = document.createElement('button');
     button.textContent = entry.label;
@@ -327,10 +486,9 @@ async function main(): Promise<void> {
     poseBar.appendChild(button);
   }
 
-  // ── wear ─────────────────────────────────────────────────────────────────
+  // ── wear and clear ────────────────────────────────────────────────────────
   const optionBar = document.getElementById('opts')!;
   const wearButton = document.createElement('button');
-  let wear = true;
   wearButton.textContent = 'worn';
   wearButton.setAttribute('aria-pressed', 'true');
   wearButton.onclick = async () => {
@@ -339,24 +497,33 @@ async function main(): Promise<void> {
     wearButton.setAttribute('aria-pressed', String(wear));
     wearButton.disabled = true;
     say(`recompositing ${wear ? 'worn' : 'as it left the factory'}…`);
-    // Only the surfaces change; the meshes and the rig stay exactly as they are.
-    for (let i = 0; i < PIECES.length; i += 1) {
-      const piece = PIECES[i]!;
-      const target = loaded[i] as SkinnedMesh;
-      const material = await ask({ type: 'material', path: piece.mtl }, 'material');
-      const composited = await compositeSurfaces(
-        material.material as MaterialPayload, PALETTE, fetchTexture, wear,
-      );
-      target.material = (material.material as MaterialPayload).submaterials
-        .map((sub) => materialFor(sub.name, composited));
-    }
+    for (const item of [...wearing.values()]) await equip(item);
     replaceLast(wear ? 'worn' : 'as it left the factory');
     wearButton.disabled = false;
   };
   optionBar.appendChild(wearButton);
 
+  const actions = document.getElementById('acts')!;
+  const clear = document.createElement('button');
+  clear.textContent = 'clear';
+  clear.onclick = () => {
+    for (const objects of equipped.values()) for (const o of objects) o.removeFromParent();
+    equipped.clear();
+    wearing.clear();
+    waysEl.textContent = '';
+    renderList();
+    say('cleared');
+  };
+  actions.appendChild(clear);
+
+  // Open on something rather than an empty grid.
+  const opener = (bySlot.get('torso') ?? []).find((i) => (i.name ?? '').includes('Sunchaser'))
+    ?? (bySlot.get('torso') ?? []).find((i) => !i.variant_of);
+  if (opener) await equip(opener);
   await setPose(POSES[1]!);
-  say('ready — drag to orbit');
+  say('ready — pick a piece on the left');
+
+  (window as unknown as { __try: unknown }).__try = { all, bySlot, families, equipped, wearing, equip };
 }
 
 void main().catch((error) => {

@@ -78,7 +78,7 @@ The browser-only pages, which need a real GPU and a real archive:
 
 | page | what it proves |
 | --- | --- |
-| `/try.html` | **all of it, to poke at**: a loadout, orbit, poses, wear, themes |
+| `/try.html` | **the kitbasher**: the whole catalogue, equippable, with poses, wear and themes |
 | `/theme.html` | a theme switch restyles the page *and* the canvas, and AA passes |
 | `/verify.html` | OPFS eviction, storage quotas, capability detection |
 | `/demo.html` | every onboarding screen, including the failure ones |
