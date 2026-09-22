@@ -14,6 +14,17 @@
       "env": {
         "FW_ARCHIVE": "/Volumes/Plex/SC Data/Data.p4k"
       }
+    },
+    {
+      "name": "hangarworks-start",
+      "runtimeExecutable": "/Users/noelwalling/Developer/Star Citizen/web/node_modules/.bin/next",
+      "runtimeArgs": [
+        "start",
+        "-p",
+        "3100",
+        "/Users/noelwalling/Developer/Star Citizen/web"
+      ],
+      "port": 3100
     }
   ]
 }

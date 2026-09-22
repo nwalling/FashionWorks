@@ -123,7 +123,8 @@ Unchanged, except that the first one is new and dominates:
 
 - [x] The package can actually open an archive — 0.2.0, measured against the
       real archive and inside a Next production build.
-- [ ] The 0.2.0 tarball is vendored into the Hangarworks repo.
+- [x] The 0.2.0 tarball is vendored into the Hangarworks repo — `0a56bb4`,
+      hosting test 36/36, theme test 9/9, deployed to production.
 - [ ] Windows passes in Chrome and Firefox from a default install, or its
       failures are understood and the copy reflects them.
 - [ ] `robots: noindex` dropped, route added to `src/app/sitemap.ts`, linked
