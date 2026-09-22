@@ -19,7 +19,7 @@ import { readCatalogue, type Catalogue } from './archive/catalogue';
 import { inspectFile } from './archive/validate';
 import { initial, next, type Event, type State } from './onboarding';
 import { Onboarding } from './ui/Onboarding';
-import { Viewer } from './ui/Viewer';
+import { Kitbasher } from './ui/Kitbasher';
 import './ui/onboarding.css';
 import { readTokens, watchTheme, type Tokens } from './theme';
 
@@ -71,7 +71,7 @@ function errorCodeFor(state: State): FashionWorksErrorCode | null {
 }
 
 export function FashionWorks(props: FashionWorksProps): JSX.Element {
-  const { className, onReady, onError } = props;
+  const { className, onReady, onError, initialLoadout, onLoadoutChange } = props;
   const [state, setState] = useState<State>(initial);
   const [tokens, setTokens] = useState<Tokens | null>(null);
   const root = useRef<HTMLDivElement>(null);
@@ -172,17 +172,32 @@ export function FashionWorks(props: FashionWorksProps): JSX.Element {
     minHeight: '100%',
   }), []);
 
+  const ready = state.stage === 'ready' && tokens && catalogue && client.current;
+
   return (
     <div ref={root} className={className} style={style} data-fashionworks="">
-      <Onboarding
-        state={state}
-        onEvent={(event) => (event.type === 'start' ? void start() : emit(event))}
-        onFile={onFile}
-      />
-      {/* The 3D view. Tokens are threaded rather than read again, so one
-          observer serves the whole component, and a theme change restyles the
-          scene without rebuilding it -- rebuilding would drop the armour. */}
-      {state.stage === 'ready' && tokens ? <Viewer tokens={tokens} className="fw-view" /> : null}
+      {/* Onboarding carries the visitor to `ready`, and then the kitbasher takes
+          the whole panel: there is nothing left to say once the catalogue
+          exists that the listing does not say better. */}
+      {!ready && (
+        <Onboarding
+          state={state}
+          onEvent={(event) => (event.type === 'start' ? void start() : emit(event))}
+          onFile={onFile}
+        />
+      )}
+      {/* Tokens are threaded rather than read again, so one observer serves the
+          whole component, and a theme change restyles the scene without
+          rebuilding it -- rebuilding would drop the armour. */}
+      {ready && (
+        <Kitbasher
+          client={client.current!}
+          catalogue={catalogue}
+          tokens={tokens}
+          initialLoadout={initialLoadout}
+          onLoadoutChange={onLoadoutChange}
+        />
+      )}
     </div>
   );
 }

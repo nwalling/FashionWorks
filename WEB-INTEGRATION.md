@@ -354,13 +354,15 @@ Built and verified in this repo:
   fork. `tools/build.sh` must apply it after `clone_or_update`.
 
 - `web/app/` — the `@fashionworks/web` package: the `<FashionWorks />`
-  component, ES and CJS with types. **110 KB brotli** against the 400 KB
-  budget, plus 644 bytes of stylesheet. Onboarding, capability checks, archive
-  validation, error states and the themed 3D viewport.
-- `web/app/try.html` — a development page that exercises the **whole** pipeline
-  against a real archive: 2,439 wearable pieces across six slots, colourways as
-  swatches, equip-a-whole-set, poses, worn-versus-factory surfaces and a
-  visitor-supplied backdrop.
+  component, ES and CJS with types. **139 KB brotli** against the 400 KB
+  budget, plus 1.5 KB of stylesheet, with the 203 KB WebAssembly core as a
+  separate asset. Onboarding, capability checks, archive validation, error
+  states, and at `ready` the kitbasher itself: 2,439 wearable pieces across six
+  slots, colourways as swatches, equip-a-whole-set, poses, worn-versus-factory
+  surfaces, a visitor-supplied backdrop, and the loadout in the URL fragment.
+- `web/app/kitbasher.html` — verifies all of that **from `dist/`**, not from
+  source, against the real archive. `built.html` does the same for the archive
+  open and catalogue build alone.
 
 **0.1.0 shipped with no archive reader at all**, and this section used to
 paper over it: no WebAssembly, no worker, `archive.worker.ts` reachable from

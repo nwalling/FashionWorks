@@ -41,3 +41,18 @@ export {
   HIDDEN_FLAGS,
 } from './archive/catalogue';
 export type { Catalogue, CatalogueItem, Slot } from './archive/catalogue';
+
+// The kitbasher itself, below the `FashionWorks` wrapper: a host that has its
+// own archive handling, or a verification page that opens one over HTTP, can
+// render the listing and the body without going through the file picker.
+export { Kitbasher } from './ui/Kitbasher';
+export type { KitbasherProps } from './ui/Kitbasher';
+export {
+  Kitbasher as KitbasherEngine,
+  POSES,
+  encodeLoadout,
+  decodeLoadout,
+  matchSet,
+  paletteOf,
+} from './three/kitbasher';
+export type { KitbasherState, KitbasherScene, Pose } from './three/kitbasher';

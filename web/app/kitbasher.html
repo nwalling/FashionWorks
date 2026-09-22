@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en" data-theme="hangarworks">
+<head>
+<meta charset="utf-8">
+<title>FashionWorks — the built kitbasher</title>
+<style>
+  /* Hangarworks' real default palette, scoped to html: a bare [data-theme]
+     rule matches any element carrying the attribute, including theme chips. */
+  :root, html[data-theme="hangarworks"] {
+    --sc-dark:#0A1219; --sc-card:#16292F; --sc-border:#2C4E5D; --sc-field:#1E3A44;
+    --sc-text:#EAF2F6; --sc-subtle:#9FB6C2; --sc-accent:#FF8A34; --sc-badge:#5AD1E6;
+    --sc-accent-text:#FF8A34; --sc-accent-ink:#0a1219;
+  }
+  html[data-theme="dolomite"] {
+    --sc-dark:#ffffff; --sc-card:#ccd0d9; --sc-border:#b1b8c5;
+    --sc-field:rgba(51,51,51,.05); --sc-text:#333333; --sc-subtle:#505153;
+    --sc-accent:#e8872b; --sc-accent-text:#764416; --sc-badge:#12589c;
+    --sc-accent-ink:#0a1219;
+  }
+  body { margin:0; background:var(--sc-dark); color:var(--sc-text);
+         font:14px/1.5 ui-sans-serif, system-ui, sans-serif; }
+  header { display:flex; gap:12px; align-items:center; padding:10px 16px;
+           border-bottom:1px solid var(--sc-border); }
+  header b { font-size:15px; }
+  header button { background:var(--sc-field); color:var(--sc-text);
+                  border:1px solid var(--sc-border); border-radius:8px; padding:4px 10px; }
+  #log { color:var(--sc-subtle); font-size:12px; margin-left:auto;
+         white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:60%; }
+  /* A DEFINITE height, as the contract now says: the component's root is
+     min-height:100%, and a percentage minimum needs a parent with a height. */
+  #mount { height: calc(100vh - 46px); min-height: 520px; display:flex; }
+  #mount > [data-fashionworks] { flex: 1 1 auto; }
+</style>
+</head>
+<body>
+<header>
+  <b>FashionWorks</b>
+  <span>the built package, rendering the kitbasher</span>
+  <button id="theme">theme: hangarworks</button>
+  <span id="log">starting…</span>
+</header>
+<div id="mount"></div>
+<script type="module" src="./kitbasher.ts"></script>
+</body>
+</html>

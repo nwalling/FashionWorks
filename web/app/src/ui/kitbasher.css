@@ -1,0 +1,222 @@
+/* The kitbasher, entirely on the host's tokens.
+ *
+ * Same rule as onboarding.css: no colour literals, and every `var()` fallback
+ * is another token rather than a value, so a partial theme still coheres.
+ * Enforced by stylelint `color-no-hex` and `color-named: never`.
+ */
+
+.fw-kit {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  color: var(--sc-text);
+  background: var(--sc-card);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.fw-kit-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--sc-border);
+  font-size: 13px;
+}
+
+.fw-kit-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.fw-kit-label,
+.fw-kit-count,
+.fw-kit-item-meta,
+.fw-kit-empty,
+.fw-kit-status {
+  color: var(--sc-subtle);
+}
+
+.fw-kit-label {
+  margin-right: 2px;
+}
+
+.fw-kit button {
+  background: var(--sc-field);
+  color: var(--sc-text);
+  border: 1px solid var(--sc-border);
+  border-radius: 8px;
+  padding: 5px 10px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  line-height: 1.2;
+}
+
+.fw-kit button:hover:not(:disabled) {
+  border-color: var(--sc-border-bright, var(--sc-border));
+}
+
+.fw-kit button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* Keyboard focus must be visible in every theme: the accent, falling back to
+ * the text colour, which a theme always guarantees is readable. */
+.fw-kit button:focus-visible,
+.fw-kit input:focus-visible {
+  outline: 2px solid var(--sc-accent, var(--sc-text));
+  outline-offset: 2px;
+}
+
+.fw-kit button[aria-pressed="true"],
+.fw-kit button[aria-selected="true"],
+.fw-kit button[role="tab"][aria-selected="true"] {
+  background: var(--sc-accent);
+  color: var(--sc-accent-ink, var(--sc-dark));
+  border-color: transparent;
+}
+
+.fw-kit button[aria-selected="true"] .fw-kit-count,
+.fw-kit button[aria-selected="true"] .fw-kit-item-meta {
+  color: inherit;
+  opacity: 0.8;
+}
+
+.fw-kit-body {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  min-height: 0;
+}
+
+@media (max-width: 720px) {
+  .fw-kit-body {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 40%) minmax(0, 1fr);
+  }
+}
+
+.fw-kit-side {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--sc-border);
+  padding: 10px;
+  gap: 8px;
+}
+
+.fw-kit-slots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.fw-kit-slots button {
+  padding: 4px 9px;
+  font-size: 12px;
+}
+
+.fw-kit-search {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--sc-field);
+  color: var(--sc-text);
+  border: 1px solid var(--sc-border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.fw-kit-search::placeholder {
+  color: var(--sc-subtle);
+}
+
+.fw-kit-items {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fw-kit-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  text-align: left;
+  border-color: transparent;
+  background: transparent;
+}
+
+.fw-kit-item:hover:not(:disabled) {
+  background: var(--sc-field);
+}
+
+.fw-kit-item-name {
+  font-size: 13px;
+}
+
+.fw-kit-item-meta {
+  font-size: 11px;
+}
+
+.fw-kit-empty {
+  margin: 6px 8px;
+  font-size: 13px;
+}
+
+.fw-kit-ways {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--sc-border);
+}
+
+/* A colourway swatch's background is the item's own palette colour, set
+ * inline, which is the one place a literal colour is right: it is data. */
+.fw-kit-way {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 6px;
+}
+
+.fw-kit-way[aria-checked="true"] {
+  outline: 2px solid var(--sc-accent, var(--sc-text));
+  outline-offset: 2px;
+}
+
+.fw-kit-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.fw-kit-view {
+  flex: 1 1 auto;
+  min-height: 0;
+  border-radius: 0;
+  background-size: cover;
+  background-position: center;
+}
+
+.fw-kit-status {
+  margin: 0;
+  padding: 6px 12px;
+  font-size: 12px;
+  border-top: 1px solid var(--sc-border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

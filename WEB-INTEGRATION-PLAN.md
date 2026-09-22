@@ -51,6 +51,16 @@ worker fetches and compiles it (657,794 bytes, 31 exports).
 `npm run build` is now gated on `scripts/check-package.mjs` — twelve assertions
 about the built artefact, including both budgets and the absolutisation above.
 
+**And `ready` is the kitbasher now, not a bare viewport.** The listing,
+colourway swatches, equip-a-set, poses, worn-versus-factory and the backdrop
+were ported out of `try.tsx` into the component (`src/three/kitbasher.ts` is
+the orchestration, `src/ui/Kitbasher.tsx` the shell), and `initialLoadout` /
+`onLoadoutChange` are implemented: the ids of what is worn, comma-separated,
+which is what goes in the fragment. Verified from `dist/` in
+`web/app/kitbasher.html`: equip-set filled helmet, arms and legs with the
+Sunchaser colourways, and a theme switch to Dolomite drove the WebGL clear
+colour to the page white along with the DOM.
+
 **For Hangarworks:** vendor the new tarball and the route works unchanged. No
 code change on your side; §2.3's layout advice was the only thing that was
 wrong, and you had already worked around it.
