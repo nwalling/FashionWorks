@@ -17,6 +17,7 @@ pub mod blend;
 pub mod catalog;
 pub mod composite;
 pub mod gold;
+pub mod material;
 pub mod mesh;
 mod p4k;
 pub mod poses;
@@ -39,6 +40,15 @@ pub struct Archive {
     entries: Vec<starbreaker_p4k::P4kEntry>,
     /// The canonical armature, once built. One per session.
     rig: Option<armature::Armature>,
+    /// Normalised path to entry index, built on first lookup.
+    ///
+    /// **Not an optimisation, a fix.** Looking an asset up by scanning the
+    /// entry list normalises both sides per comparison, which is two String
+    /// allocations against each of 1,365,842 entries. One texture costs about
+    /// eighteen lookups, because a split DDS gathers its mip streams from
+    /// sibling entries, and a piece wants a dozen textures -- so a naive scan
+    /// is tens of billions of allocations for one armour piece.
+    by_path: std::cell::OnceCell<std::collections::HashMap<String, usize>>,
 }
 
 #[wasm_bindgen]
@@ -52,7 +62,7 @@ impl Archive {
         let source = RangeSource::new(read_range, byte_length as u64);
         let mut reader = RangeReader::new(source);
         let entries = p4k::index(&mut reader).map_err(|e| JsValue::from_str(&e))?;
-        Ok(Archive { reader, entries, rig: None })
+        Ok(Archive { reader, entries, rig: None, by_path: std::cell::OnceCell::new() })
     }
 
     /// Number of entries in the archive. The 4.10 build indexes 1,365,842.
@@ -199,8 +209,13 @@ struct ArchiveSiblings<'a> {
 
 impl starbreaker_dds::ReadSibling for ArchiveSiblings<'_> {
     fn read_sibling(&self, suffix: &str) -> Option<Vec<u8>> {
+        // Through the index, not a scan. A texture resolves about eighteen of
+        // these -- one per mip stream -- and a piece wants a dozen textures, so
+        // scanning 1.37 M entries each time is hundreds of millions of
+        // comparisons for one armour piece.
         let name = format!("{}{}", self.base, suffix);
-        let entry = self.archive.entries.iter().find(|e| e.name == name)?;
+        let index = self.archive.find_asset(&name)?;
+        let entry = self.archive.entries.get(index)?;
         p4k::read_entry(self.archive.reader.source(), entry)
             .ok()
             .map(|e| e.bytes)
@@ -364,11 +379,47 @@ impl Archive {
     /// once reached conversion with "no converted geometry" long after the
     /// extraction that reported success.
     fn find_asset(&self, path: &str) -> Option<usize> {
+        let index = self.path_index();
         let wanted = normalise_asset(path);
-        self.entries
-            .iter()
-            .position(|e| normalise_asset(&e.name) == wanted)
+        if let Some(found) = index.get(&wanted) {
+            return Some(*found);
+        }
+        // **A material references the artist's source texture, and the archive
+        // ships the built one.** Every layer in the detail library names a
+        // `.tif`; what is actually in the P4K is a `.dds`. Looking up the path
+        // as written finds nothing, silently, and the composite then runs with
+        // no layer textures at all -- which renders as flat tinted plates that
+        // look plausible and carry none of the surface detail.
+        let swapped = swap_extension(&wanted, "dds")?;
+        index.get(&swapped).copied()
     }
+
+    /// The path index, built once.
+    ///
+    /// A `OnceCell` rather than `&mut self`, because every caller has only a
+    /// shared borrow and the index is derived state: building it changes
+    /// nothing an observer can see except how long the call took.
+    fn path_index(&self) -> &std::collections::HashMap<String, usize> {
+        self.by_path.get_or_init(|| {
+            let mut map = std::collections::HashMap::with_capacity(self.entries.len());
+            for (i, entry) in self.entries.iter().enumerate() {
+                // First wins: the archive can name the same asset twice, and a
+                // later duplicate must not displace the first.
+                map.entry(normalise_asset(&entry.name)).or_insert(i);
+            }
+            map
+        })
+    }
+}
+
+/// Replace a path's final extension. `None` when it has none.
+fn swap_extension(path: &str, extension: &str) -> Option<String> {
+    let dot = path.rfind('.')?;
+    // Only the last component, so a directory with a dot in it is left alone.
+    if path[dot..].contains('/') {
+        return None;
+    }
+    Some(format!("{}.{extension}", &path[..dot]))
 }
 
 /// `Data\Objects\...` and `objects/...` compare equal.
@@ -512,4 +563,169 @@ impl Archive {
         }
         Ok(out.into())
     }
+}
+
+#[wasm_bindgen]
+impl Archive {
+    /// Load an armour `.mtl` and every detail-library layer it references.
+    ///
+    /// One call rather than one per layer: a submaterial names up to eight
+    /// layers, a piece has eight submaterials, and each layer is its own small
+    /// `.mtl` in the archive. Resolving them here keeps that to a single trip
+    /// across the wasm boundary and lets the library be deduplicated -- the 495
+    /// layer materials are shared across the whole catalogue, so a piece
+    /// typically resolves a few dozen distinct ones.
+    #[wasm_bindgen(js_name = loadMaterial)]
+    pub fn load_material(&self, path: &str) -> Result<JsValue, JsValue> {
+        let index = self
+            .find_asset(path)
+            .ok_or_else(|| JsValue::from_str(&format!("no material at {path}")))?;
+        let bytes = p4k::read_entry(self.reader.source(), &self.entries[index])
+            .map_err(|e| JsValue::from_str(&e))?
+            .bytes;
+        let subs = material::parse(&bytes).map_err(|e| JsValue::from_str(&e))?;
+
+        // Every distinct layer the piece references, resolved once.
+        let mut library: std::collections::HashMap<String, material::LayerMaterial> =
+            std::collections::HashMap::new();
+        for sub in &subs {
+            for layer in sub.base_layers.iter().chain(sub.wear_layers.iter()) {
+                let key = layer.path.to_ascii_lowercase();
+                if library.contains_key(&key) {
+                    continue;
+                }
+                let Some(index) = self.find_asset(&layer.path) else { continue };
+                let Ok(entry) = p4k::read_entry(self.reader.source(), &self.entries[index]) else {
+                    continue;
+                };
+                if let Some(resolved) = material::parse_layer(&layer.path, &entry.bytes) {
+                    library.insert(key, resolved);
+                }
+            }
+        }
+
+        let out = js_sys::Object::new();
+        let submaterials = js_sys::Array::new();
+        for sub in &subs {
+            let entry = js_sys::Object::new();
+            js_sys::Reflect::set(&entry, &"name".into(), &JsValue::from_str(&sub.name))?;
+            js_sys::Reflect::set(&entry, &"shader".into(), &JsValue::from_str(&sub.shader))?;
+            js_sys::Reflect::set(&entry, &"tintable".into(), &sub.tintable().into())?;
+
+            let textures = js_sys::Object::new();
+            for (role, texture) in &sub.textures {
+                js_sys::Reflect::set(&textures, &role.as_str().into(), &JsValue::from_str(texture))?;
+            }
+            js_sys::Reflect::set(&entry, &"textures".into(), &textures.into())?;
+
+            let pairs = sub.wear_pairs();
+            let layers = js_sys::Array::new();
+            for (i, layer) in sub.base_layers.iter().enumerate() {
+                let value = layer_to_js(layer)?;
+                let worn = pairs
+                    .get(i)
+                    .copied()
+                    .flatten()
+                    .map(layer_to_js)
+                    .transpose()?;
+                js_sys::Reflect::set(&value, &"worn".into(), &worn.map_or(JsValue::NULL, Into::into))?;
+                layers.push(&value);
+            }
+            js_sys::Reflect::set(&entry, &"layers".into(), &layers.into())?;
+            submaterials.push(&entry);
+        }
+        js_sys::Reflect::set(&out, &"submaterials".into(), &submaterials.into())?;
+
+        let lib = js_sys::Object::new();
+        for (key, resolved) in &library {
+            let value = js_sys::Object::new();
+            js_sys::Reflect::set(&value, &"path".into(), &JsValue::from_str(&resolved.path))?;
+            js_sys::Reflect::set(
+                &value,
+                &"diffuse".into(),
+                &js_sys::Float32Array::from(&resolved.diffuse[..]).into(),
+            )?;
+            js_sys::Reflect::set(
+                &value,
+                &"specular".into(),
+                &js_sys::Float32Array::from(&resolved.specular[..]).into(),
+            )?;
+            js_sys::Reflect::set(&value, &"shininess".into(), &resolved.shininess.into())?;
+            js_sys::Reflect::set(&value, &"metal".into(), &resolved.metal.into())?;
+            js_sys::Reflect::set(
+                &value,
+                &"diffuseTex".into(),
+                &resolved.diffuse_tex.as_deref().map_or(JsValue::NULL, JsValue::from_str),
+            )?;
+            js_sys::Reflect::set(
+                &value,
+                &"normalTex".into(),
+                &resolved.normal_tex.as_deref().map_or(JsValue::NULL, JsValue::from_str),
+            )?;
+            js_sys::Reflect::set(&lib, &key.as_str().into(), &value.into())?;
+        }
+        js_sys::Reflect::set(&out, &"library".into(), &lib.into())?;
+        Ok(out.into())
+    }
+
+    /// Decode one texture to RGBA, gathering its split mip streams.
+    ///
+    /// **A `.dds` in this archive is not a whole DDS.** Every real texture is
+    /// split: the named entry holds headers and the smallest mip, and the
+    /// larger ones live in sibling entries. Decoding the base file alone fails
+    /// with "mip level 0 out of range".
+    ///
+    /// `mip` counts from 0, the largest. Passing a higher number is how the
+    /// 512-pixel layer cap is met without decoding a 2048 first.
+    #[wasm_bindgen(js_name = loadTexture)]
+    pub fn load_texture(&self, path: &str, mip: usize) -> Result<js_sys::Array, JsValue> {
+        let index = self
+            .find_asset(path)
+            .ok_or_else(|| JsValue::from_str(&format!("no texture at {path}")))?;
+        self.decode_dds_entry(index, mip)
+    }
+
+    /// A texture's mip sizes, without decoding any of them.
+    ///
+    /// Returns `[w0, h0, w1, h1, ...]`. Picking a mip by decoding candidates
+    /// and measuring them costs a full BC decode per try, and mip 0 of a
+    /// control map is routinely 2048x2048 -- which made choosing a 512 cost
+    /// more than using the 2048 would have. Dimensions come out of the header.
+    #[wasm_bindgen(js_name = textureSizes)]
+    pub fn texture_sizes(&self, path: &str) -> Result<Vec<u32>, JsValue> {
+        let index = self
+            .find_asset(path)
+            .ok_or_else(|| JsValue::from_str(&format!("no texture at {path}")))?;
+        let entry = self
+            .entries
+            .get(index)
+            .ok_or_else(|| JsValue::from_str("entry index out of range"))?;
+        let base = p4k::read_entry(self.reader.source(), entry)
+            .map_err(|e| JsValue::from_str(&e))?;
+        let siblings = ArchiveSiblings { archive: self, base: entry.name.clone() };
+        let dds = starbreaker_dds::DdsFile::from_split(&base.bytes, &siblings)
+            .map_err(|e| JsValue::from_str(&format!("reading split DDS: {e}")))?;
+        let mut out = Vec::new();
+        for mip in 0..dds.mip_count() {
+            let (w, h) = dds.dimensions(mip);
+            out.push(w as u32);
+            out.push(h as u32);
+        }
+        Ok(out)
+    }
+}
+
+fn layer_to_js(layer: &material::LayerRef) -> Result<js_sys::Object, JsValue> {
+    let out = js_sys::Object::new();
+    js_sys::Reflect::set(&out, &"name".into(), &JsValue::from_str(&layer.name))?;
+    js_sys::Reflect::set(&out, &"path".into(), &JsValue::from_str(&layer.path))?;
+    js_sys::Reflect::set(
+        &out,
+        &"tintColor".into(),
+        &js_sys::Float32Array::from(&layer.tint_color[..]).into(),
+    )?;
+    js_sys::Reflect::set(&out, &"paletteTint".into(), &(layer.palette_tint as f64).into())?;
+    js_sys::Reflect::set(&out, &"glossMult".into(), &layer.gloss_mult.into())?;
+    js_sys::Reflect::set(&out, &"uvTiling".into(), &layer.uv_tiling.into())?;
+    Ok(out)
 }

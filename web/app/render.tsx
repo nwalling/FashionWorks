@@ -17,7 +17,6 @@ import {
   Color,
   DirectionalLight,
   GridHelper,
-  MeshStandardMaterial,
   PerspectiveCamera,
   Scene,
   SkeletonHelper,
@@ -28,7 +27,10 @@ import {
 
 import { buildGeometry } from './src/three/geometry';
 import { buildRig, type BuiltRig } from './src/three/rig';
-import type { FromWorker, MeshPayload, RigBone, ToWorker } from './src/worker/archive.worker';
+import { compositeSurfaces, materialFor, type Composited, type PaletteEntry } from './src/three/surface';
+import type {
+  FromWorker, MaterialPayload, MeshPayload, RigBone, TexturePayload, ToWorker,
+} from './src/worker/archive.worker';
 
 /** The piece to show. Sunchaser because it is the set every other measurement
  * in this repo is anchored to. */
@@ -41,15 +43,34 @@ const PIECES = [
   {
     name: 'Defiance Helmet Sunchaser',
     path: 'Objects/Characters/Human/male_v7/armor/slaver/m_slaver_heavy_armor_helmet_01.skin',
+    mtl: 'Objects/Characters/Human/male_v7/armor/slaver/m_slaver_heavy_armor_helmet_01_01_01.mtl',
     /** The `.mtl` declares six submaterials; the mesh declares seven groups. */
     materials: 6,
   },
   {
     name: 'Defiance Core Sunchaser',
     path: 'Objects/Characters/Human/male_v7/armor/slaver/m_slaver_heavy_armor_01_core.skin',
+    mtl: 'Objects/Characters/Human/male_v7/armor/slaver/m_slaver_heavy_armor_core_01_01_01.mtl',
     materials: 8,
   },
 ];
+
+/** The Sunchaser palette, `slaver_heavy_01_01_03`.
+ *
+ * Taken from the catalogue in the real flow; pinned here so this page stays a
+ * test of *rendering* rather than of palette resolution, which phase 1 already
+ * covers at 100%. entryA is the gold every measurement in this repo is
+ * anchored to.
+ */
+const PALETTE: PaletteEntry[] = [
+  { color: hex('#f9b541'), spec: hex('#f9b541'), glossiness: 0.62 },
+  { color: hex('#5e5e5c'), spec: hex('#5e5e5c'), glossiness: 0.55 },
+  { color: hex('#575757'), spec: hex('#575757'), glossiness: 0.55 },
+];
+
+function hex(value: string): [number, number, number] {
+  return [1, 3, 5].map((i) => parseInt(value.slice(i, i + 2), 16) / 255) as [number, number, number];
+}
 
 const BASE_SKELETON = 'Objects/Characters/Human/male_v7/export/bhm_skeleton_v7.chr';
 
@@ -131,19 +152,21 @@ function showRig(bones: readonly RigBone[], summary: { bones: number; base: numb
   say(`${summary.attachments} attachment points`);
 }
 
-function show(mesh: MeshPayload, ms: number, piece: (typeof PIECES)[number]): void {
+function show(
+  mesh: MeshPayload,
+  ms: number,
+  piece: (typeof PIECES)[number],
+  material: MaterialPayload,
+  composited: Composited,
+): void {
   const { geometry, bounds, orphanGroups } = buildGeometry(mesh, piece.materials);
 
-  // One material per submaterial group. Flat greys for now: the LayerBlend
-  // shader is what gives these their real surface, and standing it up here
-  // would hide whether the *geometry* is right, which is what this page is for.
-  const palette = ['#8a929a', '#5c646b', '#6d767e', '#9aa4ad', '#4e565d', '#b0b8c0'];
-  const materials = Array.from({ length: piece.materials }, (_, i) =>
-    new MeshStandardMaterial({
-      color: new Color(palette[i % palette.length] ?? '#8a929a'),
-      roughness: 0.55,
-      metalness: 0.25,
-    }));
+  // One material per submaterial, in the .mtl's own order -- which is what the
+  // mesh's numeric group ids index. Matching by position is only safe because
+  // the ids *are* positions in that list; anywhere a name is available it is
+  // the real key, and reusing one whole-body .mtl across meshes is normal here.
+  const materials = material.submaterials.map((sub) =>
+    materialFor(sub.name, composited));
 
   // A SkinnedMesh must be parented into the same space as the bones, and bound
   // *after* both are in the scene: `bind` reads the bones' world matrices.
@@ -167,6 +190,9 @@ function show(mesh: MeshPayload, ms: number, piece: (typeof PIECES)[number]): vo
   say(`sits at y ${bounds.min.y.toFixed(3)}–${bounds.max.y.toFixed(3)} `
     + `(${size.x.toFixed(2)} × ${size.y.toFixed(2)} × ${size.z.toFixed(2)} m)`);
   say(`${mesh.unweighted} unweighted vertices, ${mesh.bones.length} bones`);
+  say(`${composited.surfaces.size} surfaces composited in ${composited.ms.toFixed(0)}ms`
+    + (composited.skipped.length ? `, ${composited.skipped.length} not LayerBlend` : '')
+    + `, ${composited.layerSlices} layer textures`);
   if (mesh.rebind) {
     say(`rebind: ${mesh.rebind.mapped} joints mapped, ${mesh.rebind.stray} stray, `
       + `${mesh.rebind.redistributed} vertices redistributed, ${mesh.rebind.guessed} guessed`);
@@ -203,7 +229,39 @@ function show(mesh: MeshPayload, ms: number, piece: (typeof PIECES)[number]): vo
     unweighted: mesh.unweighted,
     rebind: mesh.rebind,
     rigBones: rig?.bones.length ?? 0,
+    surfaces: composited.surfaces.size,
+    skipped: composited.skipped,
   };
+}
+
+/** One outstanding request per message kind.
+ *
+ * The worker handles messages in order and answers each with a message of a
+ * matching kind, so a queue per kind is enough to turn it into something
+ * awaitable -- and keeps the page readable as a sequence rather than as a
+ * callback tree.
+ */
+function rpc(worker: Worker) {
+  const waiting = new Map<string, Array<(value: FromWorker) => void>>();
+  worker.onmessage = (event: MessageEvent<FromWorker>) => {
+    const message = event.data;
+    if (message.type === 'progress') {
+      status.textContent = `${lines.join('\n')}\n${message.step}…`;
+      return;
+    }
+    if (message.type === 'failed') {
+      say(`failed: ${message.message}`);
+      return;
+    }
+    waiting.get(message.type)?.shift()?.(message);
+  };
+  return <T extends FromWorker['type']>(request: ToWorker, expect: T) =>
+    new Promise<Extract<FromWorker, { type: T }>>((resolve) => {
+      const queue = waiting.get(expect) ?? [];
+      queue.push(resolve as (value: FromWorker) => void);
+      waiting.set(expect, queue);
+      worker.postMessage(request);
+    });
 }
 
 async function main(): Promise<void> {
@@ -214,46 +272,54 @@ async function main(): Promise<void> {
     return;
   }
   say(`archive ${(total / 1024 ** 3).toFixed(2)} GB`);
+  frame();
 
   const worker = new Worker(new URL('./src/worker/archive.worker.ts', import.meta.url), {
     type: 'module',
   });
-  worker.onmessage = (event: MessageEvent<FromWorker>) => {
-    const message = event.data;
-    if (message.type === 'progress') {
-      status.textContent = `${lines.join('\n')}\n${message.step}…`;
-    } else if (message.type === 'indexed') {
-      say(`${message.entryCount.toLocaleString()} entries in ${(message.ms / 1000).toFixed(1)}s`);
-      // The rig first: a mesh loaded before it exists comes back with its own
-      // joint indices, which address a bone list the scene does not have.
-      worker.postMessage({
-        type: 'rig', base: BASE_SKELETON, donors: DONORS,
-      } satisfies ToWorker);
-    } else if (message.type === 'rig') {
-      showRig(message.bones, message.summary);
-      pending = PIECES.length;
-      for (const piece of PIECES) {
-        worker.postMessage({ type: 'mesh', path: piece.path } satisfies ToWorker);
-      }
-    } else if (message.type === 'mesh') {
-      const piece = PIECES.find((p) => p.path === message.path) ?? PIECES[0]!;
-      show(message.mesh, message.ms, piece);
-      pending -= 1;
-      if (pending === 0) {
-        const skeletons = new Set(bound.map((m) => m.skeleton));
-        say(`\n${bound.length} pieces, ${skeletons.size} skeleton`
-          + `${skeletons.size === 1 ? '' : 's'}`);
-      }
-    } else if (message.type === 'failed') {
-      say(`failed: ${message.message}`);
-    }
-  };
-  // No catalogue: drawing one piece needs an index and two entry reads, not a
-  // 316 MB DataCore parse. Skipping it is what makes this page open in seconds.
-  worker.postMessage({
+  const ask = rpc(worker);
+
+  // No catalogue: drawing a piece needs an index and a handful of entry reads,
+  // not a 316 MB DataCore parse.
+  const indexed = await ask({
     type: 'open-url', url: '/__p4k', byteLength: total, skeleton: 'male', catalogue: false,
-  } satisfies ToWorker);
-  frame();
+  }, 'indexed');
+  say(`${indexed.entryCount.toLocaleString()} entries in ${(indexed.ms / 1000).toFixed(1)}s`);
+
+  // The rig first: a mesh loaded before it exists comes back with its own joint
+  // indices, which address a bone list the scene does not have.
+  const rigMessage = await ask({ type: 'rig', base: BASE_SKELETON, donors: DONORS }, 'rig');
+  showRig(rigMessage.bones, rigMessage.summary);
+
+  let textureReads = 0;
+  let textureMs = 0;
+  const fetchTexture = async (path: string, maxSize: number): Promise<TexturePayload | null> => {
+    const before = textureReads;
+    const answer = await ask({ type: 'texture', path, maxSize }, 'texture');
+    textureReads = answer.reads;
+    textureMs += answer.ms;
+    void before;
+    return answer.texture;
+  };
+
+  for (const piece of PIECES) {
+    const mesh = await ask({ type: 'mesh', path: piece.path }, 'mesh');
+    const material = await ask({ type: 'material', path: piece.mtl }, 'material');
+    (window as unknown as { __material: unknown }).__material = material.material;
+    const composited = await compositeSurfaces(material.material, PALETTE, fetchTexture);
+    // Keep the raw composites so they can be compared with the pipeline's
+    // baked PNGs directly -- the shader against the reference, with no
+    // lighting in between.
+    const store = (window as unknown as { __composites: Record<string, unknown> });
+    store.__composites = store.__composites ?? {};
+    store.__composites[piece.name] = composited;
+    show(mesh.mesh, mesh.ms, piece, material.material, composited);
+  }
+
+  say(`\n${textureReads.toLocaleString()} range reads total, `
+    + `${(textureMs / 1000).toFixed(1)}s of it decoding textures`);
+  const skeletons = new Set(bound.map((m) => m.skeleton));
+  say(`\n${bound.length} pieces, ${skeletons.size} skeleton${skeletons.size === 1 ? '' : 's'}`);
 }
 
 void main().catch((error) => say(`threw: ${error instanceof Error ? error.message : String(error)}`));

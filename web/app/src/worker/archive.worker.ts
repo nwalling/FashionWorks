@@ -29,7 +29,11 @@ export type ToWorker =
   /** Load one mesh from the already-open archive. */
   | { type: 'mesh'; path: string }
   /** Build the canonical armature before any mesh is loaded. */
-  | { type: 'rig'; base: string; donors: string[] };
+  | { type: 'rig'; base: string; donors: string[] }
+  /** Resolve a `.mtl` and its whole layer library. */
+  | { type: 'material'; path: string }
+  /** Decode one texture to RGBA at the given mip. */
+  | { type: 'texture'; path: string; maxSize: number };
 
 export interface RigSummary {
   /** Total bones: the base skeleton plus the grafted attachment points. */
@@ -49,6 +53,47 @@ export interface RigBone {
   rotation: Float32Array;
   world: Float32Array;
   attachment: boolean;
+}
+
+export interface LayerRef {
+  name: string;
+  path: string;
+  /** The layer's own colour, linear. */
+  tintColor: Float32Array;
+  /** 0 = the artist chose it; 1-3 index palette entry A/B/C. */
+  paletteTint: number;
+  glossMult: number;
+  uvTiling: number;
+  worn: LayerRef | null;
+}
+
+export interface LayerMaterial {
+  path: string;
+  diffuse: Float32Array;
+  specular: Float32Array;
+  shininess: number;
+  metal: boolean;
+  diffuseTex: string | null;
+  normalTex: string | null;
+}
+
+export interface MaterialPayload {
+  submaterials: Array<{
+    name: string;
+    shader: string;
+    tintable: boolean;
+    textures: Record<string, string>;
+    layers: LayerRef[];
+  }>;
+  /** Every distinct detail layer the piece references, by lowercased path. */
+  library: Record<string, LayerMaterial>;
+}
+
+export interface TexturePayload {
+  path: string;
+  width: number;
+  height: number;
+  rgba: Uint8Array;
 }
 
 export interface MeshPayload {
@@ -75,6 +120,8 @@ export type FromWorker =
   | { type: 'stats'; reads: number; fetched: number }
   | { type: 'mesh'; path: string; mesh: MeshPayload; ms: number }
   | { type: 'rig'; summary: RigSummary; bones: RigBone[]; ms: number }
+  | { type: 'material'; path: string; material: MaterialPayload; ms: number }
+  | { type: 'texture'; texture: TexturePayload | null; ms: number; reads: number; fetched: number }
   | { type: 'failed'; message: string };
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
@@ -154,11 +201,21 @@ function urlReader(url: string): (offset: number, length: number) => Uint8Array 
 
 /** The archive stays open between messages: re-indexing 1.37 M entries for
  * every mesh would cost 15 seconds each. */
+/** Range reads and bytes, across the session. The texture path reports these
+ * because a split DDS gathers its mip streams from sibling entries, and in the
+ * HTTP harness each of those is a round trip -- which is a property of the
+ * harness, not of the production `FileReaderSync` path. */
+let reads = 0;
+let fetched = 0;
+
 let opened: {
   archive: {
     loadMesh(path: string): unknown;
     buildRig(base: string, donors: string[]): unknown;
     rigBones(): unknown;
+    loadMaterial(path: string): unknown;
+    loadTexture(path: string, mip: number): [number, number, Uint8Array];
+    textureSizes(path: string): Uint32Array;
   };
 } | undefined;
 
@@ -172,6 +229,48 @@ async function run(message: ToWorker): Promise<void> {
     const summary = opened.archive.buildRig(message.base, message.donors) as RigSummary;
     const bones = opened.archive.rigBones() as RigBone[];
     say({ type: 'rig', summary, bones, ms: performance.now() - started });
+    return;
+  }
+
+  if (message.type === 'material') {
+    if (!opened) {
+      say({ type: 'failed', message: 'no archive is open' });
+      return;
+    }
+    const started = performance.now();
+    const material = opened.archive.loadMaterial(message.path) as MaterialPayload;
+    say({ type: 'material', path: message.path, material, ms: performance.now() - started });
+    return;
+  }
+
+  if (message.type === 'texture') {
+    if (!opened) {
+      say({ type: 'failed', message: 'no archive is open' });
+      return;
+    }
+    const started = performance.now();
+    try {
+      // Pick the largest mip that fits the cap, from the *header*. Choosing it
+      // by decoding candidates costs a full BC decode per try, and mip 0 of a
+      // control map is routinely 2048 -- so asking for 512 cost more than
+      // taking the 2048 would have.
+      const sizes = opened.archive.textureSizes(message.path);
+      let mip = 0;
+      while ((mip + 1) * 2 < sizes.length && sizes[mip * 2]! > message.maxSize) {
+        mip += 1;
+      }
+      const [w, h, rgba] = opened.archive.loadTexture(message.path, mip);
+      say({
+        type: 'texture',
+        texture: { path: message.path, width: w, height: h, rgba },
+        ms: performance.now() - started,
+        reads,
+        fetched,
+      });
+    } catch {
+      // A texture that will not decode is not fatal: the surface falls back.
+      say({ type: 'texture', texture: null, ms: performance.now() - started, reads, fetched });
+    }
     return;
   }
 
@@ -191,8 +290,6 @@ async function run(message: ToWorker): Promise<void> {
   await wasm.default();
 
   const skeleton = message.skeleton;
-  let reads = 0;
-  let fetched = 0;
   const base = message.type === 'open' || message.type === 'open-url'
     ? (message.type === 'open' ? fileReader(message.file) : urlReader(message.url))
     : (() => { throw new Error('unreachable'); })();

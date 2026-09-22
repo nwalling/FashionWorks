@@ -721,6 +721,36 @@ reporting, and is exactly how the palette-specular bug presented.
 looks for a whole family of four or more collapsing onto one colour. Lynx
 presented as *pairs* inside a family that otherwise varied fine.
 
+### A material references a .tif and the archive ships a .dds
+
+Every entry in the detail library names its textures as
+`textures/layers/natural/leather_01_diff.tif` -- the artist's source file. What
+is in the P4K is the built `.dds`. Looking the path up as written finds nothing,
+**silently**, and the composite then runs with no layer textures at all: flat
+tinted plates that look plausible and carry none of the surface detail.
+
+`find_asset` retries with the extension swapped to `.dds`.
+
+### Looking an asset up by scanning is the difference between 2s and 20s
+
+`find_asset` normalised both sides per comparison -- two `String` allocations
+against each of **1,365,842 entries** -- and a split DDS resolves about
+**eighteen** of these, one per mip stream, on top of the lookup for the texture
+itself. A piece wants a dozen textures.
+
+Measured on the Sunchaser core, scan against a `HashMap` built once:
+
+| | scan | indexed |
+| --- | --- | --- |
+| helmet, 5 surfaces | 15,162 ms | **1,490 ms** |
+| core, 5 surfaces | 19,586 ms | **485 ms** |
+| texture decode, total | 23.9 s | **1.6 s** |
+| mesh load | 1,218 ms | 206 ms |
+
+Range reads are identical at 285, so none of this was I/O. `Archive::by_path`
+is a `OnceCell` built on first lookup; `ArchiveSiblings::read_sibling` goes
+through it too, which is where most of the eighteen went.
+
 ### The canonical armature comes from two donors, and matches bone for bone
 
 The base `.chr` carries 220 bones and **no attachment points at all**. A CDS

@@ -652,8 +652,43 @@ texture arrays.
 **Exit:** per-submaterial mean albedo within tolerance of the Python bakes; the
 store-render comparisons re-run and pass; the audit invariants hold.
 
-**Status: met, all three.** `web/gpu/` holds the shader and a harness that runs
-it in a real WebGL2 context and reads both render targets back.
+**Status: met, all three, and now running on real geometry from a real
+archive.** `web/gpu/` holds the shader; `web/app/src/three/surface.ts` drives it
+from the archive, and the Sunchaser renders gold.
+
+The in-browser composite against the pipeline's baked PNGs for the same
+submaterials, with no lighting in between:
+
+| submaterial | browser | bake | off |
+| --- | --- | --- | --- |
+| `core_plate_m` | 111.3 91.5 58.3 | 109.3 89.4 56.3 | 2.1 |
+| `core_fabric_m` | 57.0 56.3 55.3 | 56.2 55.6 54.9 | 0.8 |
+| `smallplate_m` | 155.7 128.8 87.4 | 154.9 127.4 85.6 | 1.8 |
+| `backplate_m` | 114.6 99.3 73.6 | 113.0 97.4 72.3 | 1.9 |
+| `bracket_m` | 167.7 150.0 118.2 | 165.8 148.5 116.9 | 1.9 |
+
+Every one brighter, by 0.8 to 2.1 -- the direction and size the bake's own
+truncation predicts. Non-LayerBlend submaterials are skipped correctly: the
+helmet's `helmet_light_m` is `Illum`, and the core's glass and glow are
+`GlassPBR` and `Illum`.
+
+On screen the pair reads **45.5% gold at a contrast of 2.56** over a
+silhouette-diffed 101,548 body pixels. That is *not* comparable to the store
+render's 36.0%: it pools a helmet (reference 50.1%) with a core (36.0%), and
+this page's lighting is a placeholder rather than the tuned scene. The
+composite-against-bake table above is the comparison that isolates the shader.
+
+Two faults found by running it:
+
+- **A material references the artist's `.tif` and the archive ships the built
+  `.dds`.** Looking the path up as written finds nothing, silently, and the
+  composite runs with no layer textures -- flat tinted plates that look
+  plausible and carry none of the detail.
+- **Asset lookup was a linear scan over 1,365,842 entries**, normalising both
+  sides per comparison, and a split DDS resolves about eighteen of them for its
+  mip streams. Indexing once took the helmet's five surfaces from 15,162 ms to
+  **1,490 ms** and the core's from 19,586 ms to **485 ms**, with the range-read
+  count unchanged at 285 -- so none of it was I/O.
 
 | exit criterion | harness | result |
 | --- | --- | --- |
