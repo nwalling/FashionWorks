@@ -721,6 +721,60 @@ reporting, and is exactly how the palette-specular bug presented.
 looks for a whole family of four or more collapsing onto one colour. Lynx
 presented as *pairs* inside a family that otherwise varied fine.
 
+### Three frames, and the conversion between them is not one conversion
+
+The web port touches data in three different up-axes, and mixing them produces
+failures that look like parsing bugs and are not:
+
+| source | up | to three.js |
+| --- | --- | --- |
+| `.chr` skeleton and `.skin` meshes | **+Z** | -90 degrees about X: `(x, y, z) -> (x, z, -y)` |
+| an animation clip's world space | **-Y** | **180 degrees about X**: negate y and z |
+
+Clip-to-archive is itself -90 about X, so clip-to-scene is the two composed --
+which is exactly the conversion the pipeline's `to_gltf_quat` applies, and why
+`CLAUDE.md` already records the clip reaching glTF "through a 180 degree
+rotation about X".
+
+Getting it wrong is legible once you know the shape of it. Converting a clip
+rotation as if it were a skeleton rotation lays the character **on its back at a
+right angle**, every joint otherwise correct. Converting a clip *position* as if
+it were a skeleton position stands the whole body up along the wrong axis, with
+head, hips, hands and feet all at anatomically perfect distances.
+
+### A clip's local rotations apply directly here, and not in the pipeline
+
+`CLAUDE.md` lists "copy the local rotations" as a refuted approach, and it is --
+**for the pipeline**, whose rig has been through Collada, Blender and the glTF
+exporter, so its bone frames no longer match the ones the clip was authored
+against.
+
+The web port builds its armature straight from the same `.chr` the clip targets.
+The frames match, and the clip's locals apply directly. The delta retarget is
+still there and still correct; it is simply not needed when nothing has
+converted the rig in between.
+
+**Rotations only.** The clip's positions are in its own world space and would
+import the animation rig's proportions; leaving them alone is what keeps bone
+lengths ours.
+
+Measured on `nw_stand_idle_turn360_planted`, against the pipeline's own figures:
+head **1.704** against 1.70, hips **1.001** against 1.00, hands at **-0.307 and
++0.302** against ±0.31 at hip height, feet at **0.103**. 145 clip bones, all 145
+resolved by CRC32.
+
+### A socket mount is bone-relative, and `place` is not
+
+Composing `bone_world · locator⁻¹` gives where a prop lands in world space,
+which is what you want for *reporting* -- the grips test uses it. Parenting the
+prop to that same bone and also giving it that matrix applies the bone **twice**
+and floats a backpack a metre above the head, with correct facing and correct
+grips, which is a confusing place to be.
+
+What a scene graph wants is `locator⁻¹` alone; the bone supplies the rest, and
+posing then carries the prop for free. `socket::mount` and `socket::place` are
+separate functions for exactly this reason.
+
 ### A material references a .tif and the archive ships a .dds
 
 Every entry in the detail library names its textures as

@@ -22,6 +22,7 @@ pub mod mesh;
 mod p4k;
 pub mod poses;
 pub mod rebind;
+pub mod socket;
 mod range;
 
 use wasm_bindgen::prelude::*;
@@ -728,4 +729,274 @@ fn layer_to_js(layer: &material::LayerRef) -> Result<js_sys::Object, JsValue> {
     js_sys::Reflect::set(&out, &"glossMult".into(), &layer.gloss_mult.into())?;
     js_sys::Reflect::set(&out, &"uvTiling".into(), &layer.uv_tiling.into())?;
     Ok(out)
+}
+
+#[wasm_bindgen]
+impl Archive {
+    /// Load a rigid prop and work out where it mounts.
+    ///
+    /// Returns the mesh, plus `mount`: the prop's local matrix **relative to
+    /// the socket bone**, row-major 3x4 in the archive's frame. A caller
+    /// parents the mesh to that bone and applies it, which is what makes posing
+    /// move the pack with the body for free.
+    ///
+    /// Bone-relative, deliberately. Returning the world placement instead and
+    /// then parenting to the bone applies the bone twice, which floated a
+    /// backpack a metre above the head -- correct grips, correct facing,
+    /// nowhere near the body. `grips` below reports the world positions, which
+    /// is what they are for.
+    ///
+    /// `null` mount means no locator was found. The prop still loads -- it will
+    /// simply sit at the bone's origin, which is wrong but visible, rather than
+    /// vanishing.
+    #[wasm_bindgen(js_name = loadProp)]
+    pub fn load_prop(&self, path: &str, socket: &str) -> Result<JsValue, JsValue> {
+        let cga_index = self
+            .find_asset(path)
+            .ok_or_else(|| JsValue::from_str(&format!("not in this archive: {path}")))?;
+        let cga = p4k::read_entry(self.reader.source(), &self.entries[cga_index])
+            .map_err(|e| JsValue::from_str(&e))?
+            .bytes;
+        // The vertex half, as with `.skin`/`.skinm`.
+        let cgam = self
+            .find_asset(&format!("{path}m"))
+            .and_then(|i| p4k::read_entry(self.reader.source(), &self.entries[i]).ok())
+            .map(|e| e.bytes)
+            .unwrap_or_default();
+
+        let loaded = mesh::load(&cga, &cgam).map_err(|e| JsValue::from_str(&e))?;
+        let out = mesh_to_js(&loaded, None)?;
+
+        let prop = socket::Prop::parse(&cga);
+        let bone = self
+            .rig
+            .as_ref()
+            .and_then(|rig| rig.index_of(socket).map(|i| &rig.bones[i]))
+            .map(|b| socket::from_quat(b.world_rotation, b.world_position));
+
+        let locator = prop
+            .as_ref()
+            .and_then(|prop| socket::mount_for(&prop.nodes, socket))
+            .map(|node| node.bone_to_world);
+        let mount = locator.as_ref().map(socket::mount);
+        // Where things land, for reporting: this one *does* compose the bone.
+        let placed = match (&bone, &locator) {
+            (Some(bone), Some(locator)) => Some(socket::place(bone, locator)),
+            _ => None,
+        };
+
+        let object: js_sys::Object = out.clone().into();
+        js_sys::Reflect::set(
+            &object,
+            &"mount".into(),
+            &match mount {
+                Some(m) => {
+                    let flat: Vec<f32> = m.iter().flatten().copied().collect();
+                    js_sys::Float32Array::from(&flat[..]).into()
+                }
+                None => JsValue::NULL,
+            },
+        )?;
+
+        // The grips, so a caller can check left really is left. A pack's
+        // extents look the same whichever way round it is mounted.
+        let grips = js_sys::Object::new();
+        if let (Some(prop), Some(m)) = (&prop, &placed) {
+            for side in ["left", "right"] {
+                if let Some(node) = prop.grip(side) {
+                    let at = socket::apply(
+                        m,
+                        [
+                            node.bone_to_world[0][3],
+                            node.bone_to_world[1][3],
+                            node.bone_to_world[2][3],
+                        ],
+                    );
+                    js_sys::Reflect::set(
+                        &grips,
+                        &side.into(),
+                        &js_sys::Float32Array::from(&at[..]).into(),
+                    )?;
+                }
+            }
+        }
+        js_sys::Reflect::set(&object, &"grips".into(), &grips.into())?;
+
+        let helpers = js_sys::Array::new();
+        if let Some(prop) = &prop {
+            for node in prop.helpers() {
+                helpers.push(&JsValue::from_str(&node.name));
+            }
+        }
+        js_sys::Reflect::set(&object, &"helpers".into(), &helpers.into())?;
+        Ok(object.into())
+    }
+}
+
+#[wasm_bindgen]
+impl Archive {
+    /// List the clips in an animation database.
+    #[wasm_bindgen(js_name = listClips)]
+    pub fn list_clips(&self, path: &str) -> Result<js_sys::Array, JsValue> {
+        let index = self
+            .find_asset(path)
+            .ok_or_else(|| JsValue::from_str(&format!("no animation at {path}")))?;
+        let bytes = p4k::read_entry(self.reader.source(), &self.entries[index])
+            .map_err(|e| JsValue::from_str(&e))?
+            .bytes;
+        let db = starbreaker_3d::animation::parse_dba(&bytes)
+            .map_err(|e| JsValue::from_str(&format!("parsing .dba: {e}")))?;
+        let out = js_sys::Array::new();
+        for clip in &db.clips {
+            out.push(&JsValue::from_str(&clip.name));
+        }
+        Ok(out)
+    }
+
+    /// Retarget one animation clip onto the canonical armature.
+    ///
+    /// Returns a rotation **delta** per bone in the archive's own frame, as
+    /// `[w, x, y, z]`, to be applied on top of the bone's rest orientation.
+    ///
+    /// The archive's frame, not glTF's, because a rotation delta is
+    /// basis-dependent -- `d' = B d B⁻¹` -- and the caller's skeleton decides
+    /// which `B`. The pipeline's is a 180-degree rotation about X, because that
+    /// is where Blender's export lands; the web rig's is -90, because it
+    /// converts Z-up to Y-up directly. Handing out the pipeline's conversion
+    /// folded the character up: head below the hips, feet in the air.
+    ///
+    /// A delta, not an absolute orientation, and that is the whole design.
+    /// Three approaches were tried in the pipeline and two fail:
+    ///
+    /// * *Copy the clip's local rotations.* The clip stores absolute local
+    ///   rotations in the **animation rig's** bone frames, which ours no longer
+    ///   match after conversion. The character ends up on its back, and no axis
+    ///   permutation fixes it -- seven were tried.
+    /// * *Copy world orientations.* Spine and legs land; the arms point at the
+    ///   ceiling. Absolute orientation only transfers where the two rigs' bone
+    ///   axes agree, and for arms they do not.
+    /// * *Transfer each bone's delta from its own bind pose.* This works,
+    ///   because "rotate this bone by however far the animation moves it" needs
+    ///   no agreement about axes at all. Bone lengths stay ours, so the pose
+    ///   adapts to our proportions.
+    ///
+    /// Bones the clip does not animate come back as identity, which is what
+    /// lets a clip touching 145 of 255 leave the rest alone rather than
+    /// resetting them.
+    #[wasm_bindgen(js_name = retargetPose)]
+    pub fn retarget_pose(&self, path: &str, clip_name: &str) -> Result<JsValue, JsValue> {
+        use starbreaker_3d::animation::{bone_name_hash, clip_final_pose, parse_dba};
+
+        let rig = self
+            .rig
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("no rig; call buildRig first"))?;
+
+        let index = self
+            .find_asset(path)
+            .ok_or_else(|| JsValue::from_str(&format!("no animation at {path}")))?;
+        let bytes = p4k::read_entry(self.reader.source(), &self.entries[index])
+            .map_err(|e| JsValue::from_str(&e))?
+            .bytes;
+        let db = parse_dba(&bytes).map_err(|e| JsValue::from_str(&format!("parsing .dba: {e}")))?;
+
+        let needle = clip_name.to_ascii_lowercase();
+        let clip = db
+            .clips
+            .iter()
+            .find(|c| c.name.to_ascii_lowercase().contains(&needle))
+            .ok_or_else(|| JsValue::from_str(&format!("no clip matching {clip_name}")))?;
+
+        // Clip bones are keyed by CRC32 of their name; our armature has the
+        // names, so hashing ours recovers the mapping.
+        let sampled: std::collections::HashMap<u32, _> = clip_final_pose(clip).into_iter().collect();
+
+        let bind: Vec<poses::BindBone> = rig
+            .bones
+            .iter()
+            .map(|bone| poses::BindBone {
+                name: bone.name.clone(),
+                parent: bone.parent,
+                local_rotation: bone.local_rotation,
+                local_position: bone.local_position,
+                world_rotation: bone.world_rotation,
+            })
+            .collect();
+
+        // `forward_kinematics` takes an `Fn`, so the count goes in a Cell
+        // rather than making the sampler stateful.
+        let animated = std::cell::Cell::new(0usize);
+        let posed = poses::forward_kinematics(&bind, |name| {
+            let bone = sampled.get(&bone_name_hash(name))?;
+            animated.set(animated.get() + 1);
+            Some(poses::Sample {
+                rotation: Some(bone.rotation),
+                position: bone.position,
+            })
+        });
+        let animated = animated.get();
+
+        // The clip's own local rotations, per bone.
+        //
+        // **The pipeline cannot use these and this port can**, which is worth
+        // being explicit about because `CLAUDE.md` records "copy the local
+        // rotations" as a refuted approach. It is refuted *for the pipeline*:
+        // its rig has been through Collada, Blender and the glTF exporter, so
+        // its bone frames no longer match the ones the clip was authored
+        // against, and the character ends up on its back.
+        //
+        // This rig is built straight from the same `.chr` the clip targets, so
+        // the frames do match and a local rotation applies directly. The delta
+        // is still returned alongside, for a consumer whose rig has been
+        // through a conversion.
+        let locals = js_sys::Array::new();
+        for bone in &rig.bones {
+            let entry = js_sys::Object::new();
+            js_sys::Reflect::set(&entry, &"name".into(), &JsValue::from_str(&bone.name))?;
+            match sampled.get(&bone_name_hash(&bone.name)) {
+                Some(sample) => {
+                    js_sys::Reflect::set(
+                        &entry,
+                        &"rotation".into(),
+                        &js_sys::Float32Array::from(&sample.rotation[..]).into(),
+                    )?;
+                    js_sys::Reflect::set(
+                        &entry,
+                        &"position".into(),
+                        &match sample.position {
+                            Some(p) => js_sys::Float32Array::from(&p[..]).into(),
+                            None => JsValue::NULL,
+                        },
+                    )?;
+                }
+                None => {
+                    js_sys::Reflect::set(&entry, &"rotation".into(), &JsValue::NULL)?;
+                    js_sys::Reflect::set(&entry, &"position".into(), &JsValue::NULL)?;
+                }
+            }
+            locals.push(&entry);
+        }
+
+        let out = js_sys::Object::new();
+        let deltas = js_sys::Array::new();
+        // The armature **root is skipped**: it carries the clip's own world
+        // placement, which otherwise drags the whole body a metre sideways.
+        for (i, (name, pose)) in posed.iter().enumerate() {
+            let entry = js_sys::Object::new();
+            js_sys::Reflect::set(&entry, &"name".into(), &JsValue::from_str(name))?;
+            js_sys::Reflect::set(&entry, &"root".into(), &(rig.bones[i].parent.is_none()).into())?;
+            js_sys::Reflect::set(
+                &entry,
+                &"delta".into(),
+                &js_sys::Float32Array::from(&pose.raw[..]).into(),
+            )?;
+            deltas.push(&entry);
+        }
+        js_sys::Reflect::set(&out, &"clip".into(), &JsValue::from_str(&clip.name))?;
+        js_sys::Reflect::set(&out, &"bones".into(), &deltas.into())?;
+        js_sys::Reflect::set(&out, &"locals".into(), &locals.into())?;
+        js_sys::Reflect::set(&out, &"animated".into(), &(animated as f64).into())?;
+        js_sys::Reflect::set(&out, &"clipBones".into(), &(sampled.len() as f64).into())?;
+        Ok(out.into())
+    }
 }

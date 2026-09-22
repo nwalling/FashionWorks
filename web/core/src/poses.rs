@@ -46,8 +46,20 @@ pub struct Sample {
 /// The retargeted pose for one bone, in glTF axes.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Posed {
-    /// Rotation delta as glTF `[x, y, z, w]`.
+    /// Rotation delta as glTF `[x, y, z, w]`, for the pipeline's frame.
+    ///
+    /// This one has the clip-space-to-glTF conversion baked in -- a 180-degree
+    /// rotation about X -- because that is the change of basis the pipeline's
+    /// Blender export ends up in.
     pub delta: [f32; 4],
+    /// The same delta in the **archive's own frame**, as `[w, x, y, z]`.
+    ///
+    /// A consumer whose skeleton is in a different basis needs this one and has
+    /// to conjugate it itself: a rotation delta is basis-dependent, `d' = B d
+    /// B⁻¹`. The web port builds its bones with a *-90 degree* rotation about X
+    /// (Z-up to Y-up), not 180, so handing it [`Posed::delta`] folds the
+    /// character up -- head below the hips, feet in the air.
+    pub raw: [f32; 4],
     pub position: Vec3,
 }
 
@@ -139,6 +151,7 @@ pub fn forward_kinematics(
                 bone.name.clone(),
                 Posed {
                     delta: to_gltf_quat(delta),
+                    raw: delta,
                     position: to_gltf_position(world_position[i]),
                 },
             )
@@ -195,6 +208,20 @@ mod tests {
         });
         let child = out[1].1.delta;
         assert!((child[3] - 0.70710677).abs() < 1e-5, "child inherits the turn: {child:?}");
+    }
+
+    #[test]
+    fn the_raw_delta_is_the_unconverted_one() {
+        // A consumer in a different basis needs this: the delta is
+        // basis-dependent, and handing out only the glTF-converted one folded
+        // the web port's character up.
+        let turn: Quat = [0.70710677, 0.0, 0.0, 0.70710677];
+        let bind = vec![bone("World", None, ID, ID)];
+        let out = forward_kinematics(&bind, |_| {
+            Some(Sample { rotation: Some(turn), position: None })
+        });
+        assert_eq!(out[0].1.raw, turn, "[w, x, y, z], no conversion");
+        assert_eq!(out[0].1.delta, to_gltf_quat(turn));
     }
 
     #[test]

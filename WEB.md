@@ -440,8 +440,35 @@ rotating `LeftFoot` moves the helmet by 0. And one `Spine1` rotation moves the
 helmet *and* the core, which is the whole point of the shared armature: **2
 pieces, 1 `THREE.Skeleton`, 1 bone array, 255 bone objects.**
 
-Socket placement and pose retargeting are ported and checked against the
-pipeline but are not yet wired into this scene.
+**Sockets and poses are wired in too, so a loadout assembles.** A backpack is a
+rigid `.cga` with no bone weights at all: it parents to
+`backpack_attach_1_override` with `locator⁻¹` as its local matrix, and posing
+the spine carries it while posing a foot does not. Its own
+`grip_left_1`/`grip_right_1` land at x **-0.206** and **+0.202**, which is the
+only check that catches a backwards mount -- a pack's extents look much the same
+either way round. **No yaw**: the pipeline's `SOCKET_YAW` is a Blender-frame
+correction and applying it here mounts the pack backwards.
+
+The idle pose retargets from `stand.dba` at **145 clip bones, all 145 resolved**
+by CRC32, and lands on the pipeline's own figures: head **1.704** against 1.70,
+hips **1.001** against 1.00, hands at **-0.307** and **+0.302** against ±0.31 at
+hip height, feet at **0.103**.
+
+Two things that cost real time, both recorded in `CLAUDE.md`:
+
+- **There are three up-axes, not two.** The `.chr` is +Z up, an animation clip's
+  world space is **-Y** up, three.js is +Y. Archive-to-scene is -90 degrees
+  about X; clip-to-scene is **180**. Using the skeleton's conversion on a clip
+  rotation lays the character on its back at a right angle with every joint
+  otherwise correct; using it on a clip *position* stands the body up along the
+  wrong axis with every distance anatomically perfect.
+- **A clip's local rotations apply directly here, and the pipeline's refutation
+  of that does not transfer.** "Copy the local rotations" fails for a rig that
+  has been through Collada and Blender, because its bone frames no longer match
+  the clip's. This armature is built straight from the same `.chr` the clip
+  targets, so they do match. Rotations only -- the clip's positions would import
+  the animation rig's proportions, and leaving them alone is what keeps bone
+  lengths ours.
 
 *How it went.* The first question was the same one phase 0 asked of the DataCore:
 does the parser run on wasm32 at all? `starbreaker-3d` as shipped does **not**,

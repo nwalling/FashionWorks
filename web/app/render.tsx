@@ -18,6 +18,7 @@ import {
   DirectionalLight,
   GridHelper,
   PerspectiveCamera,
+  Mesh,
   Scene,
   SkeletonHelper,
   SkinnedMesh,
@@ -26,10 +27,12 @@ import {
 } from 'three';
 
 import { buildGeometry } from './src/three/geometry';
-import { buildRig, type BuiltRig } from './src/three/rig';
+import {
+  applyClip, buildRig, mountMatrix, restPose, type BuiltRig,
+} from './src/three/rig';
 import { compositeSurfaces, materialFor, type Composited, type PaletteEntry } from './src/three/surface';
 import type {
-  FromWorker, MaterialPayload, MeshPayload, RigBone, TexturePayload, ToWorker,
+  FromWorker, MaterialPayload, MeshPayload, PropPayload, RigBone, TexturePayload, ToWorker,
 } from './src/worker/archive.worker';
 
 /** The piece to show. Sunchaser because it is the set every other measurement
@@ -72,7 +75,33 @@ function hex(value: string): [number, number, number] {
   return [1, 3, 5].map((i) => parseInt(value.slice(i, i + 2), 16) / 255) as [number, number, number];
 }
 
+/** A rigid prop, which binds to a socket rather than being skinned.
+ *
+ * 135 catalogue items come out this way. The backpack is the case the socket
+ * work was verified on, and the one where a backwards mount is invisible to a
+ * bounding box.
+ */
+const PROP = {
+  name: 'BUL-H4 Ammo Carrier Stronghold',
+  path: 'Objects/Characters/Human/backpack/cds/m_cds_combat_superheavy_backpack_01.cga',
+  mtl: 'Objects/Characters/Human/backpack/cds/m_cds_combat_superheavy_backpack_01_05.mtl',
+  socket: 'backpack_attach_1_override',
+  materials: 4,
+};
+
 const BASE_SKELETON = 'Objects/Characters/Human/male_v7/export/bhm_skeleton_v7.chr';
+
+/** Where the poses live, and which clip to stand in.
+ *
+ * `nw_stand_idle_turn360_planted` is one of the two the pipeline uses. Clips
+ * suffixed `_add` are additive deltas layered at runtime and are no use alone.
+ */
+const POSE = {
+  dba: 'Animations/Characters/Human/male_v7/weapons/no_weapon/locomotion/stand.dba',
+  clip: 'nw_stand_idle_turn360_planted',
+};
+
+let rest: Map<string, import('three').Quaternion> | undefined;
 
 /** Donors for the attachment points the base skeleton does not have.
  *
@@ -92,7 +121,7 @@ const DONORS = [
   'Objects/Characters/Human/male_v7/armor/slaver/m_slaver_heavy_armor_01_core.skin',
 ];
 
-const bound: SkinnedMesh[] = [];
+const bound: Array<SkinnedMesh | Mesh> = [];
 let pending = 0;
 
 let rig: BuiltRig | undefined;
@@ -143,6 +172,9 @@ addEventListener('resize', () => {
 
 function showRig(bones: readonly RigBone[], summary: { bones: number; base: number; grafted: number; attachments: number }): void {
   rig = buildRig(bones);
+  // Captured before anything is posed: taking it afterwards makes every later
+  // comparison read zero and look like a parsing failure.
+  rest = restPose(rig);
   scene.add(rig.root);
   const helper = new SkeletonHelper(rig.root);
   (helper.material as { opacity: number; transparent: boolean }).opacity = 0.35;
@@ -264,6 +296,53 @@ function rpc(worker: Worker) {
     });
 }
 
+function showProp(
+  prop: PropPayload,
+  ms: number,
+  material: MaterialPayload,
+  composited: Composited,
+): void {
+  const { geometry } = buildGeometry(prop, PROP.materials);
+  const materials = material.submaterials.map((sub) => materialFor(sub.name, composited));
+
+  // A plain Mesh, not a SkinnedMesh: the prop carries no bone weights at all.
+  const object = new Mesh(geometry, materials);
+  object.frustumCulled = false;
+
+  const bone = rig?.byName.get(PROP.socket);
+  say(`\n${PROP.name}`);
+  say(`${(prop.positions.length / 3).toLocaleString()} vertices, `
+    + `${(prop.indices.length / 3).toLocaleString()} triangles, ${ms.toFixed(0)}ms`);
+  say(`${prop.helpers.length} helpers, socket ${bone ? 'found' : 'MISSING'}`);
+
+  if (bone && prop.mount) {
+    // Parented to the bone with the mount as its local matrix, so posing the
+    // spine carries the pack with it and nothing has to be recomputed.
+    object.matrixAutoUpdate = false;
+    object.matrix.copy(mountMatrix(prop.mount));
+    bone.add(object);
+    const f = (v: number) => v.toFixed(3);
+    const left = prop.grips.left;
+    const right = prop.grips.right;
+    if (left && right) {
+      // Archive frame: x is across the body. Left must stay negative.
+      say(`grips land at x ${f(left[0]!)} (left) and ${f(right[0]!)} (right)`
+        + `  ${left[0]! < 0 && right[0]! > 0 ? 'CORRECT' : 'BACKWARDS'}`);
+    }
+  } else {
+    scene.add(object);
+    say('no mount found; sitting at the origin');
+  }
+  bound.push(object);
+
+  (window as unknown as { __prop: unknown }).__prop = {
+    vertices: prop.positions.length / 3,
+    mounted: Boolean(bone && prop.mount),
+    grips: { left: prop.grips.left ? Array.from(prop.grips.left) : null,
+             right: prop.grips.right ? Array.from(prop.grips.right) : null },
+  };
+}
+
 async function main(): Promise<void> {
   const head = await fetch('/__p4k', { method: 'HEAD' });
   const total = Number(head.headers.get('content-length') ?? 0);
@@ -316,10 +395,34 @@ async function main(): Promise<void> {
     show(mesh.mesh, mesh.ms, piece, material.material, composited);
   }
 
+  // The prop, mounted rather than skinned.
+  const propMessage = await ask({ type: 'prop', path: PROP.path, socket: PROP.socket }, 'prop');
+  const propMaterial = await ask({ type: 'material', path: PROP.mtl }, 'material');
+  const propComposited = await compositeSurfaces(propMaterial.material, PALETTE, fetchTexture);
+  showProp(propMessage.prop, propMessage.ms, propMaterial.material, propComposited);
+
+  // Last, the pose: applied once every piece is bound, so the deformation is
+  // visible on all of them at once.
+  if (rig && rest) {
+    const posed = await ask({ type: 'pose', path: POSE.dba, clip: POSE.clip }, 'pose');
+    const moved = applyClip(rig, posed.pose.locals);
+    say(`\npose ${posed.pose.clip}`);
+    say(`${posed.pose.clipBones} bones in the clip, ${posed.pose.animated} match ours, `
+      + `${moved} actually move`);
+    (window as unknown as { __pose2: unknown }).__pose2 = {
+      clip: posed.pose.clip, animated: posed.pose.animated, moved,
+    };
+  }
+
   say(`\n${textureReads.toLocaleString()} range reads total, `
     + `${(textureMs / 1000).toFixed(1)}s of it decoding textures`);
-  const skeletons = new Set(bound.map((m) => m.skeleton));
-  say(`\n${bound.length} pieces, ${skeletons.size} skeleton${skeletons.size === 1 ? '' : 's'}`);
+  // Only the skinned pieces have one. A mounted prop has no skeleton at all --
+  // counting it would report two and read like a bug.
+  const skinned = bound.filter((m) => 'skeleton' in m && m.skeleton);
+  const skeletons = new Set(skinned.map((m) => m.skeleton));
+  say(`\n${bound.length} pieces: ${skinned.length} skinned on `
+    + `${skeletons.size} skeleton${skeletons.size === 1 ? '' : 's'}, `
+    + `${bound.length - skinned.length} mounted`);
 }
 
 void main().catch((error) => say(`threw: ${error instanceof Error ? error.message : String(error)}`));

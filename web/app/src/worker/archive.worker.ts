@@ -33,7 +33,11 @@ export type ToWorker =
   /** Resolve a `.mtl` and its whole layer library. */
   | { type: 'material'; path: string }
   /** Decode one texture to RGBA at the given mip. */
-  | { type: 'texture'; path: string; maxSize: number };
+  | { type: 'texture'; path: string; maxSize: number }
+  /** Load a rigid prop and work out where it mounts. */
+  | { type: 'prop'; path: string; socket: string }
+  /** Retarget an animation clip onto the canonical armature. */
+  | { type: 'pose'; path: string; clip: string };
 
 export interface RigSummary {
   /** Total bones: the base skeleton plus the grafted attachment points. */
@@ -96,6 +100,29 @@ export interface TexturePayload {
   rgba: Uint8Array;
 }
 
+export interface PosePayload {
+  clip: string;
+  /** Rotation deltas in the archive frame, `[w, x, y, z]`, for a rig whose
+   * bone frames no longer match the clip's. */
+  bones: Array<{ name: string; root: boolean; delta: Float32Array }>;
+  /** The clip's own local rotations, `[w, x, y, z]`, which apply directly to a
+   * rig built from the same `.chr` the clip targets. */
+  locals: Array<{ name: string; rotation: Float32Array | null; position: Float32Array | null }>;
+  /** How many of our bones the clip actually animates. */
+  animated: number;
+  clipBones: number;
+}
+
+export interface PropPayload extends MeshPayload {
+  /** The prop's own space mapped onto its socket bone: row-major 3x4, in the
+   * archive's Z-up frame. Null when no locator was found. */
+  mount: Float32Array | null;
+  /** Where the grips land once mounted. These, not the bounding box, are what
+   * tell a pack mounted backwards from one mounted correctly. */
+  grips: { left?: Float32Array; right?: Float32Array };
+  helpers: string[];
+}
+
 export interface MeshPayload {
   positions: Float32Array;
   normals: Float32Array;
@@ -122,6 +149,8 @@ export type FromWorker =
   | { type: 'rig'; summary: RigSummary; bones: RigBone[]; ms: number }
   | { type: 'material'; path: string; material: MaterialPayload; ms: number }
   | { type: 'texture'; texture: TexturePayload | null; ms: number; reads: number; fetched: number }
+  | { type: 'prop'; path: string; prop: PropPayload; ms: number }
+  | { type: 'pose'; pose: PosePayload; ms: number }
   | { type: 'failed'; message: string };
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
@@ -214,6 +243,8 @@ let opened: {
     buildRig(base: string, donors: string[]): unknown;
     rigBones(): unknown;
     loadMaterial(path: string): unknown;
+    loadProp(path: string, socket: string): unknown;
+    retargetPose(path: string, clip: string): unknown;
     loadTexture(path: string, mip: number): [number, number, Uint8Array];
     textureSizes(path: string): Uint32Array;
   };
@@ -229,6 +260,28 @@ async function run(message: ToWorker): Promise<void> {
     const summary = opened.archive.buildRig(message.base, message.donors) as RigSummary;
     const bones = opened.archive.rigBones() as RigBone[];
     say({ type: 'rig', summary, bones, ms: performance.now() - started });
+    return;
+  }
+
+  if (message.type === 'pose') {
+    if (!opened) {
+      say({ type: 'failed', message: 'no archive is open' });
+      return;
+    }
+    const started = performance.now();
+    const pose = opened.archive.retargetPose(message.path, message.clip) as PosePayload;
+    say({ type: 'pose', pose, ms: performance.now() - started });
+    return;
+  }
+
+  if (message.type === 'prop') {
+    if (!opened) {
+      say({ type: 'failed', message: 'no archive is open' });
+      return;
+    }
+    const started = performance.now();
+    const prop = opened.archive.loadProp(message.path, message.socket) as PropPayload;
+    say({ type: 'prop', path: message.path, prop, ms: performance.now() - started });
     return;
   }
 
