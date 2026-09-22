@@ -10,7 +10,8 @@ Data.p4k -> catalog (JSON) -> geometry/textures -> Blender normalize -> .glb + m
 
 `LIGHTING.md` holds a deferred plan for the viewer's lighting model.
 `WEB-LEGAL.md` holds the Phase 0 legal research: what CIG's EULA and
-Fandom FAQ actually say, and the options. The go/no-go is still open.
+Fandom FAQ actually say, the options, and **the go/no-go, which is decided and
+is go** — with the conditions recorded under "Legal" at the foot of this file.
 `WEB.md` holds the plan for a public web front end on sc-hangarworks.org.
 `WEB-INTEGRATION.md` is the contract the Hangarworks site builds against.
 `WEB-INTEGRATION-PLAN.md` is the ordered plan handed to the agent that builds
@@ -160,10 +161,15 @@ the data.
 ### Verified against real game data
 
 Build **1.0.191.55227** (`sc-alpha-4.10.0-hotfix`, 3 Sep 2026), a 158 GB
-`Data.p4k`. A full catalog run takes about 17 seconds and yields **2615 items**
-(739 helmet, 474 torso, 516 arms, 472 legs, 162 backpack, 252 undersuit),
-399 canonical plus 2216 colour variants across 165 sets, every one with real
-geometry.
+`Data.p4k`. A full catalog run takes about 17 seconds and yields **2475 items**
+(708 helmet, 474 torso, 459 arms, 469 legs, 143 backpack, 222 undersuit),
+594 canonical plus 1881 colour variants across 210 sets, every one with real
+geometry, **0 flagged `no_geometry` and 0 duplicate class names**.
+
+These are the figures after the phantom-record fix and the variant-linking fix
+below, both of which change the counts. An earlier reading of 2615 items in 165
+sets included 140 tint-palette records that are not items at all, and grouped
+eleven pieces spanning two product lines as one colourway family.
 
 **Record shape.** `Components` is a *list* whose members carry their type in
 `_Type_`, not a dict keyed by type name. The record body is wrapped in
@@ -931,7 +937,8 @@ only when the Rust port -- which filters on the `entities/scitem/characters/
 human/` path and so never saw them -- built 140 fewer items.
 
 `data/out/manifest.json` keeps the phantoms until `scx catalog`, `scx refresh`
-and `scx variants` are re-run in that order.
+and `scx variants` are re-run in that order. **Those three have been run**:
+2475 items, 2289 renderable, 1854 variant surfaces baked.
 
 ### A one-directional diff scores the test, not the reference
 
@@ -1614,6 +1621,40 @@ applied twice. Every material on an equipped variant carries `color` at
 `#ffffff` with a single swapped map, so the colour arrives once, from the
 texture. The flat palette multiply that used to sit on top is gone.
 
+### A colourway family must not span two product lines
+
+`link_variants` keyed on `(slot, geometry_key)`, and the mesh alone is too
+loose in the same way the `Set_<n>` tag is too loose the other way. `Defiance
+Legs Sunchaser` and `ADP-mk4 Legs Woodland` are both
+`m_cds_heavy_armor_01_legs.skin` -- the genuine reuse recorded above, which is
+not to be "fixed" -- so eleven pieces across two product lines became **one**
+family. `sharedName` then found no common prefix, fell back to the canonical
+member's name, and every Defiance colourway disappeared as a swatch under
+*ADP-mk4 Legs Woodland*. 71 families spanned more than one product this way.
+
+The product line joins the key. **Not the `set` tag**: that separates
+`citadel` from `citadel-se` and splits Aves across four keys, over-splitting
+lines that are one product with several editions.
+
+**The measure is whether a family shares a name prefix**, because that is
+exactly what `sharedName` needs to title the row, and it is the thing the user
+actually sees. Aggregate counts do not discriminate here: the family count
+barely moves. Across the catalogue, families sharing no prefix go from **56 to
+5**, and the 5 that remain are all unnamed items whose "name" is a class name
+and so share no words by construction.
+
+**An unnamed item's name is its class name, not `None`.** `flags_for` sets the
+name fallback and the `unnamed` flag together, so a fallback written as
+`product_key(item.name or item.class_name)` never fires, and `product_key` of a
+class name is the whole class name -- colour index included. That gives every
+unnamed colourway a key of its own and splits the family it was meant to hold
+together. `set_key` already had this right; the fallback tests the flag, as it
+does, and uses `canonical_key`, which is what drops the index.
+
+Mirrored in `web/core/src/catalog/build.rs`, with `full_diff` reporting
+**100.00% on all 20 fields over 2475 items in both directions**, `variant_of`
+and `variants` among them.
+
 ### Backdrops
 
 `viewer/src/components/Backdrop.tsx` puts a photographic plate behind the
@@ -1762,6 +1803,13 @@ viewer/src/
   Everything else is owned by `three/gltfCache.ts`, which disposes a whole GLB
   when its byte budget evicts it, and never one that a mounted `ArmorPiece` has
   pinned.
+- **A per-theme CSS rule must be scoped to `html`.** `[data-theme="dolomite"]`
+  matches *any* element carrying that attribute, not just the document root, so
+  the theme chips in `web/app/try.html` -- which set `data-theme` to name the
+  theme they switch to -- each inherited that theme's whole palette and drew a
+  light theme's text colour on the dark page. About 1.3:1, which reads as a
+  disabled button rather than as a bug. Hangarworks itself never hits this,
+  because `ThemeProvider` writes to `document.documentElement` and nothing else.
 - **`ContactShadows` must not be offset upwards.** drei parents its depth camera
   to the component's own group, but the plane it runs the two blur passes
   through is a standalone mesh pinned at world y=0. Give the group a positive y
