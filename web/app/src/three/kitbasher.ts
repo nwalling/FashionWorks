@@ -29,6 +29,7 @@ import {
   colourwayName,
   displayName,
   familyRoot,
+  readCatalogue,
   sharedName,
   SLOTS,
   type Catalogue,
@@ -40,14 +41,41 @@ import { buildGeometry } from './geometry';
 import { applyClip, buildRig, mountMatrix, type BuiltRig } from './rig';
 import { compositeSurfaces, materialFor, type PaletteEntry } from './surface';
 
-export const BASE_SKELETON = 'Objects/Characters/Human/male_v7/export/bhm_skeleton_v7.chr';
+export type Body = 'male' | 'female';
 
-/** Two donors exactly: 220 base bones + 34 + 1 reaches the pipeline's canonical
- * armature of 255 with 35 attachment points, none missing and none extra. */
-export const DONORS = [
-  'Objects/Characters/Human/male_v7/armor/cds/m_cds_undersuit_armor_02.skin',
-  'Objects/Characters/Human/male_v7/armor/slaver/m_slaver_heavy_armor_01_core.skin',
-];
+/** The base skeleton and the donor pieces, per body type.
+ *
+ * **Both skeletons carry the same 220 bone names.** Measured against the real
+ * archive: the female `.chr` has 220 bones, every name also in the male base,
+ * and *no* female-only bone. The 35 the male armature has beyond that are all
+ * grafted `*_override` attachment points, which come from the donor pieces and
+ * not from the `.chr`. That is what makes a body switch a swap of meshes and
+ * rig rather than a second binding scheme -- binding is by name everywhere.
+ *
+ * Donors are a fixed list, not an accumulation: grafting from more pieces
+ * extends the armature rather than reproducing the pipeline's. Male reaches
+ * 255 bones with 35 attachment points; female reaches 256 with 36.
+ */
+export const SKELETONS: Record<Body, { chr: string; donors: string[] }> = {
+  male: {
+    chr: 'Objects/Characters/Human/male_v7/export/bhm_skeleton_v7.chr',
+    donors: [
+      'Objects/Characters/Human/male_v7/armor/cds/m_cds_undersuit_armor_02.skin',
+      'Objects/Characters/Human/male_v7/armor/slaver/m_slaver_heavy_armor_01_core.skin',
+    ],
+  },
+  female: {
+    chr: 'Objects/Characters/Human/female_v2/export/bhf_skeleton_v2.chr',
+    donors: [
+      'Objects/Characters/Human/female_v2/armor/cds/f_cds_undersuit_armor_02.skin',
+      'Objects/Characters/Human/female_v2/armor/slaver/f_slaver_heavy_armor_01_core.skin',
+    ],
+  },
+};
+
+/** The male rig, for callers that predate the body switch. */
+export const BASE_SKELETON = SKELETONS.male.chr;
+export const DONORS = SKELETONS.male.donors;
 
 /** How much room to leave around a framed loadout. Enough that a pauldron or a
  * backpack does not touch the edge, not so much that the figure swims. */
@@ -94,6 +122,10 @@ export interface KitbasherState {
   readonly status: string;
   readonly busy: boolean;
   readonly rigBones: number;
+  readonly body: Body;
+  /** Rebuilt on a body switch, because the geometry tree selects a different
+   * mesh per skeleton. The listing renders from this, not from a prop. */
+  readonly catalogue: Catalogue;
 }
 
 /** A tint palette from the catalogue.
@@ -192,18 +224,11 @@ export class Kitbasher {
 
   private readonly wearing = new Map<Slot, CatalogueItem>();
 
-  /** Loaded pieces, so re-equipping is instant. Keyed by item *and* wear,
-   * because the two surfaces are genuinely different bakes. */
+  /** Loaded pieces, so re-equipping is instant. Keyed by item, wear **and
+   * body**, because all three pick a genuinely different mesh or bake. */
   private readonly cache = new Map<string, Object3D[]>();
 
-  private state: KitbasherState = {
-    wearing: new Map(),
-    pose: 'rest',
-    wear: true,
-    status: '',
-    busy: false,
-    rigBones: 0,
-  };
+  private state: KitbasherState;
 
   private readonly listeners = new Set<(state: KitbasherState) => void>();
 
@@ -211,9 +236,26 @@ export class Kitbasher {
 
   constructor(
     private readonly client: ArchiveClient,
-    readonly catalogue: Catalogue,
+    catalogue: Catalogue,
     private readonly view: KitbasherScene,
-  ) {}
+    body: Body = 'male',
+  ) {
+    this.state = {
+      wearing: new Map(),
+      pose: 'rest',
+      wear: true,
+      status: '',
+      busy: false,
+      rigBones: 0,
+      body,
+      catalogue,
+    };
+  }
+
+  /** The catalogue for the body currently on screen. */
+  get catalogue(): Catalogue {
+    return this.state.catalogue;
+  }
 
   subscribe(listener: (state: KitbasherState) => void): () => void {
     this.listeners.add(listener);
@@ -231,11 +273,14 @@ export class Kitbasher {
     for (const listener of this.listeners) listener(this.state);
   }
 
-  /** Build the canonical armature and stand it in the scene. Once. */
+  /** Build the canonical armature for the current body and stand it in the
+   * scene. Idempotent, and re-entered by a body switch after the old rig has
+   * been taken out. */
   async init(): Promise<void> {
     if (this.rig) return;
+    const { chr, donors } = SKELETONS[this.state.body];
     this.publish({ busy: true, status: 'building the skeleton…' });
-    const built = await this.client.rig(BASE_SKELETON, DONORS);
+    const built = await this.client.rig(chr, donors);
     if (this.disposed) return;
     this.rig = buildRig(built.bones);
     this.restRotations = new Map(this.rig.bones.map((b) => [b.name, b.quaternion.clone()]));
@@ -247,8 +292,53 @@ export class Kitbasher {
     });
   }
 
+  /** Switch body type: new skeleton, new catalogue, same loadout where it
+   * exists for the other body.
+   *
+   * The DataCore item is shared between the two -- only the mesh the geometry
+   * tree selects differs -- so what is worn carries across **by item id**. A
+   * piece with no mesh for the other body simply does not come back, which is
+   * honest: it is not in the game for that body either.
+   */
+  async setBody(body: Body): Promise<void> {
+    if (body === this.state.body || this.state.busy) return;
+    this.publish({ busy: true, status: `switching to the ${body} body…` });
+
+    const worn = [...this.wearing.values()].map((item) => item.id);
+    this.clear();
+    // The cache is keyed by body, so nothing has to be thrown away; the old
+    // body's meshes stay loaded and switching back is instant.
+    this.rig?.root.removeFromParent();
+    this.rig = null;
+
+    const rebuilt = await this.client.catalogue(body, ({ step, fraction }) => {
+      this.publish({ status: `${step} ${Math.round(fraction * 100)}%` });
+    });
+    if (this.disposed) return;
+
+    this.state = { ...this.state, body, catalogue: readCatalogue(rebuilt.json) };
+    await this.init();
+    if (this.disposed) return;
+
+    const byId = new Map(this.state.catalogue.items.map((i) => [i.id, i]));
+    let restored = 0;
+    for (const id of worn) {
+      const item = byId.get(id);
+      if (!item) continue;
+      await this.equip(item);
+      restored += 1;
+    }
+    await this.setPose(POSES.find((p) => p.label === this.state.pose) ?? POSES[0]!);
+
+    this.publish({
+      busy: false,
+      status: `${body} body · ${this.state.catalogue.items.length.toLocaleString()} pieces`
+        + (worn.length ? ` · ${restored} of ${worn.length} carried over` : ''),
+    });
+  }
+
   private async load(item: CatalogueItem): Promise<Object3D[]> {
-    const key = `${item.id}:${this.state.wear}`;
+    const key = `${item.id}:${this.state.wear}:${this.state.body}`;
     const hit = this.cache.get(key);
     if (hit) return hit;
 

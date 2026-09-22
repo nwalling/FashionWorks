@@ -1655,6 +1655,41 @@ Mirrored in `web/core/src/catalog/build.rs`, with `full_diff` reporting
 **100.00% on all 20 fields over 2475 items in both directions**, `variant_of`
 and `variants` among them.
 
+### The female body is the same rig with different meshes
+
+The long-standing "whether female meshes bind to the same bone names as male
+ones" is answered: **they do, exactly.** Measured against the real archive,
+`female_v2/export/bhf_skeleton_v2.chr` carries **220 bones, every name also in
+the male base, and not one female-only bone**. The 35 the male *armature* has
+beyond that are all grafted `*_override` attachment points, which come from the
+donor pieces rather than from the `.chr`.
+
+So a body switch is a swap of meshes and rig, not a second binding scheme --
+binding is by name everywhere, and the name sets are identical.
+
+**Female donors exist and mirror the male list**, `m_` becoming `f_`:
+`f_cds_undersuit_armor_02.skin` (42,677 verts) and
+`f_slaver_heavy_armor_01_core.skin` (22,842 verts), both 220 bones. Grafted,
+the female armature reaches **256 bones with 36 attachment points**, against
+the male's 255 and 35 -- one more, and harmless, since nothing binds
+positionally.
+
+**The item is shared; only the mesh differs.** `SubGeometry[1]` is the female
+`f_*.skin` and `SubGeometry[2]` the male `m_*.skin` on the *same* DataCore
+record, which is why a loadout carries across a switch by item id. Measured on
+a full Defiance Sunchaser set: 4 of 4 pieces carried over, geometry changing
+from `m_slaver_heavy_armor_01_core.skin` to `f_slaver_heavy_armor_01_core.skin`
+and so on, one shared skeleton across all four.
+
+The catalogues differ slightly in size -- **2,439 male against 2,436 female** --
+because three pieces have no female mesh. They simply do not appear for that
+body, which is honest: they are not in the game for it either.
+
+**Switching re-reads the DataCore, so the built catalogue is cached per body.**
+The DCB is 316 MB and deliberately not held; the catalogue it produces is a few
+MB of JSON and is. First switch to a body 10.2s, every switch after it **under
+a second** -- measured 956ms back to male and 952ms to female again.
+
 ### Backdrops
 
 `viewer/src/components/Backdrop.tsx` puts a photographic plate behind the
@@ -1739,7 +1774,6 @@ detached anchor.
 
 ### Still unverified
 
-- Whether female meshes bind to the same bone names as male ones.
 - Only one set has been converted end to end. `scx convert` has not been run
   across the full catalog, so per-item failure rates are unknown.
 - The socket bone is chosen from a per-slot table rather than read from the

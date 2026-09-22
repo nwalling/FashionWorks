@@ -45,7 +45,7 @@ export interface KitbasherProps {
 }
 
 export function Kitbasher(props: KitbasherProps): JSX.Element {
-  const { client, catalogue, tokens, initialLoadout, onLoadoutChange, onEngine } = props;
+  const { client, catalogue: initialCatalogue, tokens, initialLoadout, onLoadoutChange, onEngine } = props;
   const engine = useRef<Engine | null>(null);
   const [state, setState] = useState<KitbasherState | null>(null);
   const [slot, setSlot] = useState<Slot>('torso');
@@ -57,7 +57,7 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
   // The engine is built once the scene exists, and torn down with the view.
   const onScene = useCallback((handle: ViewerHandle) => {
     viewer.current = handle;
-    const built = new Engine(client, catalogue, handle);
+    const built = new Engine(client, initialCatalogue, handle);
     engine.current = built;
     onEngine?.(built);
     const unsubscribe = built.subscribe(setState);
@@ -68,7 +68,7 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
         if (restored) return;
       }
       // Open on something rather than an empty grid.
-      const torsos = catalogue.bySlot.get('torso') ?? [];
+      const torsos = initialCatalogue.bySlot.get('torso') ?? [];
       const opener = torsos.find((i) => displayName(i).includes('Sunchaser'))
         ?? torsos.find((i) => !i.variant_of);
       if (opener) await built.equip(opener);
@@ -98,6 +98,9 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
 
   const wearing = state?.wearing ?? new Map<Slot, CatalogueItem>();
   const onBody = wearing.get(slot);
+  // The engine rebuilds this on a body switch, so the listing follows it
+  // rather than the prop it started from.
+  const catalogue = state?.catalogue ?? initialCatalogue;
 
   // Canonical pieces only: a family's colourways appear as swatches below,
   // rather than as twenty near-identical rows.
@@ -133,7 +136,22 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
 
   return (
     <div className="fw-kit" data-fashionworks-kitbasher="">
-      <div className="fw-kit-bar" role="toolbar" aria-label="Pose, surface, set and backdrop">
+      <div className="fw-kit-bar" role="toolbar" aria-label="Body, pose, surface, set and backdrop">
+        <span className="fw-kit-group">
+          <span className="fw-kit-label">body</span>
+          {(['male', 'female'] as const).map((body) => (
+            <button
+              key={body}
+              type="button"
+              aria-pressed={(state?.body ?? 'male') === body}
+              disabled={busy}
+              title={`Show armour on the ${body} body`}
+              onClick={() => void engine.current?.setBody(body)}
+            >
+              {body}
+            </button>
+          ))}
+        </span>
         <span className="fw-kit-group">
           <span className="fw-kit-label">pose</span>
           {POSES.map((pose) => (

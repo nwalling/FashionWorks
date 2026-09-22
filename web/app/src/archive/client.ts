@@ -222,6 +222,21 @@ export class ArchiveClient {
     pump();
   }
 
+  /** Rebuild the catalogue for the other body type, over the open archive.
+   *
+   * Not a re-open: the DataCore item is the same for both, and only the mesh
+   * the geometry tree selects differs. Takes a couple of seconds, because the
+   * 316 MB DataCore is re-read rather than held in memory for a switch most
+   * visitors make once or never.
+   */
+  async catalogue(skeleton: 'male' | 'female', onProgress?: (progress: Progress) => void) {
+    this.ensure();
+    const soon = this.expect('catalogue');
+    this.relayProgress(onProgress);
+    this.send({ type: 'catalogue', skeleton });
+    return soon;
+  }
+
   /** Build the canonical armature: the base skeleton plus the attachment bones
    * the donor pieces introduce. */
   async rig(base: string, donors: string[]) {

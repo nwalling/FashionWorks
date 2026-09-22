@@ -44,6 +44,13 @@ export type ToWorker =
       catalogue?: boolean;
       coreUrl?: string;
     }
+  /** Rebuild the catalogue for the other body type, without re-indexing.
+   *
+   * The DataCore item is the same for both; what differs is which mesh the
+   * geometry tree selects -- `SubGeometry[1]` is the female `f_*.skin` and
+   * `SubGeometry[2]` the male `m_*.skin`. So switching body type is a
+   * catalogue rebuild over an archive that is already open, not a re-open. */
+  | { type: 'catalogue'; skeleton: 'male' | 'female' }
   /** Load one mesh from the already-open archive. */
   | { type: 'mesh'; path: string }
   /** Build the canonical armature before any mesh is loaded. */
@@ -257,6 +264,8 @@ let fetched = 0;
 
 let opened: {
   archive: {
+    find(path: string): number | undefined | null;
+    read(index: number): Uint8Array;
     loadMesh(path: string): unknown;
     buildRig(base: string, donors: string[]): unknown;
     rigBones(): unknown;
@@ -266,9 +275,72 @@ let opened: {
     loadTexture(path: string, mip: number): [number, number, Uint8Array];
     textureSizes(path: string): Uint32Array;
   };
+  /** Built catalogues, by body type.
+   *
+   * The DataCore is 316 MB and is not kept, but the catalogue it produces is
+   * a few MB of JSON -- so the first switch to a body pays for the read and
+   * every switch after it is free. Measured before this: 11.5s out and 8.3s
+   * back, nearly all of it re-reading the same DCB. */
+  catalogues: Map<'male' | 'female', { json: string; itemCount: number }>;
 } | undefined;
 
+/** Read the DataCore and the localization file, build a catalogue, report it.
+ *
+ * Shared by opening an archive and by switching body type. The DCB is 316 MB
+ * and is deliberately **not** kept between calls: re-reading it costs a couple
+ * of seconds where holding it costs that much memory for the whole session,
+ * and a body switch is a rare, deliberate act.
+ */
+function reportCatalogue(
+  archive: NonNullable<typeof opened>['archive'],
+  skeleton: 'male' | 'female',
+  cache?: NonNullable<typeof opened>['catalogues'],
+): void {
+  const started = performance.now();
+
+  const hit = cache?.get(skeleton);
+  if (hit) {
+    progress('skeleton and poses', 1);
+    say({ type: 'catalogue', json: hit.json, itemCount: hit.itemCount, ms: performance.now() - started });
+    return;
+  }
+
+  progress('reading item database');
+  const dcbIndex = archive.find('Data\\Game2.dcb');
+  if (dcbIndex === undefined || dcbIndex === null) {
+    say({ type: 'failed', message: 'Data\\Game2.dcb is not in this archive' });
+    return;
+  }
+  const dcb = archive.read(dcbIndex);
+  progress('reading item database', 1);
+
+  progress('item names');
+  const iniIndex = archive.find('Data\\Localization\\english\\global.ini');
+  if (iniIndex === undefined || iniIndex === null) {
+    say({ type: 'failed', message: 'the English localization file is not in this archive' });
+    return;
+  }
+  const ini = new TextDecoder('utf-8').decode(archive.read(iniIndex));
+  progress('item names', 0.4);
+
+  const json = wasm.buildCatalogue(dcb, ini, skeleton);
+  const itemCount = (JSON.parse(json) as { items: unknown[] }).items.length;
+  cache?.set(skeleton, { json, itemCount });
+  progress('skeleton and poses', 1);
+  say({ type: 'catalogue', json, itemCount, ms: performance.now() - started });
+}
+
 async function run(message: ToWorker): Promise<void> {
+  if (message.type === 'catalogue') {
+    if (!opened) {
+      say({ type: 'failed', message: 'no archive is open' });
+      return;
+    }
+    reportCatalogue(opened.archive, message.skeleton, opened.catalogues);
+    say({ type: 'stats', reads, fetched });
+    return;
+  }
+
   if (message.type === 'rig') {
     if (!opened) {
       say({ type: 'failed', message: 'no archive is open' });
@@ -380,7 +452,10 @@ async function run(message: ToWorker): Promise<void> {
   progress('reading archive index');
   let started = performance.now();
   const archive = new wasm.Archive(read, byteLength);
-  opened = { archive: archive as unknown as NonNullable<typeof opened>['archive'] };
+  opened = {
+    archive: archive as unknown as NonNullable<typeof opened>['archive'],
+    catalogues: new Map(),
+  };
   const entryCount = archive.entryCount();
   const fingerprint = archive.fingerprint();
   say({ type: 'indexed', entryCount, fingerprint, ms: performance.now() - started });
@@ -390,29 +465,7 @@ async function run(message: ToWorker): Promise<void> {
     return;
   }
 
-  progress('reading item database');
-  started = performance.now();
-  const dcbIndex = archive.find('Data\\Game2.dcb');
-  if (dcbIndex === undefined || dcbIndex === null) {
-    say({ type: 'failed', message: 'Data\\Game2.dcb is not in this archive' });
-    return;
-  }
-  const dcb = archive.read(dcbIndex);
-  progress('reading item database', 1);
-
-  progress('item names');
-  const iniIndex = archive.find('Data\\Localization\\english\\global.ini');
-  if (iniIndex === undefined || iniIndex === null) {
-    say({ type: 'failed', message: 'the English localization file is not in this archive' });
-    return;
-  }
-  const ini = new TextDecoder('utf-8').decode(archive.read(iniIndex));
-  progress('item names', 0.4);
-
-  const json = wasm.buildCatalogue(dcb, ini, skeleton);
-  const itemCount = (JSON.parse(json) as { items: unknown[] }).items.length;
-  progress('skeleton and poses', 1);
-  say({ type: 'catalogue', json, itemCount, ms: performance.now() - started });
+  reportCatalogue(opened.archive, skeleton, opened.catalogues);
   say({ type: 'stats', reads, fetched });
 }
 
