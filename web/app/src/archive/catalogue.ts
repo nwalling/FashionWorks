@@ -40,6 +40,70 @@ export interface Catalogue {
   readonly bySlot: Map<Slot, CatalogueItem[]>;
   /** Every member of a colourway family, keyed by the family's root id. */
   readonly families: Map<string, CatalogueItem[]>;
+  /** Every member of a product line in one slot, keyed by {@link lineKey}.
+   *
+   * Wider than a family: a family is one mesh in many colours, while a line is
+   * everything sold under one product name -- the Defiance core in all its
+   * colours *and* its (Modified) build, which has a mesh of its own. */
+  readonly lines: Map<string, CatalogueItem[]>;
+}
+
+/** Words that end the product part of a name. Mirrors the pipeline's
+ * `_NAME_SLOT_WORD`. */
+const SLOT_WORD = /^(helmet|helm|core|torso|arms|arm|legs|leg|backpack|pack|undersuit|suit|flight)$/i;
+
+/** Leading words too generic to name a product on their own. */
+const ARTICLES = new Set(['the', 'a', 'an']);
+
+/** The product a piece is sold as: its first word, lowercased.
+ *
+ * **The first word, not everything before the slot word.** An edition
+ * sometimes sits *between* the product and the slot -- "Aves Shrike Core",
+ * "Aztalan Galena Arms", "Carnifex Armor Lucky Break" -- and splitting at the
+ * slot word gave each of those a row of its own beside "Aves Core". Read
+ * across the catalogue, every first word shared within a slot is one product
+ * line, with one exception: "The Butcher" and "The Hill Horror" share only an
+ * article, so after one the second word joins the key.
+ *
+ * Null for a piece with no real name: an unnamed item's "name" is its class
+ * name, which stays in its own colourway family. */
+export function productLine(item: CatalogueItem): string | null {
+  if (!item.name || item.flags.includes('unnamed')) return null;
+  const words = item.name
+    .split(/\s+/)
+    .map((w) => w.replace(/["'()]/g, '').toLowerCase())
+    .filter(Boolean);
+  if (!words.length) return null;
+  return words.slice(0, ARTICLES.has(words[0]!) ? 2 : 1).join(' ');
+}
+
+/** A listing row's title: the words its members share, ending in the slot.
+ *
+ * "Defiance Core" for the Defiance line. Where the shared words stop before
+ * the slot word -- "Aves Core" and "Aves Shrike Core" share only "Aves" --
+ * the slot word is put back, so the row still says what it is. */
+export function lineTitle(line: readonly CatalogueItem[]): string {
+  const names = line.map(displayName);
+  const shared = sharedName(names);
+  if (line.length < 2 || shared.split(/\s+/).some((w) => SLOT_WORD.test(w.replace(/["'()]/g, '')))) {
+    return shared;
+  }
+  const words = displayName(lineRepresentative(line)).split(/\s+/);
+  const slotWord = words.find((w) => SLOT_WORD.test(w.replace(/["'()]/g, '')));
+  return slotWord ? `${shared} ${slotWord}` : shared;
+}
+
+/** Which listing row a piece belongs under.
+ *
+ * **By product line, not by mesh.** Keyed by mesh, the listing was
+ * inconsistent in a way that looked arbitrary: "Defiance Arms (Modified)"
+ * appeared as a colour of Defiance Arms because it shares their mesh, while
+ * "Defiance Core (Modified)" -- a mesh of its own -- got a row of its own,
+ * and "ADP-mk4 Core" appeared twice. Every piece now sits under its product
+ * name, and the variants, whatever their mesh, are its colours. */
+export function lineKey(item: CatalogueItem): string {
+  const product = productLine(item);
+  return product ? `${item.slot}|${product}` : `family|${familyRoot(item)}`;
 }
 
 /** The id of the item whose GLB a piece's family is rooted on. */
@@ -79,10 +143,19 @@ export function displayName(item: CatalogueItem): string {
   return item.name ?? item.class_name;
 }
 
+/** The medical bay's anatomy meshes -- a body and a skeleton, cut into arms,
+ * legs and torso -- carry armour attach types and are named "Body". Ten rows
+ * of flesh and bone in an armour listing. */
+function isAnatomy(item: CatalogueItem): boolean {
+  return item.geometry.some((g) => /\/body\/anatomy\//i.test(g.source.replace(/\\/g, '/')));
+}
+
 export function readCatalogue(json: string): Catalogue {
   const parsed = JSON.parse(json) as { items: CatalogueItem[] };
   const items = parsed.items.filter(
-    (item) => item.geometry.length > 0 && !item.flags.some((f) => HIDDEN_FLAGS.includes(f)),
+    (item) => item.geometry.length > 0
+      && !item.flags.some((f) => HIDDEN_FLAGS.includes(f))
+      && !isAnatomy(item),
   );
 
   const bySlot = new Map<Slot, CatalogueItem[]>(SLOTS.map((s) => [s, []]));
@@ -97,7 +170,33 @@ export function readCatalogue(json: string): Catalogue {
   for (const list of bySlot.values()) {
     list.sort((a, b) => displayName(a).localeCompare(displayName(b)));
   }
-  return { items, bySlot, families };
+  const lines = new Map<string, CatalogueItem[]>();
+  for (const list of bySlot.values()) {
+    for (const item of list) {
+      const key = lineKey(item);
+      const line = lines.get(key) ?? [];
+      line.push(item);
+      lines.set(key, line);
+    }
+  }
+  return { items, bySlot, families, lines };
+}
+
+/** Every piece sold under the same product name in the same slot. */
+export function lineOf(catalogue: Catalogue, item: CatalogueItem): CatalogueItem[] {
+  return catalogue.lines.get(lineKey(item)) ?? [item];
+}
+
+/** The piece a listing row stands for, and equips when clicked.
+ *
+ * The plainest member: the shortest name, so "ADP Core" over "ADP Core
+ * Crusader Edition", then a canonical item over a colourway of it. */
+export function lineRepresentative(line: readonly CatalogueItem[]): CatalogueItem {
+  return [...line].sort((a, b) => (
+    displayName(a).length - displayName(b).length
+    || Number(Boolean(a.variant_of)) - Number(Boolean(b.variant_of))
+    || displayName(a).localeCompare(displayName(b))
+  ))[0]!;
 }
 
 /** How saturated a `#rrggbb` is, 0 for a grey and 1 for a pure hue. */

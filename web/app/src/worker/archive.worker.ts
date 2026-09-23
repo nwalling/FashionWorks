@@ -17,7 +17,7 @@ import type { IndexStep } from '../onboarding';
 // Static, not dynamic: see the note beside `wasm.default` below.
 import * as wasm from '../../../core/pkg/fashionworks_core.js';
 
-export type ToWorker =
+export type ToWorker = (
   | {
       type: 'open';
       file: File;
@@ -62,7 +62,18 @@ export type ToWorker =
   /** Load a rigid prop and work out where it mounts. */
   | { type: 'prop'; path: string; socket: string }
   /** Retarget an animation clip onto the canonical armature. */
-  | { type: 'pose'; path: string; clip: string };
+  | { type: 'pose'; path: string; clip: string }
+  /** Find a material for an item whose record names none. */
+  | { type: 'discover'; className: string; meshPath: string; meshMaterial: string | null }
+) & {
+  /** Set on every request that expects an answer, and echoed on the answer.
+   *
+   * Without it replies were matched to requests by type alone, and a failed
+   * request answered with a bare `failed` -- which the client could only treat
+   * as the whole worker failing. One missing material then rejected every
+   * request after it, for the rest of the session. */
+  id?: number;
+};
 
 export interface RigSummary {
   /** Total bones: the base skeleton plus the grafted attachment points. */
@@ -104,6 +115,8 @@ export interface LayerMaterial {
   metal: boolean;
   diffuseTex: string | null;
   normalTex: string | null;
+  /** The layer's own `TexMod` tiling, multiplied into the reference's. */
+  tileU: number;
 }
 
 export interface MaterialPayload {
@@ -113,6 +126,16 @@ export interface MaterialPayload {
     tintable: boolean;
     textures: Record<string, string>;
     layers: LayerRef[];
+    /** The submaterial's own constants, linear. All a non-LayerBlend shader
+     * has; ignored by the compositor. Absent on payloads from older cores. */
+    diffuse?: Float32Array;
+    specular?: Float32Array;
+    emissive?: Float32Array;
+    glow: number;
+    opacity: number;
+    alphaTest: number;
+    /** 0-1. */
+    shininess: number;
   }>;
   /** Every distinct detail layer the piece references, by lowercased path. */
   library: Record<string, LayerMaterial>;
@@ -163,9 +186,21 @@ export interface MeshPayload {
   min: Float32Array;
   max: Float32Array;
   unweighted: number;
+  /** The attachment points this piece re-declares, from its own skeleton.
+   * Archive frame, parent-relative. Absent for a rigid prop. */
+  overrides?: AttachmentOverride[];
 }
 
-export type FromWorker =
+export interface AttachmentOverride {
+  name: string;
+  parent: string | null;
+  position: Float32Array;
+  /** `[w, x, y, z]`. */
+  rotation: Float32Array;
+  world: Float32Array;
+}
+
+export type FromWorker = (
   | { type: 'progress'; step: IndexStep; fraction: number }
   | { type: 'indexed'; entryCount: number; fingerprint: string; ms: number }
   | { type: 'catalogue'; json: string; itemCount: number; ms: number }
@@ -176,7 +211,9 @@ export type FromWorker =
   | { type: 'texture'; texture: TexturePayload | null; ms: number; reads: number; fetched: number }
   | { type: 'prop'; path: string; prop: PropPayload; ms: number }
   | { type: 'pose'; pose: PosePayload; ms: number }
-  | { type: 'failed'; message: string };
+  | { type: 'discovered'; path: string | null }
+  | { type: 'failed'; message: string }
+) & { id?: number };
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
 
@@ -274,6 +311,7 @@ let opened: {
     retargetPose(path: string, clip: string): unknown;
     loadTexture(path: string, mip: number): [number, number, Uint8Array];
     textureSizes(path: string): Uint32Array;
+    discoverMaterial(className: string, meshPath: string, meshMaterial?: string): string | undefined;
   };
   /** Built catalogues, by body type.
    *
@@ -295,20 +333,21 @@ function reportCatalogue(
   archive: NonNullable<typeof opened>['archive'],
   skeleton: 'male' | 'female',
   cache?: NonNullable<typeof opened>['catalogues'],
+  out: (message: FromWorker) => void = say,
 ): void {
   const started = performance.now();
 
   const hit = cache?.get(skeleton);
   if (hit) {
     progress('skeleton and poses', 1);
-    say({ type: 'catalogue', json: hit.json, itemCount: hit.itemCount, ms: performance.now() - started });
+    out({ type: 'catalogue', json: hit.json, itemCount: hit.itemCount, ms: performance.now() - started });
     return;
   }
 
   progress('reading item database');
   const dcbIndex = archive.find('Data\\Game2.dcb');
   if (dcbIndex === undefined || dcbIndex === null) {
-    say({ type: 'failed', message: 'Data\\Game2.dcb is not in this archive' });
+    out({ type: 'failed', message: 'Data\\Game2.dcb is not in this archive' });
     return;
   }
   const dcb = archive.read(dcbIndex);
@@ -317,7 +356,7 @@ function reportCatalogue(
   progress('item names');
   const iniIndex = archive.find('Data\\Localization\\english\\global.ini');
   if (iniIndex === undefined || iniIndex === null) {
-    say({ type: 'failed', message: 'the English localization file is not in this archive' });
+    out({ type: 'failed', message: 'the English localization file is not in this archive' });
     return;
   }
   const ini = new TextDecoder('utf-8').decode(archive.read(iniIndex));
@@ -327,68 +366,71 @@ function reportCatalogue(
   const itemCount = (JSON.parse(json) as { items: unknown[] }).items.length;
   cache?.set(skeleton, { json, itemCount });
   progress('skeleton and poses', 1);
-  say({ type: 'catalogue', json, itemCount, ms: performance.now() - started });
+  out({ type: 'catalogue', json, itemCount, ms: performance.now() - started });
 }
 
 async function run(message: ToWorker): Promise<void> {
+  // Answers to a request carry its id; progress and stats do not.
+  const reply = (answer: FromWorker) => say({ ...answer, id: message.id } as FromWorker);
+
   if (message.type === 'catalogue') {
     if (!opened) {
-      say({ type: 'failed', message: 'no archive is open' });
+      reply({ type: 'failed', message: 'no archive is open' });
       return;
     }
-    reportCatalogue(opened.archive, message.skeleton, opened.catalogues);
+    reportCatalogue(opened.archive, message.skeleton, opened.catalogues, reply);
     say({ type: 'stats', reads, fetched });
     return;
   }
 
   if (message.type === 'rig') {
     if (!opened) {
-      say({ type: 'failed', message: 'no archive is open' });
+      reply({ type: 'failed', message: 'no archive is open' });
       return;
     }
     const started = performance.now();
     const summary = opened.archive.buildRig(message.base, message.donors) as RigSummary;
     const bones = opened.archive.rigBones() as RigBone[];
-    say({ type: 'rig', summary, bones, ms: performance.now() - started });
+    reply({ type: 'rig', summary, bones, ms: performance.now() - started });
     return;
   }
 
   if (message.type === 'pose') {
     if (!opened) {
-      say({ type: 'failed', message: 'no archive is open' });
+      reply({ type: 'failed', message: 'no archive is open' });
       return;
     }
     const started = performance.now();
     const pose = opened.archive.retargetPose(message.path, message.clip) as PosePayload;
-    say({ type: 'pose', pose, ms: performance.now() - started });
+    reply({ type: 'pose', pose, ms: performance.now() - started });
     return;
   }
 
   if (message.type === 'prop') {
     if (!opened) {
-      say({ type: 'failed', message: 'no archive is open' });
+      reply({ type: 'failed', message: 'no archive is open' });
       return;
     }
     const started = performance.now();
     const prop = opened.archive.loadProp(message.path, message.socket) as PropPayload;
-    say({ type: 'prop', path: message.path, prop, ms: performance.now() - started });
+    reply({ type: 'prop', path: message.path, prop, ms: performance.now() - started });
     return;
   }
 
   if (message.type === 'material') {
     if (!opened) {
-      say({ type: 'failed', message: 'no archive is open' });
+      reply({ type: 'failed', message: 'no archive is open' });
       return;
     }
     const started = performance.now();
     const material = opened.archive.loadMaterial(message.path) as MaterialPayload;
-    say({ type: 'material', path: message.path, material, ms: performance.now() - started });
+    reply({ type: 'material', path: message.path, material, ms: performance.now() - started });
     return;
   }
 
   if (message.type === 'texture') {
     if (!opened) {
-      say({ type: 'failed', message: 'no archive is open' });
+      reply({ type: 'failed', message: 'no archive is open' });
       return;
     }
     const started = performance.now();
@@ -403,7 +445,7 @@ async function run(message: ToWorker): Promise<void> {
         mip += 1;
       }
       const [w, h, rgba] = opened.archive.loadTexture(message.path, mip);
-      say({
+      reply({
         type: 'texture',
         texture: { path: message.path, width: w, height: h, rgba },
         ms: performance.now() - started,
@@ -412,19 +454,31 @@ async function run(message: ToWorker): Promise<void> {
       });
     } catch {
       // A texture that will not decode is not fatal: the surface falls back.
-      say({ type: 'texture', texture: null, ms: performance.now() - started, reads, fetched });
+      reply({ type: 'texture', texture: null, ms: performance.now() - started, reads, fetched });
     }
+    return;
+  }
+
+  if (message.type === 'discover') {
+    if (!opened) {
+      reply({ type: 'failed', message: 'no archive is open' });
+      return;
+    }
+    const path = opened.archive.discoverMaterial(
+      message.className, message.meshPath, message.meshMaterial ?? undefined,
+    );
+    reply({ type: 'discovered', path: path ?? null });
     return;
   }
 
   if (message.type === 'mesh') {
     if (!opened) {
-      say({ type: 'failed', message: 'no archive is open' });
+      reply({ type: 'failed', message: 'no archive is open' });
       return;
     }
     const started = performance.now();
     const mesh = opened.archive.loadMesh(message.path) as MeshPayload;
-    say({ type: 'mesh', path: message.path, mesh, ms: performance.now() - started });
+    reply({ type: 'mesh', path: message.path, mesh, ms: performance.now() - started });
     return;
   }
   // An explicit URL where the caller gave one. wasm-bindgen's glue defaults to
@@ -471,6 +525,12 @@ async function run(message: ToWorker): Promise<void> {
 
 scope.onmessage = (event: MessageEvent<ToWorker>) => {
   run(event.data).catch((error: unknown) => {
-    say({ type: 'failed', message: error instanceof Error ? error.message : String(error) });
+    // Scoped to the request that failed, when there was one. Only a failure
+    // with no id -- opening the archive -- is the worker's own.
+    say({
+      type: 'failed',
+      message: error instanceof Error ? error.message : String(error),
+      id: event.data.id,
+    });
   });
 };

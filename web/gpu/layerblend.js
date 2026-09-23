@@ -20,9 +20,18 @@
 //     pixels, and reducing a detail texture that far shifts its mean. This is
 //     the whole of the residual `composite_diff` reports on 5 of 40
 //     submaterials, and it should not be closed by imitating the bake.
-//   * **Only the selected base layer is evaluated.** The bake evaluates all
-//     four and then picks per texel. Selection is exclusive, so the result is
-//     identical and the cost is a quarter.
+//   * **Boundaries between layers are anti-aliased.** The bake picks one
+//     layer per texel, which is exact away from an edge and a one-texel
+//     staircase along it. Here each channel's crossing is measured against
+//     its change across the texel, so an edge texel mixes the two layers by
+//     how much of it lies on each side. Everywhere else one layer carries all
+//     the weight and only that layer is evaluated, as before.
+//
+// And one the web port adds for the renderer: with `uFlatDetail` a layer
+// contributes its mean colour rather than its tiling texture, which a bake
+// cannot resolve anyway, and the ORM's alpha records which layer each texel
+// shows so `web/app/src/three/materials.ts` can draw that layer's grain on
+// the mesh at screen resolution.
 
 /// Which base layer each of the eight saturated blend-mask colours selects,
 /// keyed by `red | green<<1 | blue<<2`.
@@ -82,6 +91,27 @@ uniform bool uHasHal;
 // many layers the submaterial declares.
 uniform sampler2DArray uDiffuse;
 uniform sampler2DArray uGloss;
+
+// **Flat detail.** When set, a layer's diffuse texture contributes only its
+// linear mean colour, and the tiling grain is left for the renderer to draw on
+// the mesh at screen resolution.
+//
+// Sampling the grain into a 1024 bake cannot work: at an effective tiling of
+// 144 one repeat is seven texels, far below what a texture can hold, and
+// without a mip chain the sampler aliased it into moire -- the Defiance
+// Sunchaser's padding came out as coarse grey diagonal stripes where the game
+// shows a solid colour with a fine weave on it. A mean is exactly what a
+// correctly filtered sample of that grain converges to, so the bake keeps its
+// colour and loses nothing it could have held.
+uniform bool uFlatDetail;
+uniform vec3 uLayerMean[8];
+
+// **One atlas per piece.** Every submaterial of a mesh shares its UV space,
+// so instead of a full-size bake each, one target is shared and each pass
+// writes only the texels its own triangles own. uOwner is that map.
+uniform sampler2D uOwner;
+uniform bool uHasOwner;
+uniform int uOwnerId;
 
 // --- the palette, live ------------------------------------------------------
 // Three entries, each carrying a tint colour, a specular colour and a
@@ -188,7 +218,9 @@ void evaluateLayer(int i, vec2 uv, out vec3 colour, out float rough, out float m
 
   colour = tint;
   if (tex.x >= 0.0) {
-    vec3 linear = srgbToLinear(texture(uDiffuse, vec3(uv * tex.z, tex.x)).rgb);
+    vec3 linear = uFlatDetail
+      ? uLayerMean[i]
+      : srgbToLinear(texture(uDiffuse, vec3(uv * tex.z, tex.x)).rgb);
     if (metal > 0.5) {
       // A metal's colour is its F0, already in tint. TexSlot1 is brushed or
       // scratched surface pattern, not albedo -- these layers set their
@@ -215,6 +247,7 @@ void evaluateLayer(int i, vec2 uv, out vec3 colour, out float rough, out float m
 
 void main() {
   vec2 uv = vUv;
+  if (uHasOwner && int(texture(uOwner, uv).r * 255.0 + 0.5) != uOwnerId) discard;
 
   // The mask is a hard-edged selector, not a gradient: four saturated colours
   // cover 96% of a real armour mask, and one channel cannot express a weight
@@ -223,12 +256,31 @@ void main() {
   // invent indices between two saturated colours -- but the bake resizes the
   // mask bilinearly and then thresholds, so the interpolation precedes the
   // selection. Sampling nearest disagrees along every boundary between layers.
-  int selected = 0;
+  // **Weighted, not picked, at an edge.** The mask is a splat -- ground, then
+  // blue, green and red lerped over it in that order -- and away from an edge
+  // every weight is 0 or 1, which is exactly the table above. A hard threshold
+  // per texel, though, turns every boundary into a staircase one bake texel
+  // tall, which zoomed in reads as pixelated paint. Measuring each channel's
+  // crossing against its own change across the texel (fwidth) gives the
+  // fraction of the texel on each side, so the boundary is anti-aliased at the
+  // bake's resolution and nothing else moves.
+  float weights[4] = float[4](1.0, 0.0, 0.0, 0.0);
   if (uHasBlend) {
     vec3 m = texture(uBlend, uv).rgb;
-    int bucket = (m.r > 0.5 ? 1 : 0) | (m.g > 0.5 ? 2 : 0) | (m.b > 0.5 ? 4 : 0);
-    // Never point at a layer this submaterial does not declare.
-    selected = min(BLEND_BUCKETS[bucket], uLayerCount - 1);
+    vec3 cover = clamp((m - 0.5) / max(fwidth(m), vec3(1e-4)) + 0.5, 0.0, 1.0);
+    float wr = cover.r;
+    float wg = cover.g * (1.0 - wr);
+    float wb = cover.b * (1.0 - cover.g) * (1.0 - wr);
+    float ground = (1.0 - cover.b) * (1.0 - cover.g) * (1.0 - wr);
+    weights = float[4](wr, wg, wb, ground);
+    // Never point at a layer this submaterial does not declare: a missing
+    // layer's share goes to the last one it does.
+    for (int k = 3; k > 0; k -= 1) {
+      if (k >= uLayerCount) {
+        weights[uLayerCount - 1] += weights[k];
+        weights[k] = 0.0;
+      }
+    }
   }
 
   // How far this texel has worn through. The mask is a single BC4 channel --
@@ -241,22 +293,39 @@ void main() {
     worn = clamp((uWearThreshold - texture(uWear, uv).r) / uWearFalloff, 0.0, 1.0) * uWearAmount;
   }
 
-  vec3 colour;
-  float rough;
-  float metal;
-  evaluateLayer(selected, uv, colour, rough, metal);
-
-  // Wear happens *within* a layer, before the mask picks between them: a layer
-  // worn through shows its own paired material, not its neighbour's.
-  float pair = uWearPair[selected];
-  if (pair >= 0.0 && worn > 0.0) {
-    vec3 wornColour;
-    float wornRough;
-    float wornMetal;
-    evaluateLayer(int(pair + 0.5), uv, wornColour, wornRough, wornMetal);
-    colour = mix(colour, wornColour, worn);
-    rough = mix(rough, wornRough, worn);
-    metal = mix(metal, wornMetal, worn);
+  vec3 colour = vec3(0.0);
+  float rough = 0.0;
+  float metal = 0.0;
+  float strongest = -1.0;
+  // Which layer the renderer should draw grain from here: the dominant base
+  // layer, or its wear partner where the surface has worn more than half way.
+  float slot = 0.0;
+  for (int k = 0; k < 4; k += 1) {
+    float w = weights[k];
+    if (w <= 0.0) continue;
+    vec3 layerColour;
+    float layerRough;
+    float layerMetal;
+    evaluateLayer(k, uv, layerColour, layerRough, layerMetal);
+    // Wear happens *within* a layer, before the mask picks between them: a
+    // layer worn through shows its own paired material, not its neighbour's.
+    float pair = uWearPair[k];
+    if (pair >= 0.0 && worn > 0.0) {
+      vec3 wornColour;
+      float wornRough;
+      float wornMetal;
+      evaluateLayer(int(pair + 0.5), uv, wornColour, wornRough, wornMetal);
+      layerColour = mix(layerColour, wornColour, worn);
+      layerRough = mix(layerRough, wornRough, worn);
+      layerMetal = mix(layerMetal, wornMetal, worn);
+    }
+    colour += layerColour * w;
+    rough += layerRough * w;
+    metal += layerMetal * w;
+    if (w > strongest) {
+      strongest = w;
+      slot = (pair >= 0.0 && worn > 0.5) ? pair : float(k);
+    }
   }
 
   // Occlusion from the _hal map. The shader flag %HUE_AO_LUMINANCE_MAP and the
@@ -279,7 +348,8 @@ void main() {
   // nothing bound the parameters do nothing.
 
   oAlbedo = vec4(linearToSrgb(max(colour * uUserTint, 0.0)), 1.0);
-  oOrm = vec4(ao, rough, metal, 1.0);
+  // Alpha carries the layer slot, 0-7, for the renderer's detail pass.
+  oOrm = vec4(ao, rough, metal, slot / 7.0);
 }
 `;
 
@@ -291,7 +361,7 @@ export const UNIFORM_NAMES = [
   'uPaletteColor', 'uPaletteSpec', 'uPaletteGloss',
   'uLayerTint', 'uLayerResponse', 'uLayerTex', 'uLayerGlossParams',
   'uWearPair', 'uLayerCount', 'uWearThreshold', 'uWearFalloff', 'uWearAmount',
-  'uUserTint',
+  'uUserTint', 'uFlatDetail', 'uLayerMean', 'uOwner', 'uHasOwner', 'uOwnerId',
 ];
 
 /// The blend table, in JavaScript, for anything that needs to reason about a
@@ -320,6 +390,7 @@ export function packLayers(layers) {
   const tex = new Float32Array(MAX_LAYERS * 4);
   const glossParams = new Float32Array(MAX_LAYERS * 2);
   const wearPair = new Float32Array(MAX_BASE_LAYERS).fill(-1);
+  const mean = new Float32Array(MAX_LAYERS * 3).fill(1);
 
   const put = (slot, layer) => {
     tint.set([layer.tint[0], layer.tint[1], layer.tint[2], layer.paletteTint ?? 0], slot * 4);
@@ -332,6 +403,7 @@ export function packLayers(layers) {
       slot * 4,
     );
     glossParams.set([layer.shininess ?? 0.5, layer.glossMult ?? 1], slot * 2);
+    if (layer.meanRgb) mean.set(layer.meanRgb, slot * 3);
   };
 
   layers.slice(0, MAX_BASE_LAYERS).forEach((layer, i) => {
@@ -342,5 +414,8 @@ export function packLayers(layers) {
     }
   });
 
-  return { tint, response, tex, glossParams, wearPair, count: Math.min(layers.length, MAX_BASE_LAYERS) };
+  return {
+    tint, response, tex, glossParams, wearPair, mean,
+    count: Math.min(layers.length, MAX_BASE_LAYERS),
+  };
 }

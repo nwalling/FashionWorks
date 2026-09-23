@@ -13,8 +13,10 @@ import type { ArchiveClient } from '../archive/client';
 import {
   colourwayName,
   displayName,
-  familyRoot,
-  sharedName,
+  lineKey,
+  lineOf,
+  lineRepresentative,
+  lineTitle,
   swatchColour,
   SLOTS,
   type Catalogue,
@@ -43,6 +45,11 @@ export interface KitbasherProps {
   readonly onLoadoutChange?: (encoded: string) => void;
   /** Called once the engine exists, for a verification page to drive it. */
   readonly onEngine?: (engine: Engine) => void;
+}
+
+/** A row's title: the words its whole line shares -- "Defiance Core". */
+function titleOfLine(catalogue: Catalogue, item: CatalogueItem): string {
+  return lineTitle(lineOf(catalogue, item));
 }
 
 export function Kitbasher(props: KitbasherProps): JSX.Element {
@@ -103,19 +110,28 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
   // rather than the prop it started from.
   const catalogue = state?.catalogue ?? initialCatalogue;
 
-  // Canonical pieces only: a family's colourways appear as swatches below,
-  // rather than as twenty near-identical rows.
+  // One row per product line: its colours and editions appear as swatches
+  // above, rather than as twenty near-identical rows -- and a (Modified)
+  // build is one of them too, whatever mesh it happens to use.
   const pool = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    return (catalogue.bySlot.get(slot) ?? []).filter((item) => {
-      if (item.variant_of) return false;
-      if (!needle) return true;
-      return `${item.name ?? ''} ${item.class_name}`.toLowerCase().includes(needle);
-    });
+    const seen = new Set<string>();
+    const rows: CatalogueItem[] = [];
+    for (const item of catalogue.bySlot.get(slot) ?? []) {
+      const key = lineKey(item);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const line = lineOf(catalogue, item);
+      if (needle && !line.some((member) => (
+        `${member.name ?? ''} ${member.class_name}`.toLowerCase().includes(needle)
+      ))) continue;
+      rows.push(lineRepresentative(line));
+    }
+    return rows.sort((a, b) => titleOfLine(catalogue, a).localeCompare(titleOfLine(catalogue, b)));
   }, [catalogue, slot, search]);
 
-  const familyOf = (item: CatalogueItem) => catalogue.families.get(familyRoot(item)) ?? [item];
-  const titleOf = (item: CatalogueItem) => sharedName(familyOf(item).map(displayName));
+  const familyOf = (item: CatalogueItem) => lineOf(catalogue, item);
+  const titleOf = (item: CatalogueItem) => titleOfLine(catalogue, item);
 
   const chooseBackdrop = (file: File | undefined) => {
     if (!file) return;
@@ -132,7 +148,7 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
   // Work out the colours of the family on screen, for the pieces that carry no
   // tint palette. Only the visible family: compositing is real work, and the
   // catalogue has a thousand such pieces.
-  const family = onBody ? (catalogue.families.get(familyRoot(onBody)) ?? []) : [];
+  const family = onBody ? lineOf(catalogue, onBody) : [];
   const familyKey = family.map((f) => f.id).join(',');
   useEffect(() => {
     for (const variant of family) {
@@ -279,7 +295,7 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
             )}
             {pool.slice(0, MAX_ROWS).map((item) => {
               const family = familyOf(item);
-              const selected = Boolean(onBody && familyRoot(onBody) === familyRoot(item));
+              const selected = Boolean(onBody && lineKey(onBody) === lineKey(item));
               const meta = [
                 item.manufacturer?.code ?? '',
                 item.weight_class ?? '',

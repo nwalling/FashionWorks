@@ -16,6 +16,8 @@ is go** — with the conditions recorded under "Legal" at the foot of this file.
 `WEB-INTEGRATION.md` is the contract the Hangarworks site builds against.
 `WEB-INTEGRATION-PLAN.md` is the ordered plan handed to the agent that builds
 that site: the same boundary, as steps rather than as a spec.
+`LOADOUT.md` is the plan for weapons, holsters and the raised pose, with the
+port survey and clip measurements it rests on.
 
 `PLAN.md` is the design document. This file is the operational one: what is
 decided, what is verified, and what to run. When the two disagree, this file wins
@@ -1714,6 +1716,120 @@ it took from another product line and the status says so -- "helmet from
 Balor" -- because a visitor who did not ask for a Balor helmet should not have
 to work out why they are wearing one. 142 of the picks across 573 anchors
 cross a line this way.
+
+### The web viewer's surfaces, rebuilt (2026-09-23)
+
+Five reported bugs, four causes, all in the port rather than the data.
+
+**The viewport going white was the compositor leaking WebGL contexts.**
+`compositeSurfaces` created a context per call and never released one, and
+every listing swatch was a composite too. Chrome keeps sixteen and then drops
+the *oldest* -- the viewer's own -- which renders as a white canvas with a
+broken-image icon. There is now one shared compositing context. Measured
+after: 30 torsos equipped and 40 swatches composited, context intact.
+
+**The striped Sunchaser padding was moire.** Layer textures tile 20-2560
+times across the UV square and were sampled into a 1024 bake from a
+single-level array with `LINEAR`, so a weave became coarse diagonal grey
+stripes. Two changes: the bake takes each layer's **mean** (`uFlatDetail`), and
+`three/materials.ts` draws the grain on the mesh at screen resolution from the
+layer slot the bake records in the ORM alpha. The colour is exactly the
+bake's; only the texture is added back. The pipeline never had this bug because
+its `_tiled` resizes with Lanczos.
+
+**"Missing detail" was the armour's normal map, never bound.** `TexSlot3`
+(`_ddn`) was in the material payload and nothing used it. CryEngine maps are
+DirectX-style, and with textures uploaded unflipped that is already the +v
+direction three.js's derivative tangent frame uses: `normalScale (1, 1)`.
+Blender flips v on import, which is the only reason the pipeline inverted
+green.
+
+**Blend-mask edges are anti-aliased in the bake.** Each channel's crossing is
+measured against `fwidth` across the texel, so an edge texel mixes the two
+layers by coverage. Away from an edge one layer has all the weight and the
+result is the verified table, unchanged.
+
+**One atlas per piece.** Every submaterial used to get a full 1024 albedo and
+ORM -- sixteen textures, ~85 MB, for one torso. `surface.rasterOwners`
+rasterises each submaterial's UV triangles into an owner map (dilated for the
+gutters), and every pass writes only its own texels into one shared target.
+Submaterials sharing more than 10% of their UV space with another get their
+own bake. A Sunchaser torso is now 46 MB, and the engine's cache is bounded
+at 640 MB and evicts least-recently-used pieces that are not worn.
+
+**97 of the 142 backpacks name no material,** so they rendered in placeholder
+grey. `web/core/src/discover.rs` ports the pipeline's `discover_materials`:
+class name first (longest prefix), then the mesh's own `MTL_NAME`, then
+`<stem>_NN.mtl` beside it. Separately, **non-LayerBlend submaterials** --
+`Illum` straps and lights, `GlassPBR` visors, `MeshDecal`, screens -- now get
+the constants and textures their `.mtl` declares instead of the placeholder.
+
+**A piece's `_override` bones are it moving the attachment points.** The rig
+takes them from one undersuit donor; the ADP-mk4 core re-declares
+`backpack_attach_1_override` at y -0.228 local, ten centimetres behind the
+donor, so a Warden pack hung on the donor's point sat inside the shell.
+`loadMesh` now returns a piece's own override bones, and the outermost piece
+declaring a point wins (torso over legs over arms over helmet over undersuit).
+
+**`Glow` is a fraction of the surface's own colour, emitted.** The ADP-mk4 Big
+Boss graffiti is a bright green layer on a submaterial with `Glow 0.02`, and
+glows in CIG's render while the near-black plate around it does not. Emitted
+as `albedo * glow * GLOW_GAIN` (25, chosen by eye against that render). 486
+LayerBlend submaterials carry some Glow; the gain is capped at 4.
+
+**One failed request used to kill the worker client.** Replies were matched to
+requests by type and a failure was a bare `failed`, which the client could
+only treat as the whole worker failing -- so one missing material rejected
+every request after it. Requests now carry ids and a failure rejects only its
+own.
+
+**The listing groups by product line, the first word of the name.** Keyed by
+mesh, "Defiance Arms (Modified)" was a colour of Defiance Arms (shared mesh)
+while "Defiance Core (Modified)" was its own row (own mesh), and "ADP-mk4
+Core" appeared twice. Every first word shared within a slot is one product
+line across the catalogue -- Aves Shrike/Starchaser/Talon, Aztalan
+Galena/Tamarack, Carnifex -- except after an article: "The Butcher" and "The
+Hill Horror" share only "The". The medical bay's anatomy meshes (named
+"Body", under `body/anatomy/`) are hidden.
+
+### Holsters are item ports, and the archive has the held weapon too (2026-09-23)
+
+Scoped in `LOADOUT.md`; the facts are measured, the design is not built.
+
+**Armour declares its holsters** as `SItemPortContainerComponentParams.Ports`,
+and the count follows the torso's weight with no exceptions across 1,741
+records: a light core carries `wep_stocked_3`, two grenade and four magazine
+points; medium `wep_stocked_2..3`, three and six; heavy two, four and eight.
+Legs carry `wep_sidearm`, `utility_attach_1..2`, `medPen_attach_1..2` and
+`oxyPen_attach_1..2` at every weight. Backpacks carry `wep_stocked_2..3` and
+`gadget_attach_1`. Arms and helmets carry none. A Large (size 5) weapon fits
+only `wep_stocked_3`.
+
+**Every bone a port names is already in the armature** -- the 36 grafted
+attachment points are exactly these -- and **every holsterable item carries
+the locator the port names**, `attach_offset_left_01`/`_right_01`: as `.chr`
+bones on `.cdf`-rooted items (rifle, pistol, pen, grenade, multitool) and as NMC
+nodes on `.cgf` items (knife, magazine). Placement is the backpack's
+`bone_world · locator⁻¹`, unchanged.
+
+**A backpack carries its own holster helpers.** `cds_combat_heavy_backpack_01.cga`
+has `wep_stocked_attach_2/3_override` nodes at x = ∓0.194 in its own frame,
+which is where a pack-wearer's rifles sit. Nothing in the records says which
+owner wins when torso and backpack both declare a port; the plan reads it as
+the outermost, and checks that against a screenshot first.
+
+**The held weapon sits on `RightWeaponBone`** (the body's
+`weapon_attach_hand_right`, no item locator), a base-skeleton bone under
+`RightHand`. `stocked_alerted_stand_idle_turn360_raised` animates that bone
+directly and retargets today: 148 bones, 0 unresolved, through `anim-dump`.
+The pistol set has only an upper-body idle (89 bones); the female rig ships the
+same 42 weapon databases and the same raised clip.
+
+**Weapons are `LayerBlend_V2`** with the same `TintPaletteTree` palettes, 231
+of which the DCB export already holds. A colourway sits on the geometry
+**root** with its own `.mtl` or palette; the tagged `SubGeometry` children are
+alternates for other records -- the reverse of armour, where the root is the
+crate.
 
 ### Backdrops
 

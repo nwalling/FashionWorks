@@ -74,19 +74,58 @@ export function linearMean(rgba) {
 export function createLayerArray(gl, slices, size = LAYER_SIZE) {
   const texture = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D_ARRAY, texture);
-  gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl.RGBA8, size, size, Math.max(slices.length, 1));
+  // **A full mip chain.** A layer texture is sampled at an effective tiling of
+  // up to 2560, so one repeat can be a few texels of the bake; with a single
+  // level and LINEAR the sampler skips most of the texture and aliases what is
+  // left into moire. With mips the hardware picks the level whose texels match
+  // the footprint, which is what the pipeline's Lanczos resize did.
+  const levels = Math.floor(Math.log2(size)) + 1;
+  gl.texStorage3D(gl.TEXTURE_2D_ARRAY, levels, gl.RGBA8, size, size, Math.max(slices.length, 1));
   slices.forEach((rgba, index) => {
     gl.texSubImage3D(
       gl.TEXTURE_2D_ARRAY, 0, 0, 0, index, size, size, 1,
       gl.RGBA, gl.UNSIGNED_BYTE, rgba,
     );
   });
-  // A layer texture tiles, so it wraps; it is sampled at an effective tiling of
-  // up to 2560, so it filters.
+  gl.generateMipmap(gl.TEXTURE_2D_ARRAY);
   gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.REPEAT);
   gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.REPEAT);
-  gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
   gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  return texture;
+}
+
+/// The linear mean colour of an sRGB RGBA buffer, per channel.
+export function linearMeanRgb(rgba) {
+  const table = new Float32Array(256);
+  for (let i = 0; i < 256; i += 1) {
+    const c = i / 255;
+    table[i] = c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  }
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  for (let i = 0; i < rgba.length; i += 4) {
+    r += table[rgba[i]];
+    g += table[rgba[i + 1]];
+    b += table[rgba[i + 2]];
+  }
+  const n = Math.max(1, rgba.length / 4);
+  return [r / n, g / n, b / n];
+}
+
+/// A single-channel owner map: which submaterial each texel of UV space
+/// belongs to. Nearest, because an owner is an id, not a quantity.
+export function createOwnerMap(gl, owners, size) {
+  const texture = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, size, size, 0, gl.RED, gl.UNSIGNED_BYTE, owners);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   return texture;
 }
 
@@ -140,7 +179,8 @@ const DEFAULT_PALETTE = [
 ///
 /// `material` carries the layer stack, the control-map textures and the
 /// palette; `arrays` the two library texture arrays.
-export function render(gl, { program, uniforms }, target, size, material, arrays) {
+export function render(gl, { program, uniforms }, target, size, material, arrays, options = {}) {
+  const { clear = false, read = true } = options;
   const packed = packLayers(material.layers);
   const palette = (material.palette && material.palette.length ? material.palette : DEFAULT_PALETTE)
     .slice(0, 3);
@@ -148,6 +188,10 @@ export function render(gl, { program, uniforms }, target, size, material, arrays
 
   gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer);
   gl.viewport(0, 0, size, size);
+  if (clear) {
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+  }
   gl.useProgram(program);
   gl.disable(gl.DEPTH_TEST);
   gl.disable(gl.BLEND);
@@ -162,6 +206,11 @@ export function render(gl, { program, uniforms }, target, size, material, arrays
   bind(2, gl.TEXTURE_2D, material.blend ?? arrays.blank, uniforms.uBlend);
   bind(3, gl.TEXTURE_2D, material.wear ?? arrays.blank, uniforms.uWear);
   bind(4, gl.TEXTURE_2D, material.hal ?? arrays.blank, uniforms.uHal);
+  bind(5, gl.TEXTURE_2D, material.owner ?? arrays.blank, uniforms.uOwner);
+  gl.uniform1i(uniforms.uHasOwner, material.owner ? 1 : 0);
+  gl.uniform1i(uniforms.uOwnerId, material.ownerId ?? 0);
+  gl.uniform1i(uniforms.uFlatDetail, material.flatDetail ? 1 : 0);
+  gl.uniform3fv(uniforms.uLayerMean, packed.mean);
 
   gl.uniform1i(uniforms.uHasBlend, material.blend ? 1 : 0);
   gl.uniform1i(uniforms.uHasWear, material.wear ? 1 : 0);
@@ -184,7 +233,13 @@ export function render(gl, { program, uniforms }, target, size, material, arrays
   gl.uniform3fv(uniforms.uUserTint, material.userTint ?? [1, 1, 1]);
 
   gl.drawArrays(gl.TRIANGLES, 0, 3);
+  if (!read) return null;
+  return readTarget(gl, target, size);
+}
 
+/// Read both attachments of a bake target back to the CPU.
+export function readTarget(gl, target, size) {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer);
   const read = (attachment) => {
     gl.readBuffer(attachment);
     const pixels = new Uint8Array(size * size * 4);

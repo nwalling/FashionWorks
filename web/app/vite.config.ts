@@ -135,12 +135,35 @@ function emitCore(): Plugin {
   };
 }
 
+/** Serve the core where `coreUrl()` looks for it when running from source.
+ *
+ * `coreUrl` resolves `./fashionworks_core_bg.wasm` next to `client.ts`, which
+ * is right for the built package -- `emitCore` puts it there -- and a 404 under
+ * the dev server, where `client.ts` is `src/archive/client.ts`. Dev only.
+ */
+function serveCore(): Plugin {
+  const source = resolve(
+    dirname(fileURLToPath(import.meta.url)),
+    '../core/pkg/fashionworks_core_bg.wasm',
+  );
+  return {
+    name: 'fashionworks-serve-core',
+    apply: 'serve',
+    configureServer(server) {
+      server.middlewares.use('/src/archive/fashionworks_core_bg.wasm', (_request, response) => {
+        response.writeHead(200, { 'content-type': 'application/wasm', 'cache-control': 'no-store' });
+        createReadStream(source).pipe(response);
+      });
+    },
+  };
+}
+
 // Two jobs. `vite build` produces the `@fashionworks/web` library; `vite`
 // serves the verification pages, which is how the parts that cannot be tested
 // headlessly -- OPFS, real storage quotas, a real drag-and-drop, the wasm core
 // against the real archive, and a live theme switch -- get a real browser.
 export default defineConfig({
-  plugins: [react(), archiveRange(), unbundleCore(), emitCore()],
+  plugins: [react(), archiveRange(), serveCore(), unbundleCore(), emitCore()],
   build: {
     lib: {
       entry: resolve(dirname(fileURLToPath(import.meta.url)), 'src/index.ts'),

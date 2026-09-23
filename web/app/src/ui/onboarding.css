@@ -201,7 +201,9 @@
   min-height: 320px;
   border-radius: 12px;
   overflow: hidden;
-  background: var(--sc-dark);
+  /* The longhand, not the shorthand: `background` would reset a backdrop's
+   * size and position wherever this rule wins the cascade. */
+  background-color: var(--sc-dark);
 }
 
 .fw-view canvas {

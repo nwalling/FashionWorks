@@ -122,7 +122,14 @@ export function Viewer({ tokens, onScene, className }: ViewerProps): JSX.Element
     const setBackdrop = (url: string | null) => {
       state.backdrop = Boolean(url);
       if (url) {
-        element.style.backgroundImage = `url(${url})`;
+        // Every longhand set here, inline, not just the image: `.fw-view`
+        // declares the `background` *shorthand*, which resets size and
+        // position to their initial values -- so the photo rendered at its
+        // natural size pinned to the top left, whatever `.fw-kit-view` said.
+        element.style.backgroundImage = `url("${url}")`;
+        element.style.backgroundSize = 'cover';
+        element.style.backgroundPosition = 'center';
+        element.style.backgroundRepeat = 'no-repeat';
         element.classList.add('fw-has-backdrop');
         // The canvas has to stop painting the theme colour over the photo.
         scene.background = null;
@@ -130,6 +137,9 @@ export function Viewer({ tokens, onScene, className }: ViewerProps): JSX.Element
         grid.visible = false;
       } else {
         element.style.backgroundImage = '';
+        element.style.backgroundSize = '';
+        element.style.backgroundPosition = '';
+        element.style.backgroundRepeat = '';
         element.classList.remove('fw-has-backdrop');
         scene.background = new Color(0x000000);
         renderer.setClearAlpha(1);

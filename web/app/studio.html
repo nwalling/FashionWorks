@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en" data-theme="hangarworks">
+<head>
+<meta charset="utf-8">
+<title>FashionWorks studio</title>
+<style>
+  :root, html[data-theme="hangarworks"] {
+    --sc-dark:#0A1219; --sc-card:#16292F; --sc-border:#2C4E5D; --sc-field:#1E3A44;
+    --sc-text:#EAF2F6; --sc-subtle:#9FB6C2; --sc-accent:#FF8A34; --sc-badge:#5AD1E6;
+    --sc-accent-text:#FF8A34; --sc-accent-ink:#0a1219;
+  }
+  html, body { margin:0; height:100%; background:var(--sc-dark); color:var(--sc-text);
+               font:14px/1.5 ui-sans-serif, system-ui, sans-serif; }
+  #log { position:fixed; right:8px; bottom:4px; z-index:5; font-size:11px; color:var(--sc-subtle); }
+  #mount { height:100dvh; display:flex; }
+  #mount > [data-fashionworks-kitbasher] { flex: 1 1 auto; min-width: 0; }
+</style>
+</head>
+<body>
+<div id="mount"></div>
+<span id="log">starting…</span>
+<script type="module" src="./studio.tsx"></script>
+</body>
+</html>

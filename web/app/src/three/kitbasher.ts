@@ -13,13 +13,16 @@
  */
 
 import {
+  Bone,
   Box3,
+  type Material,
   Mesh,
   Object3D,
   PerspectiveCamera,
   Quaternion,
   Scene,
   SkinnedMesh,
+  type Texture,
   Vector3,
 } from 'three';
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
@@ -28,7 +31,8 @@ import type { ArchiveClient } from '../archive/client';
 import {
   colourwayName,
   displayName,
-  familyRoot,
+  lineOf,
+  lineTitle,
   readCatalogue,
   sharedName,
   SLOTS,
@@ -36,10 +40,16 @@ import {
   type CatalogueItem,
   type Slot,
 } from '../archive/catalogue';
-import type { MaterialPayload, MeshPayload, PropPayload } from '../worker/archive.worker';
+import type {
+  AttachmentOverride,
+  MaterialPayload,
+  MeshPayload,
+  PropPayload,
+} from '../worker/archive.worker';
 import { buildGeometry } from './geometry';
-import { applyClip, buildRig, mountMatrix, type BuiltRig } from './rig';
-import { compositeSurfaces, materialFor, type PaletteEntry } from './surface';
+import { meshTexture, plainMaterial, surfaceMaterial, texturesWanted } from './materials';
+import { applyClip, bonePosition, boneRotation, buildRig, mountMatrix, type BuiltRig } from './rig';
+import { compositeSurfaces, dataTexture, type CompositeGeometry, type PaletteEntry } from './surface';
 
 export type Body = 'male' | 'female';
 
@@ -84,6 +94,21 @@ const FRAME_MARGIN = 1.12;
 /** Never get closer than this, whatever the bounds say. A single glove would
  * otherwise put the camera inside its own near plane. */
 const MIN_FRAME_DISTANCE = 0.6;
+
+/** How much the loaded-piece cache may hold before it drops what is not worn.
+ *
+ * Estimated GPU bytes -- textures with their mips, plus geometry. It used to
+ * hold everything ever equipped, forever: a torso was 85 MB of surfaces, and
+ * browsing a slot for a few minutes exhausted the GPU and lost the context. */
+const CACHE_BUDGET = 640 * 1024 * 1024;
+
+/** Which piece's attachment points win, lowest first.
+ *
+ * Every piece can re-declare an attachment point, and the undersuit declares
+ * most of them. The outermost piece that carries a point is the one it is
+ * mounted on: the backpack hangs where the torso's shell puts it, the sidearm
+ * where the legs put it. */
+const OVERRIDE_ORDER: readonly Slot[] = ['undersuit', 'helmet', 'arms', 'legs', 'torso'];
 
 /** Bake resolution for a swatch. A 22px chip needs a mean, not a texture. */
 const SWATCH_BAKE = 64;
@@ -227,6 +252,12 @@ export function decodeLoadout(encoded: string, catalogue: Catalogue): CatalogueI
  */
 export const SET_MATCH_THRESHOLD = 8;
 
+/** What equip-set anchors on, in order of preference. */
+const ANCHOR_ORDER: readonly Slot[] = ['torso', 'helmet', 'arms', 'legs', 'undersuit', 'backpack'];
+
+/** Slots a set may simply not have, without the set being incomplete. */
+export const OPTIONAL_SLOTS: ReadonlySet<Slot> = new Set<Slot>(['backpack', 'undersuit']);
+
 /** Slot words, which end the product part of a display name. Mirrors the
  * pipeline's `_NAME_SLOT_WORD`. */
 const SLOT_WORD = /^(helmet|helm|core|torso|arms|arm|legs|leg|backpack|pack|undersuit|suit|flight)$/i;
@@ -276,7 +307,7 @@ export function matchSet(
   wearing: ReadonlyMap<Slot, CatalogueItem>,
 ): SetPlan {
   const familyName = (item: CatalogueItem) =>
-    sharedName((catalogue.families.get(familyRoot(item)) ?? [item]).map(displayName));
+    lineTitle(lineOf(catalogue, item));
   const anchorShared = familyName(anchor);
   const edition = editionOf(displayName(anchor));
   const anchorMarks = parentheticals(displayName(anchor));
@@ -389,13 +420,23 @@ export class Kitbasher {
 
   private restRotations = new Map<string, Quaternion>();
 
-  private readonly equipped = new Map<Slot, Object3D[]>();
+  private readonly equipped = new Map<Slot, Loaded>();
 
   private readonly wearing = new Map<Slot, CatalogueItem>();
 
   /** Loaded pieces, so re-equipping is instant. Keyed by item, wear **and
-   * body**, because all three pick a genuinely different mesh or bake. */
-  private readonly cache = new Map<string, Object3D[]>();
+   * body**, because all three pick a genuinely different mesh or bake.
+   *
+   * In least-recently-used order -- a hit moves to the back -- and bounded by
+   * {@link CACHE_BUDGET}. What is on the body is never evicted. */
+  private readonly cache = new Map<string, Loaded>();
+
+  /** Materials found for items whose record names none, by item id. */
+  private readonly discovered = new Map<string, string | null>();
+
+  /** Each attachment point as the rig built it, to restore when the piece
+   * that moved it comes off. */
+  private attachmentDefaults = new Map<string, { parent: Object3D; position: Vector3; quaternion: Quaternion }>();
 
   private state: KitbasherState;
 
@@ -429,39 +470,61 @@ export class Kitbasher {
 
   private readonly swatches = new Map<string, string>();
 
-  /** Triangle share per submaterial, keyed by the mesh that defines it.
+  /** A mesh's UV layout and triangle share per material id, keyed by the mesh.
    *
    * **Keyed by the mesh, not the item, because a colourway family shares one.**
-   * That is what makes weighting affordable here: twenty Odyssey colourways
-   * resolve one mesh between them, not twenty. */
-  private readonly meshWeights = new Map<string, Map<string, number> | null>();
+   * That is what makes a swatch affordable: twenty Odyssey colourways resolve
+   * one mesh between them, not twenty. */
+  private readonly swatchMeshes = new Map<string, {
+    geometry: CompositeGeometry[];
+    triangles: Map<number, number>;
+    materialFile: string | null;
+  } | null>();
 
-  private async weightsFor(
-    item: CatalogueItem,
-    material: MaterialPayload,
-  ): Promise<ReadonlyMap<string, number> | null> {
+  private async swatchMesh(item: CatalogueItem) {
     const source = item.geometry[0]?.source;
     if (!source) return null;
-    const cached = this.meshWeights.get(source);
+    const cached = this.swatchMeshes.get(source);
     if (cached !== undefined) return cached;
-
-    let weights: Map<string, number> | null = null;
+    let entry: {
+      geometry: CompositeGeometry[];
+      triangles: Map<number, number>;
+      materialFile: string | null;
+    } | null = null;
     try {
-      const mesh = (await this.client.mesh(source)).mesh;
-      weights = new Map<string, number>();
-      for (const submesh of mesh.submeshes) {
-        // The id can point past the end of the list -- the Sunchaser helmet
-        // declares seven groups against six submaterials. An orphan group has
-        // no colour to weight, so it is left out rather than guessed at.
-        const name = material.submaterials[submesh.materialId]?.name;
-        if (!name) continue;
-        weights.set(name, (weights.get(name) ?? 0) + submesh.count / 3);
+      const payload: MeshPayload = item.bind_mode === 'socket'
+        ? (await this.client.prop(source, item.socket ?? 'backpack_attach_1_override')).prop
+        : (await this.client.mesh(source)).mesh;
+      const triangles = new Map<number, number>();
+      for (const submesh of payload.submeshes) {
+        triangles.set(submesh.materialId, (triangles.get(submesh.materialId) ?? 0) + submesh.count / 3);
       }
+      entry = {
+        geometry: [{ uvs: payload.uvs, indices: payload.indices, submeshes: payload.submeshes }],
+        triangles,
+        materialFile: payload.materialFile,
+      };
     } catch {
-      // A prop or a mesh that will not load: fall back to an unweighted mean.
-      weights = null;
+      // A mesh that will not load: the swatch falls back to an unweighted mean
+      // over whole-square bakes.
+      entry = null;
     }
-    this.meshWeights.set(source, weights);
+    this.swatchMeshes.set(source, entry);
+    return entry;
+  }
+
+  /** Triangle share per submaterial name. The id can point past the end of
+   * the list -- the Sunchaser helmet declares seven groups against six
+   * submaterials -- and an orphan group has no colour to weight. */
+  private static weightsByName(
+    triangles: ReadonlyMap<number, number>,
+    material: MaterialPayload,
+  ): Map<string, number> {
+    const weights = new Map<string, number>();
+    for (const [id, count] of triangles) {
+      const name = material.submaterials[id]?.name;
+      if (name) weights.set(name, (weights.get(name) ?? 0) + count);
+    }
     return weights;
   }
 
@@ -488,13 +551,14 @@ export class Kitbasher {
    */
   requestSwatch(item: CatalogueItem): void {
     if (this.swatchAsked.has(item.id)) return;
-    const mtl = item.materials[0];
-    if (!mtl) return;
     this.swatchAsked.add(item.id);
 
     this.swatchQueue = this.swatchQueue.then(async () => {
       if (this.disposed) return;
       try {
+        const mesh = await this.swatchMesh(item);
+        const mtl = await this.materialPathFor(item, mesh?.materialFile ?? null);
+        if (!mtl || this.disposed) return;
         const material = (await this.client.material(mtl)).material;
         const fetchTexture = async (path: string, maxSize: number) =>
           (await this.client.texture(path, Math.min(maxSize, SWATCH_LAYER))).texture;
@@ -502,11 +566,15 @@ export class Kitbasher {
           wear: this.state.wear,
           size: SWATCH_BAKE,
           layerSize: SWATCH_LAYER,
+          geometry: mesh?.geometry,
         });
         if (this.disposed) return;
-        const weights = await this.weightsFor(item, material);
-        if (this.disposed) return;
+        const weights = mesh ? Kitbasher.weightsByName(mesh.triangles, material) : null;
         const hex = meanColour(composited.means, weights);
+        for (const pair of new Set(composited.surfaces.values())) {
+          pair.albedo.dispose();
+          pair.orm.dispose();
+        }
         if (hex) {
           this.swatches.set(item.id, hex);
           this.publish({ swatches: new Map(this.swatches) });
@@ -516,6 +584,24 @@ export class Kitbasher {
         // stays in `swatchAsked` so a broken piece is not retried forever.
       }
     });
+  }
+
+  /** The material an item wears: the one its record names, or -- for the
+   * quarter of the catalogue that names none, including 97 of 142 backpacks --
+   * the one the archive has for it by class name or by mesh. */
+  private async materialPathFor(item: CatalogueItem, meshMaterial: string | null): Promise<string | null> {
+    if (item.materials[0]) return item.materials[0];
+    if (this.discovered.has(item.id)) return this.discovered.get(item.id) ?? null;
+    let found: string | null = null;
+    try {
+      found = await this.client.discoverMaterial(
+        item.class_name, item.geometry[0]?.source ?? '', meshMaterial,
+      );
+    } catch {
+      found = null;
+    }
+    this.discovered.set(item.id, found);
+    return found;
   }
 
   subscribe(listener: (state: KitbasherState) => void): () => void {
@@ -545,6 +631,16 @@ export class Kitbasher {
     if (this.disposed) return;
     this.rig = buildRig(built.bones);
     this.restRotations = new Map(this.rig.bones.map((b) => [b.name, b.quaternion.clone()]));
+    this.attachmentDefaults = new Map(built.bones
+      .filter((b) => b.attachment)
+      .map((b) => {
+        const bone = this.rig!.byName.get(b.name)!;
+        return [b.name, {
+          parent: bone.parent ?? this.rig!.root,
+          position: bone.position.clone(),
+          quaternion: bone.quaternion.clone(),
+        }];
+      }));
     this.view.scene.add(this.rig.root);
     this.publish({
       busy: false,
@@ -598,29 +694,69 @@ export class Kitbasher {
     });
   }
 
-  private async load(item: CatalogueItem): Promise<Object3D[]> {
+  private async load(item: CatalogueItem): Promise<Loaded> {
     const key = `${item.id}:${this.state.wear}:${this.state.body}`;
     const hit = this.cache.get(key);
-    if (hit) return hit;
+    if (hit) {
+      // Most recently used goes to the back of the eviction order.
+      this.cache.delete(key);
+      this.cache.set(key, hit);
+      return hit;
+    }
 
-    const mtl = item.materials[0];
+    // Meshes first: the compositor needs to know where each submaterial sits
+    // in UV space to bake them all into one atlas.
+    const socket = item.bind_mode === 'socket';
+    const socketName = item.socket ?? 'backpack_attach_1_override';
+    const payloads: Array<MeshPayload | PropPayload> = [];
+    // A piece can be several meshes: arms ship a left and a right.
+    for (const geometry of item.geometry) {
+      payloads.push(socket
+        ? (await this.client.prop(geometry.source, socketName)).prop
+        : (await this.client.mesh(geometry.source)).mesh);
+    }
+
+    const mtl = await this.materialPathFor(item, payloads[0]?.materialFile ?? null);
     const material: MaterialPayload = mtl
       ? (await this.client.material(mtl)).material
       : { submaterials: [], library: {} };
     const fetchTexture = async (path: string, maxSize: number) =>
       (await this.client.texture(path, maxSize)).texture;
-    const composited = await compositeSurfaces(material, paletteOf(item), fetchTexture, this.state.wear);
+    const composited = await compositeSurfaces(material, paletteOf(item), fetchTexture, {
+      wear: this.state.wear,
+      geometry: payloads.map((p) => ({ uvs: p.uvs, indices: p.indices, submeshes: p.submeshes })),
+      detail: true,
+    });
+
+    // The textures the materials bind directly: the armour's own normal maps,
+    // and the diffuse of anything that is not LayerBlend.
+    const byPath = new Map<string, Texture>();
+    for (const sub of material.submaterials) {
+      for (const want of texturesWanted(sub)) {
+        if (byPath.has(want.path)) continue;
+        const payload = (await this.client.texture(want.path, 1024)).texture;
+        if (!payload) continue;
+        byPath.set(
+          want.path,
+          meshTexture(dataTexture(payload.rgba, payload.width, payload.height, want.srgb), want.srgb),
+        );
+      }
+    }
+
     const count = Math.max(1, material.submaterials.length);
-    const materials = material.submaterials.length
-      ? material.submaterials.map((sub) => materialFor(sub.name, composited))
-      : [materialFor('', composited)];
+    const materials: Material[] = material.submaterials.length
+      ? material.submaterials.map((sub) => (composited.surfaces.has(sub.name)
+        ? surfaceMaterial(sub, composited, { byPath })
+        : plainMaterial(sub, { byPath })))
+      : [plainMaterial({
+        name: '', shader: 'Illum', tintable: false, textures: {}, layers: [],
+        glow: 0, opacity: 1, alphaTest: 0, shininess: 0.45,
+      }, { byPath })];
 
     const objects: Object3D[] = [];
-    // A piece can be several meshes: arms ship a left and a right.
-    for (const geometry of item.geometry) {
-      if (item.bind_mode === 'socket') {
-        const socket = item.socket ?? 'backpack_attach_1_override';
-        const prop: PropPayload = (await this.client.prop(geometry.source, socket)).prop;
+    for (const payload of payloads) {
+      if (socket) {
+        const prop = payload as PropPayload;
         const object = new Mesh(buildGeometry(prop, count).geometry, materials);
         object.frustumCulled = false;
         if (prop.mount) {
@@ -629,14 +765,80 @@ export class Kitbasher {
         }
         objects.push(object);
       } else {
-        const mesh: MeshPayload = (await this.client.mesh(geometry.source)).mesh;
-        const object = new SkinnedMesh(buildGeometry(mesh, count).geometry, materials);
+        const object = new SkinnedMesh(buildGeometry(payload, count).geometry, materials);
         object.frustumCulled = false;
         objects.push(object);
       }
     }
-    this.cache.set(key, objects);
-    return objects;
+
+    const loaded = measure(key, objects, materials, payloads.flatMap((p) => p.overrides ?? []));
+    this.cache.set(key, loaded);
+    this.evict();
+    return loaded;
+  }
+
+  /** Drop least-recently-used pieces until the cache fits its budget. Never
+   * one that is on the body. */
+  private evict(): void {
+    const worn = new Set(this.equipped.values());
+    let total = 0;
+    for (const loaded of this.cache.values()) total += loaded.bytes;
+    for (const [key, loaded] of this.cache) {
+      if (total <= CACHE_BUDGET) break;
+      if (worn.has(loaded)) continue;
+      loaded.dispose();
+      this.cache.delete(key);
+      total -= loaded.bytes;
+    }
+  }
+
+  /** What the cache holds, for a check to read. */
+  cacheStats(): { entries: number; bytes: number; worn: number } {
+    let bytes = 0;
+    for (const loaded of this.cache.values()) bytes += loaded.bytes;
+    return { entries: this.cache.size, bytes, worn: this.equipped.size };
+  }
+
+  /** Move every attachment point to where the outermost piece declaring it
+   * puts it, or back to the rig's own where none does.
+   *
+   * The rig's points come from one undersuit donor. A torso re-declares them
+   * for its own shell -- the ADP-mk4 core carries the backpack point ten
+   * centimetres further back -- and a Warden pack hung on the donor's point
+   * sat inside that shell. */
+  private applyOverrides(): void {
+    const rig = this.rig;
+    if (!rig) return;
+    const chosen = new Map<string, AttachmentOverride>();
+    for (const slot of OVERRIDE_ORDER) {
+      for (const override of this.equipped.get(slot)?.overrides ?? []) chosen.set(override.name, override);
+    }
+    for (const [name, rest] of this.attachmentDefaults) {
+      const bone = rig.byName.get(name);
+      if (!bone) continue;
+      const override = chosen.get(name);
+      const parent: Bone | undefined = override?.parent ? rig.byName.get(override.parent) : undefined;
+      if (override && parent) {
+        if (bone.parent !== parent) parent.add(bone);
+        bone.position.copy(bonePosition(override.position));
+        bone.quaternion.copy(boneRotation(override.rotation));
+      } else {
+        if (bone.parent !== rest.parent) rest.parent.add(bone);
+        bone.position.copy(rest.position);
+        bone.quaternion.copy(rest.quaternion);
+      }
+      this.restRotations.set(name, bone.quaternion.clone());
+    }
+    rig.root.updateMatrixWorld(true);
+    rig.skeleton.update();
+  }
+
+  /** Where an attachment point is right now, in the scene. For checks. */
+  attachmentWorld(name: string): [number, number, number] | null {
+    const bone = this.rig?.byName.get(name);
+    if (!bone) return null;
+    const at = bone.getWorldPosition(new Vector3());
+    return [at.x, at.y, at.z];
   }
 
   async equip(item: CatalogueItem): Promise<void> {
@@ -646,9 +848,9 @@ export class Kitbasher {
     const name = displayName(item);
     this.publish({ busy: true, status: `${name}…` });
 
-    let objects: Object3D[];
+    let loaded: Loaded;
     try {
-      objects = await this.load(item);
+      loaded = await this.load(item);
     } catch (error) {
       this.publish({
         busy: false,
@@ -659,9 +861,9 @@ export class Kitbasher {
     if (this.disposed) return;
 
     // The old piece comes out first, so a slot never holds two.
-    for (const previous of this.equipped.get(slot) ?? []) previous.removeFromParent();
+    for (const previous of this.equipped.get(slot)?.objects ?? []) previous.removeFromParent();
 
-    for (const object of objects) {
+    for (const object of loaded.objects) {
       if (object instanceof SkinnedMesh) {
         this.view.scene.add(object);
         object.bind(this.rig.skeleton, object.matrixWorld);
@@ -670,10 +872,13 @@ export class Kitbasher {
         (bone ?? this.view.scene).add(object);
       }
     }
-    this.equipped.set(slot, objects);
+    this.equipped.set(slot, loaded);
     this.wearing.set(slot, item);
+    this.applyOverrides();
+    // The piece this replaced may be evictable now.
+    this.evict();
 
-    const triangles = objects.reduce(
+    const triangles = loaded.objects.reduce(
       (sum, o) => sum + ((o as Mesh).geometry?.getIndex()?.count ?? 0) / 3,
       0,
     );
@@ -682,22 +887,28 @@ export class Kitbasher {
   }
 
   unequip(slot: Slot): void {
-    for (const object of this.equipped.get(slot) ?? []) object.removeFromParent();
+    for (const object of this.equipped.get(slot)?.objects ?? []) object.removeFromParent();
     this.equipped.delete(slot);
     this.wearing.delete(slot);
+    this.applyOverrides();
     this.publish({ status: `${slot} removed` });
   }
 
   clear(): void {
-    for (const objects of this.equipped.values()) for (const o of objects) o.removeFromParent();
+    for (const loaded of this.equipped.values()) for (const o of loaded.objects) o.removeFromParent();
     this.equipped.clear();
     this.wearing.clear();
+    this.applyOverrides();
     this.publish({ status: 'cleared' });
   }
 
-  /** Fill the empty slots to match the piece on the torso, or whatever is on. */
+  /** Fill the empty slots to match the piece on the torso, or whatever is on.
+   *
+   * The anchor is an armour piece whenever one is worn: a backpack or an
+   * undersuit is rarely sold as part of a set, and anchoring on one matched
+   * the armour to a pack. */
   async equipSet(): Promise<number> {
-    const anchor = this.wearing.get('torso') ?? [...this.wearing.values()][0];
+    const anchor = ANCHOR_ORDER.map((slot) => this.wearing.get(slot)).find(Boolean);
     if (!anchor) {
       this.publish({ status: 'equip something first, then match a set to it' });
       return 0;
@@ -708,19 +919,29 @@ export class Kitbasher {
     // Say what happened to the slots that stayed empty. Reporting only the
     // count read as a silent failure: "filled 3" tells nobody whether the set
     // has no backpack or whether the match gave up.
+    //
+    // **A backpack or undersuit is never a failure.** Most sets ship neither,
+    // so "this set has no undersuit or backpack" was on nearly every result
+    // and made a complete set read as a partial one. They are filled when the
+    // set has them and otherwise not mentioned.
     const filled = plan.picks.length
       ? `filled ${plan.picks.length} slot${plan.picks.length === 1 ? '' : 's'}`
       : 'nothing to add';
-    const absent = plan.unfilled.filter((u) => u.absent).map((u) => u.slot);
-    const short = plan.unfilled.filter((u) => !u.absent).map((u) => u.reason);
+    const required = plan.unfilled.filter((u) => !OPTIONAL_SLOTS.has(u.slot));
+    const absent = required.filter((u) => u.absent).map((u) => u.slot);
+    const short = required.filter((u) => !u.absent).map((u) => u.reason);
+    // Borrowing a piece from another line is a note, not a shortfall: the set
+    // is complete, and the visitor is told where the piece came from.
     const borrowed = plan.crossLine.map((c) => `${c.slot} from ${c.line}`);
     const why = [
       absent.length ? `this set has no ${absent.join(' or ')}` : '',
       ...short,
-      ...borrowed,
     ].filter(Boolean);
+    const notes = borrowed.length ? ` · ${borrowed.join(' · ')}` : '';
     this.publish({
-      status: why.length ? `set: ${filled} · ${why.join(' · ')}` : `set complete: ${filled}`,
+      status: why.length
+        ? `set: ${filled} · ${why.join(' · ')}${notes}`
+        : `set complete: ${filled}${notes}`,
     });
     return plan.picks.length;
   }
@@ -780,8 +1001,8 @@ export class Kitbasher {
   frameLoadout(): void {
     const bounds = new Box3();
     let any = false;
-    for (const objects of this.equipped.values()) {
-      for (const object of objects) {
+    for (const loaded of this.equipped.values()) {
+      for (const object of loaded.objects) {
         bounds.expandByObject(object);
         any = true;
       }
@@ -820,8 +1041,69 @@ export class Kitbasher {
   dispose(): void {
     this.disposed = true;
     this.clear();
+    for (const loaded of this.cache.values()) loaded.dispose();
+    this.cache.clear();
     this.rig?.root.removeFromParent();
     this.rig = null;
     this.listeners.clear();
   }
 }
+
+/** A loaded piece: what goes in the scene, what it moves, and what it costs. */
+interface Loaded {
+  readonly key: string;
+  readonly objects: Object3D[];
+  readonly overrides: AttachmentOverride[];
+  /** Estimated bytes held, GPU and CPU together. */
+  readonly bytes: number;
+  dispose(): void;
+}
+
+/** Everything a loaded piece owns, measured, with a way to free it. */
+function measure(
+  key: string,
+  objects: Object3D[],
+  materials: Material[],
+  overrides: AttachmentOverride[],
+): Loaded {
+  const textures = new Set<Texture>();
+  for (const material of materials) {
+    const m = material as Material & Record<string, unknown>;
+    for (const slot of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap']) {
+      const texture = m[slot] as Texture | null | undefined;
+      if (texture && !texture.userData.shared) textures.add(texture);
+    }
+    const grain = m.userData?.fwGrain as Record<string, { value: unknown }> | undefined;
+    for (const uniform of Object.values(grain ?? {})) {
+      const texture = uniform.value as Texture | null;
+      if (texture && typeof texture === 'object' && 'isTexture' in texture) textures.add(texture);
+    }
+  }
+  let bytes = 0;
+  for (const texture of textures) {
+    const image = texture.image as { width?: number; height?: number; depth?: number; data?: ArrayLike<number> };
+    const texels = (image.width ?? 0) * (image.height ?? 0) * (image.depth ?? 1);
+    // GPU with mips, plus the CPU copy three.js keeps for re-upload.
+    bytes += texels * 4 * 1.34 + (image.data?.length ?? 0);
+  }
+  const geometries = new Set<Mesh['geometry']>();
+  for (const object of objects) {
+    const geometry = (object as Mesh).geometry;
+    if (!geometry) continue;
+    geometries.add(geometry);
+    for (const attribute of Object.values(geometry.attributes)) bytes += attribute.array.byteLength * 2;
+    bytes += (geometry.index?.array.byteLength ?? 0) * 2;
+  }
+  return {
+    key,
+    objects,
+    overrides,
+    bytes,
+    dispose() {
+      for (const texture of textures) texture.dispose();
+      for (const material of materials) material.dispose();
+      for (const geometry of geometries) geometry.dispose();
+    },
+  };
+}
+

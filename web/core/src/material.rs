@@ -139,6 +139,21 @@ pub struct SubMaterial {
     pub textures: HashMap<String, String>,
     pub base_layers: Vec<LayerRef>,
     pub wear_layers: Vec<LayerRef>,
+    /// The submaterial's own constants. A LayerBlend surface takes its colour
+    /// from its layers and ignores these; every other shader -- `Illum`,
+    /// `MeshDecal`, glass, screens -- has nothing else. Dropping them is how a
+    /// backpack's `Illum` strap rendered as the renderer's placeholder grey.
+    pub diffuse: [f32; 3],
+    pub specular: [f32; 3],
+    pub emissive: [f32; 3],
+    /// CryEngine's glow factor. On a LayerBlend surface it is a fraction of
+    /// the composited albedo emitted -- which is what makes the ADP-mk4 Big
+    /// Boss graffiti glow while the near-black plate around it stays dark.
+    pub glow: f32,
+    pub opacity: f32,
+    pub alpha_test: f32,
+    /// 0-1, from the archive's 0-255.
+    pub shininess: f32,
 }
 
 impl SubMaterial {
@@ -185,12 +200,23 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<SubMaterial>, String> {
         .materials
         .iter()
         .map(|sub| {
+            // Slot numbers mean different things to different shaders. On
+            // LayerBlend, TexSlot2 is unused and TexSlot3 is the normal map; on
+            // Illum and the decal shaders TexSlot2 carries the `_ddna` normal.
+            // So only LayerBlend trusts the number first, and everything else
+            // trusts the file name first -- which is what CIG's own suffixes
+            // (`_diff`, `_ddna`, `_spec`) are for.
+            let layered = sub.shader.to_ascii_lowercase().contains("layerblend");
             let mut textures = HashMap::new();
             for binding in &sub.texture_slots {
                 if binding.path.is_empty() {
                     continue;
                 }
-                let role = slot_role(&binding.slot).or_else(|| suffix_role(&binding.path));
+                let role = if layered {
+                    slot_role(&binding.slot).or_else(|| suffix_role(&binding.path))
+                } else {
+                    suffix_role(&binding.path).or_else(|| slot_role(&binding.slot))
+                };
                 if let Some(role) = role {
                     textures.entry(role.to_string()).or_insert_with(|| binding.path.clone());
                 }
@@ -203,6 +229,13 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<SubMaterial>, String> {
                 textures,
                 base_layers,
                 wear_layers,
+                diffuse: sub.diffuse,
+                specular: sub.specular,
+                emissive: sub.emissive,
+                glow: sub.glow,
+                opacity: sub.opacity,
+                alpha_test: sub.alpha_test,
+                shininess: (sub.shininess / 255.0).clamp(0.0, 1.0),
             }
         })
         .collect())
@@ -244,8 +277,29 @@ pub fn parse_layer(path: &str, bytes: &[u8]) -> Option<LayerMaterial> {
         metal: LayerMaterial::decide_metal(tint_mode, sub.diffuse, sub.specular),
         diffuse_tex,
         normal_tex,
-        tile_u: 1.0,
+        tile_u: tex_mod_tile_u(&sub.authored_textures),
     })
+}
+
+/// The layer diffuse's own `TexMod` tiling, or 1.
+///
+/// 87 of the 495 library layers carry one on `TexSlot1`, from 1.5 to 20, and
+/// the pipeline multiplies it into the reference's `UVTiling`
+/// (`tint.py`: `repeat = entry.uv_tiling * detail.tile_u`). The port used to
+/// hard-code 1.0, so those layers' grain came out up to twenty times too
+/// coarse -- invisible while the bake averaged it away, and wrong the moment
+/// the detail is drawn at render time.
+fn tex_mod_tile_u(textures: &[mtl::AuthoredTexture]) -> f32 {
+    textures
+        .iter()
+        .filter(|t| t.slot.eq_ignore_ascii_case("TexSlot1"))
+        .flat_map(|t| t.child_blocks.iter())
+        .filter(|b| b.tag.eq_ignore_ascii_case("TexMod"))
+        .flat_map(|b| b.attributes.iter())
+        .find(|a| a.name.eq_ignore_ascii_case("TileU"))
+        .and_then(|a| a.value.trim().parse::<f32>().ok())
+        .filter(|v| v.is_finite() && *v > 0.0)
+        .unwrap_or(1.0)
 }
 
 #[cfg(test)]
@@ -338,6 +392,25 @@ mod tests {
             ..SubMaterial::default()
         };
         assert!(sub.wear_pairs()[0].is_none(), "matched case-insensitively");
+    }
+
+    #[test]
+    fn a_layer_takes_its_own_texmod_tiling() {
+        let texture = |slot: &str, tile: &str| mtl::AuthoredTexture {
+            slot: slot.into(),
+            path: "textures/layers/x_diff.tif".into(),
+            is_virtual: false,
+            attributes: vec![],
+            child_blocks: vec![mtl::AuthoredBlock {
+                tag: "TexMod".into(),
+                attributes: vec![mtl::AuthoredAttribute { name: "TileU".into(), value: tile.into() }],
+                children: vec![],
+            }],
+        };
+        assert_eq!(tex_mod_tile_u(&[texture("TexSlot1", "4")]), 4.0);
+        assert_eq!(tex_mod_tile_u(&[texture("TexSlot2", "4")]), 1.0, "only the diffuse's");
+        assert_eq!(tex_mod_tile_u(&[texture("TexSlot1", "0")]), 1.0, "a zero tiling is no tiling");
+        assert_eq!(tex_mod_tile_u(&[]), 1.0);
     }
 
     #[test]

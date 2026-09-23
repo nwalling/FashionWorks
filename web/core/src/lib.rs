@@ -16,6 +16,7 @@ pub mod audit;
 pub mod blend;
 pub mod catalog;
 pub mod composite;
+pub mod discover;
 pub mod gold;
 pub mod material;
 pub mod mesh;
@@ -50,6 +51,9 @@ pub struct Archive {
     /// sibling entries, and a piece wants a dozen textures -- so a naive scan
     /// is tens of billions of allocations for one armour piece.
     by_path: std::cell::OnceCell<std::collections::HashMap<String, usize>>,
+    /// Every character `.mtl`, by stem and by directory, for items that name
+    /// no material of their own. Built on first use.
+    mtls: std::cell::OnceCell<discover::MtlIndex>,
 }
 
 #[wasm_bindgen]
@@ -63,7 +67,13 @@ impl Archive {
         let source = RangeSource::new(read_range, byte_length as u64);
         let mut reader = RangeReader::new(source);
         let entries = p4k::index(&mut reader).map_err(|e| JsValue::from_str(&e))?;
-        Ok(Archive { reader, entries, rig: None, by_path: std::cell::OnceCell::new() })
+        Ok(Archive {
+            reader,
+            entries,
+            rig: None,
+            by_path: std::cell::OnceCell::new(),
+            mtls: std::cell::OnceCell::new(),
+        })
     }
 
     /// Number of entries in the archive. The 4.10 build indexes 1,365,842.
@@ -369,7 +379,35 @@ impl Archive {
             loaded.bones = rig.bones.iter().map(|b| b.name.clone()).collect();
             report
         });
-        mesh_to_js(&loaded, report.as_ref())
+        let out = mesh_to_js(&loaded, report.as_ref())?;
+        js_sys::Reflect::set(&out, &"overrides".into(), &overrides_to_js(&skin)?.into())?;
+        Ok(out)
+    }
+
+    /// A material for an item whose record names none. See [`discover`].
+    ///
+    /// `class_name` is tried first, then the mesh: `mesh_material` is the file
+    /// the mesh's own `MTL_NAME` chunk names, when the caller has it. `None`
+    /// when nothing plausible exists, which is rare and honest -- Artimex Arms
+    /// Wildwood has no material anywhere in the archive.
+    #[wasm_bindgen(js_name = discoverMaterial)]
+    pub fn discover_material(
+        &self,
+        class_name: &str,
+        mesh_path: &str,
+        mesh_material: Option<String>,
+    ) -> Option<String> {
+        let index = self.mtls.get_or_init(|| {
+            let names: Vec<String> = self.entries.iter().map(|e| normalise_asset(&e.name)).collect();
+            discover::MtlIndex::build(names.iter().map(String::as_str))
+        });
+        if let Some(found) = index.by_class(class_name) {
+            return Some(found.to_string());
+        }
+        if mesh_path.is_empty() {
+            return None;
+        }
+        index.by_mesh(&normalise_asset(mesh_path), mesh_material.as_deref())
     }
 
     /// An entry index for an asset path, however it is spelled.
@@ -411,6 +449,58 @@ impl Archive {
             map
         })
     }
+}
+
+/// The attachment points a piece declares for itself, from its own skeleton.
+///
+/// **An `_override` bone is the armour moving an attachment point**, which is
+/// what the name says. The canonical armature takes its 35 from one undersuit
+/// donor, and every torso then re-declares them where *its* shell puts them:
+/// the ADP-mk4 core carries `backpack_attach_1_override` at y -0.233, ten
+/// centimetres behind the donor's -0.130, and its rifle holsters wider and
+/// higher. Hanging a Warden pack on the donor's point buried it in that shell.
+///
+/// Parent-relative, and the parent is named rather than indexed: the piece's
+/// skeleton is its own 50-odd bones, not the armature's 255, so only a name
+/// means the same thing on both sides.
+fn overrides_to_js(skin: &[u8]) -> Result<js_sys::Array, JsValue> {
+    let out = js_sys::Array::new();
+    let Some(bones) = starbreaker_3d::skeleton::parse_skeleton(skin) else {
+        return Ok(out);
+    };
+    for bone in &bones {
+        if !bone.name.to_ascii_lowercase().ends_with(armature::ATTACHMENT_SUFFIX) {
+            continue;
+        }
+        let parent = bone
+            .parent_index
+            .and_then(|p| bones.get(p as usize))
+            .map(|p| p.name.clone());
+        let entry = js_sys::Object::new();
+        js_sys::Reflect::set(&entry, &"name".into(), &JsValue::from_str(&bone.name))?;
+        js_sys::Reflect::set(
+            &entry,
+            &"parent".into(),
+            &parent.map_or(JsValue::NULL, |p| JsValue::from_str(&p)),
+        )?;
+        js_sys::Reflect::set(
+            &entry,
+            &"position".into(),
+            &js_sys::Float32Array::from(&bone.local_position[..]).into(),
+        )?;
+        js_sys::Reflect::set(
+            &entry,
+            &"rotation".into(),
+            &js_sys::Float32Array::from(&bone.local_rotation[..]).into(),
+        )?;
+        js_sys::Reflect::set(
+            &entry,
+            &"world".into(),
+            &js_sys::Float32Array::from(&bone.world_position[..]).into(),
+        )?;
+        out.push(&entry);
+    }
+    Ok(out)
 }
 
 /// Replace a path's final extension. `None` when it has none.
@@ -612,6 +702,17 @@ impl Archive {
             js_sys::Reflect::set(&entry, &"name".into(), &JsValue::from_str(&sub.name))?;
             js_sys::Reflect::set(&entry, &"shader".into(), &JsValue::from_str(&sub.shader))?;
             js_sys::Reflect::set(&entry, &"tintable".into(), &sub.tintable().into())?;
+            for (key, value) in [
+                ("diffuse", &sub.diffuse),
+                ("specular", &sub.specular),
+                ("emissive", &sub.emissive),
+            ] {
+                js_sys::Reflect::set(&entry, &key.into(), &js_sys::Float32Array::from(&value[..]).into())?;
+            }
+            js_sys::Reflect::set(&entry, &"glow".into(), &sub.glow.into())?;
+            js_sys::Reflect::set(&entry, &"opacity".into(), &sub.opacity.into())?;
+            js_sys::Reflect::set(&entry, &"alphaTest".into(), &sub.alpha_test.into())?;
+            js_sys::Reflect::set(&entry, &"shininess".into(), &sub.shininess.into())?;
 
             let textures = js_sys::Object::new();
             for (role, texture) in &sub.textures {
@@ -663,6 +764,7 @@ impl Archive {
                 &"normalTex".into(),
                 &resolved.normal_tex.as_deref().map_or(JsValue::NULL, JsValue::from_str),
             )?;
+            js_sys::Reflect::set(&value, &"tileU".into(), &resolved.tile_u.into())?;
             js_sys::Reflect::set(&lib, &key.as_str().into(), &value.into())?;
         }
         js_sys::Reflect::set(&out, &"library".into(), &lib.into())?;

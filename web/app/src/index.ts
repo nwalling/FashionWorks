@@ -34,6 +34,11 @@ export type { OpenResult, OpenHandlers } from './archive/client';
 export {
   readCatalogue,
   familyRoot,
+  lineKey,
+  lineOf,
+  lineTitle,
+  lineRepresentative,
+  productLine,
   sharedName,
   colourwayName,
   displayName,

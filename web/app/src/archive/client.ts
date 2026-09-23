@@ -78,6 +78,11 @@ export class ArchiveClient {
 
   private waiting = new Map<string, Array<(message: FromWorker) => void>>();
 
+  /** Requests awaiting their own answer, by id. */
+  private pending = new Map<number, (message: FromWorker) => void>();
+
+  private nextId = 1;
+
   /** Set by the first `failed` message, and re-thrown at every pending waiter
    * so a failure surfaces as a rejection rather than as a hang. */
   private failure: string | null = null;
@@ -87,6 +92,14 @@ export class ArchiveClient {
     const worker = new ArchiveWorker();
     worker.onmessage = (event: MessageEvent<FromWorker>) => {
       const message = event.data;
+      // An answer to one request, success or failure, goes to that request
+      // and nowhere else. A missing texture is that texture's problem.
+      if (message.id !== undefined) {
+        const waiter = this.pending.get(message.id);
+        this.pending.delete(message.id);
+        waiter?.(message);
+        return;
+      }
       if (message.type === 'failed') {
         this.failure = message.message;
         // Every waiter, not just the matching one: nothing else is coming.
@@ -94,6 +107,8 @@ export class ArchiveClient {
           for (const resolve of queue) resolve(message);
         }
         this.waiting.clear();
+        for (const resolve of this.pending.values()) resolve(message);
+        this.pending.clear();
         return;
       }
       this.waiting.get(message.type)?.shift()?.(message);
@@ -108,6 +123,8 @@ export class ArchiveClient {
         }
       }
       this.waiting.clear();
+      for (const resolve of this.pending.values()) resolve({ type: 'failed', message: this.failure });
+      this.pending.clear();
     };
     this.worker = worker;
     return worker;
@@ -132,6 +149,24 @@ export class ArchiveClient {
 
   private send(message: ToWorker): void {
     this.ensure().postMessage(message);
+  }
+
+  /** Send a request and wait for *its* answer. */
+  private request<T extends FromWorker['type']>(
+    type: T,
+    message: ToWorker,
+  ): Promise<Extract<FromWorker, { type: T }>> {
+    if (this.failure) return Promise.reject(new Error(this.failure));
+    const id = this.nextId;
+    this.nextId += 1;
+    return new Promise((resolve, reject) => {
+      this.pending.set(id, (answer) => {
+        if (answer.type === 'failed') reject(new Error(answer.message));
+        else if (answer.type !== type) reject(new Error(`expected ${type}, got ${answer.type}`));
+        else resolve(answer as Extract<FromWorker, { type: T }>);
+      });
+      this.send({ ...message, id });
+    });
   }
 
   /** Open a dropped archive and build its catalogue.
@@ -231,54 +266,50 @@ export class ArchiveClient {
    */
   async catalogue(skeleton: 'male' | 'female', onProgress?: (progress: Progress) => void) {
     this.ensure();
-    const soon = this.expect('catalogue');
     this.relayProgress(onProgress);
-    this.send({ type: 'catalogue', skeleton });
-    return soon;
+    return this.request('catalogue', { type: 'catalogue', skeleton });
   }
 
   /** Build the canonical armature: the base skeleton plus the attachment bones
    * the donor pieces introduce. */
   async rig(base: string, donors: string[]) {
-    const soon = this.expect('rig');
-    this.send({ type: 'rig', base, donors });
-    return soon;
+    return this.request('rig', { type: 'rig', base, donors });
   }
 
   async mesh(path: string) {
-    const soon = this.expect('mesh');
-    this.send({ type: 'mesh', path });
-    return soon;
+    return this.request('mesh', { type: 'mesh', path });
   }
 
   async material(path: string) {
-    const soon = this.expect('material');
-    this.send({ type: 'material', path });
-    return soon;
+    return this.request('material', { type: 'material', path });
   }
 
   async texture(path: string, maxSize: number) {
-    const soon = this.expect('texture');
-    this.send({ type: 'texture', path, maxSize });
-    return soon;
+    return this.request('texture', { type: 'texture', path, maxSize });
   }
 
   async prop(path: string, socket: string) {
-    const soon = this.expect('prop');
-    this.send({ type: 'prop', path, socket });
-    return soon;
+    return this.request('prop', { type: 'prop', path, socket });
   }
 
   async pose(path: string, clip: string) {
-    const soon = this.expect('pose');
-    this.send({ type: 'pose', path, clip });
-    return soon;
+    return this.request('pose', { type: 'pose', path, clip });
+  }
+
+  /** A material for an item whose record names none: by class name, then by
+   * the mesh. `null` when the archive has nothing plausible. */
+  async discoverMaterial(className: string, meshPath: string, meshMaterial: string | null = null) {
+    const answer = await this.request('discovered', {
+      type: 'discover', className, meshPath, meshMaterial,
+    });
+    return answer.path;
   }
 
   close(): void {
     this.worker?.terminate();
     this.worker = null;
     this.waiting.clear();
+    this.pending.clear();
     this.failure = null;
   }
 }
