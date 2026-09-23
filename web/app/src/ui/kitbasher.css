@@ -198,13 +198,16 @@
   font-size: 13px;
 }
 
+/* At the top of the column, under the search, rather than at its foot: at the
+ * bottom it sat below a listing long enough to push it off the screen. */
 .fw-kit-ways {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  padding-top: 8px;
-  border-top: 1px solid var(--sc-border);
+  flex: 0 0 auto;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--sc-border);
 }
 
 /* Full width, so the swatches wrap underneath it rather than beside it. */

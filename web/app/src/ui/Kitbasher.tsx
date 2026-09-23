@@ -231,6 +231,31 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
+          {onBody && familyOf(onBody).length > 1 && (
+            <div className="fw-kit-ways" role="radiogroup" aria-label="Colourway">
+              {/* Labelled, because a row of small squares at the foot of a long
+                  listing reads as decoration rather than as a control. */}
+              <span className="fw-kit-ways-label">
+                {familyOf(onBody).length} colourways
+              </span>
+              {familyOf(onBody).map((variant) => {
+                const colour = variant.tint?.layers?.[0]?.color;
+                return (
+                  <button
+                    key={variant.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={onBody.id === variant.id}
+                    className="fw-kit-way"
+                    style={colour ? { background: colour } : undefined}
+                    title={colourwayName(displayName(variant), titleOf(variant))}
+                    disabled={busy}
+                    onClick={() => void engine.current?.equip(variant)}
+                  />
+                );
+              })}
+            </div>
+          )}
           <div className="fw-kit-items" role="listbox" aria-label={`${slot} pieces`}>
             {pool.length === 0 && (
               <p className="fw-kit-empty">{search ? 'nothing matches' : 'nothing in this slot'}</p>
@@ -262,31 +287,6 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
               <p className="fw-kit-empty">…and {pool.length - MAX_ROWS} more; search to narrow</p>
             )}
           </div>
-          {onBody && familyOf(onBody).length > 1 && (
-            <div className="fw-kit-ways" role="radiogroup" aria-label="Colourway">
-              {/* Labelled, because a row of small squares at the foot of a long
-                  listing reads as decoration rather than as a control. */}
-              <span className="fw-kit-ways-label">
-                {familyOf(onBody).length} colourways
-              </span>
-              {familyOf(onBody).map((variant) => {
-                const colour = variant.tint?.layers?.[0]?.color;
-                return (
-                  <button
-                    key={variant.id}
-                    type="button"
-                    role="radio"
-                    aria-checked={onBody.id === variant.id}
-                    className="fw-kit-way"
-                    style={colour ? { background: colour } : undefined}
-                    title={colourwayName(displayName(variant), titleOf(variant))}
-                    disabled={busy}
-                    onClick={() => void engine.current?.equip(variant)}
-                  />
-                );
-              })}
-            </div>
-          )}
         </aside>
 
         <div className="fw-kit-stage">

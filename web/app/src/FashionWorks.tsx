@@ -169,7 +169,20 @@ export function FashionWorks(props: FashionWorksProps): JSX.Element {
     // through the stylesheet rather than inline.
     display: 'flex',
     flexDirection: 'column' as const,
+    // **A floor and a ceiling.** `min-height` alone is a floor: the root still
+    // grew to fit its content, so the armour listing pushed the panel past the
+    // bottom of the window, the listing never became the overflow point and so
+    // never scrolled, and the 3D canvas inherited the oversized height and
+    // framed the character below the fold. Every bound above this element --
+    // the host's definite height, the flex chain, the grid row -- ended here.
+    //
+    // Both percentages resolve against a parent with a definite height, which
+    // is what the contract asks a host for, and pin the root to exactly that.
+    // Against a parent with only a `min-height` they are both ignored, so a
+    // host that does not follow the contract gets the old behaviour rather
+    // than a collapsed panel.
     minHeight: '100%',
+    maxHeight: '100%',
   }), []);
 
   const ready = state.stage === 'ready' && tokens && catalogue && client.current;
