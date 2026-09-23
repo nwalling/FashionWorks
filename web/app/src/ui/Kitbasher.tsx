@@ -15,6 +15,7 @@ import {
   displayName,
   familyRoot,
   sharedName,
+  swatchColour,
   SLOTS,
   type Catalogue,
   type CatalogueItem,
@@ -232,14 +233,14 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
             onChange={(event) => setSearch(event.target.value)}
           />
           {onBody && familyOf(onBody).length > 1 && (
-            <div className="fw-kit-ways" role="radiogroup" aria-label="Colourway">
+            <div className="fw-kit-ways" role="radiogroup" aria-label="Color">
               {/* Labelled, because a row of small squares at the foot of a long
                   listing reads as decoration rather than as a control. */}
               <span className="fw-kit-ways-label">
-                {familyOf(onBody).length} colourways
+                {familyOf(onBody).length} colors
               </span>
               {familyOf(onBody).map((variant) => {
-                const colour = variant.tint?.layers?.[0]?.color;
+                const colour = swatchColour(variant);
                 return (
                   <button
                     key={variant.id}
@@ -266,7 +267,7 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
               const meta = [
                 item.manufacturer?.code ?? '',
                 item.weight_class ?? '',
-                family.length > 1 ? `${family.length} colourways` : '',
+                family.length > 1 ? `${family.length} colors` : '',
               ].filter(Boolean).join(' · ');
               return (
                 <button

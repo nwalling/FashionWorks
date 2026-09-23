@@ -15,12 +15,35 @@
   font-family: var(--font-body, system-ui, sans-serif);
 }
 
+/* Centred in whatever the host gives it, on both axes.
+ *
+ * `margin: auto` on a flex item absorbs the free space on both sides, so the
+ * panel sits in the middle of the viewport instead of hard against its top
+ * left corner -- which is where a file picker with three lines of text above
+ * it looked stranded. */
 .fw-onboarding {
   background: var(--sc-card);
   color: var(--sc-text);
   padding: 24px;
   border-radius: 12px;
   max-width: 640px;
+  margin: auto;
+  text-align: center;
+}
+
+/* Lists stay left-aligned: centred bullet points are hard to scan, and these
+ * are the requirement list and the indexing steps. */
+.fw-onboarding .fw-checks,
+.fw-onboarding .fw-steps,
+.fw-onboarding .fw-requirements,
+.fw-onboarding .fw-problem,
+.fw-onboarding .fw-path {
+  text-align: left;
+}
+
+/* The button row centres with everything else rather than hanging left. */
+.fw-onboarding button {
+  margin: 4px;
 }
 
 .fw-onboarding h2 {

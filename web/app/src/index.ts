@@ -37,6 +37,7 @@ export {
   sharedName,
   colourwayName,
   displayName,
+  swatchColour,
   SLOTS,
   HIDDEN_FLAGS,
 } from './archive/catalogue';

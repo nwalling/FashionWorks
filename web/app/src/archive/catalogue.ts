@@ -99,3 +99,57 @@ export function readCatalogue(json: string): Catalogue {
   }
   return { items, bySlot, families };
 }
+
+/** How saturated a `#rrggbb` is, 0 for a grey and 1 for a pure hue. */
+function saturationOf(hex: string): number {
+  if (!/^#[0-9a-f]{6}$/i.test(hex)) return 0;
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  const max = Math.max(r!, g!, b!);
+  const min = Math.min(r!, g!, b!);
+  return max === 0 ? 0 : (max - min) / max;
+}
+
+/** The colour to paint a piece's swatch with: its primary, as the eye sees it.
+ *
+ * Entry A of the tint palette is the primary colour -- measured at 81% across
+ * the colourways whose name states a colour that is really in their palette.
+ *
+ * **But a palette entry carries two colours, and a metal takes the specular.**
+ * A metal layer has no diffuse albedo, so its appearance *is* its F0. The Lynx
+ * arms are the case that settles it: every colourway names the same material
+ * and the same geometry, entry A's tint colour is white or near-white on all of
+ * them, and the whole colourway lives in the specular -- red `#ff0000`, green
+ * `#0a921c`, blue `#0314fd`. Reading the tint colour paints ten different arms
+ * the same grey.
+ *
+ * So the more saturated of the two wins, with a margin so that a neutral
+ * specular on a genuinely coloured dielectric does not steal it. Aqua and Olive
+ * carry their hue in the tint colour against a neutral spec, and are the
+ * internal control: they must keep reading from `color`.
+ */
+export function swatchColour(item: CatalogueItem): string | null {
+  const entry = item.tint?.layers?.[0];
+  if (!entry) return null;
+  const { color, spec } = entry;
+  if (!color) return spec || null;
+  if (!spec) return color;
+
+  // A saturated specular against a neutral tint: the hue is in the specular.
+  if (saturationOf(spec) > saturationOf(color) + 0.15) return spec;
+
+  // Both neutral, and the tint is white. Saturation cannot separate those, and
+  // white is exactly what a metal's TintColor is -- CryEngine's signature for
+  // "there is no diffuse term here". `Lynx Arms Black` is the case: tint
+  // #ffffff against a #545454 specular, so reading the tint paints a piece
+  // called Black white. The specular is what it looks like.
+  if (isNearWhite(color) && !isNearWhite(spec)) return spec;
+
+  return color;
+}
+
+/** Bright and colourless -- a metal's tint, rather than a white paint. */
+function isNearWhite(hex: string): boolean {
+  if (!/^#[0-9a-f]{6}$/i.test(hex)) return false;
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  return Math.min(r!, g!, b!) > 218 && saturationOf(hex) < 0.1;
+}
