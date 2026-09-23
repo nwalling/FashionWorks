@@ -192,7 +192,7 @@ wildcard, so every database under the skeleton is its own. The weapon sets:
 
 | set | male DBAs | full-body idle clips of interest |
 | --- | --- | --- |
-| `stocked/` (rifles, SMGs, shotguns, LMGs, snipers) | 12 | `stocked_alerted_stand_idle_turn360_raised` (148 ch), `..._turn360_planted` (147, weapon ready, lowered), `stocked_alerted_crouch_idle_01` (148) |
+| `stocked/` (rifles, SMGs, shotguns, LMGs, snipers) | 12 | `stocked_alerted_stand_idle_turn360_raised` (148 ch), `..._turn360_planted` (147; *not* a lowered stance -- its last frame is `_raised` exactly, see below), `stocked_alerted_crouch_idle_01` (148) |
 | `pistol/` | 13 | none full-body; `pistol_alerted_stand_idle_upperbody_01` (89 ch, spine up), `pistol_alerted_crouch_idle_iron_01` (116) |
 | `knife.dba` | 1 | `knife_alerted_stand_idle_01` (149) |
 | `grenade.dba`, `grin/multitool.dba`, `select_deselect.dba`, `reloads.dba` | -- | transitions and overlays, no standing idle |
@@ -329,13 +329,24 @@ posing carries everything for free, as it does the backpack.
 
 One item is "in hand" at a time, chosen from what is holstered; holding it
 takes it out of its holster, as in the game. It is parented at
-`RightWeaponBone` with identity offset. The pose set gains **ready**
-(`..._turn360_planted`), **raised** (`..._turn360_raised`) and **raised
-crouch**, chosen per the held item's `anim_set`:
+`RightWeaponBone` with identity offset. The pose set gains **raised**
+(`..._turn360_raised`) and **raised crouch**, chosen per the held item's
+`anim_set`.
 
-| anim set | stand ready / raised | crouch | female |
+**There is no ready (lowered) stance.** It was built from
+`..._turn360_planted` and shipped in 0.6.0, and its last frame -- the one a
+pose takes -- is the raised stance to the millimetre: `RightWeaponBone`, both
+hands, head and hips all 0 cm from `_raised`. Clicking it changed nothing. So
+the stances follow the game's own two states instead: **idle** (and rest) put
+the weapon back in its holster, **raised** draws one -- the last held, else
+the first carried weapon, rifles first -- and **crouch** keeps what is in the
+hand. Removing the held item keeps a crouch crouched.
+
+The clips:
+
+| anim set | stand raised | crouch | female |
 | --- | --- | --- | --- |
-| `stocked` | `stocked_alerted_stand_idle_turn360_planted` / `_raised` | `stocked_alerted_crouch_idle_01` | same clips |
+| `stocked` | `stocked_alerted_stand_idle_turn360_raised` | `stocked_alerted_crouch_idle_01` | same clips |
 | `pistol` | `pistol_alerted_stand_idle_upperbody_01` over `nw_stand_idle_turn360_planted` | `pistol_alerted_crouch_idle_iron_01` | same |
 | `knife` | `knife_alerted_stand_idle_01` | upper-body over the crouch idle | upper-body only |
 | `multitool` | deferred | -- | -- |

@@ -1848,6 +1848,12 @@ came out as slabs at the origin. `gear::place_nodes` applies it, to props too.
 is in the hands from the clip alone. Pistol and knife sets have only
 upper-body idles and ride on the unarmed stand/crouch.
 
+**There is no "ready" stance, and 0.6.0's was the raised one.** The stocked
+set's `..._turn360_planted` ends its turn in the raised stance exactly -- every
+measured bone 0 cm from `_raised` -- so the button did nothing. Poses now follow
+the game's two states: idle and rest holster the weapon, raised draws one (the
+last held, else rifles first), crouch keeps what is in the hand.
+
 **The left hand needs no IK.** Measured in the raised pose across all 53
 distinct stocked meshes: the left knuckle sits a **median 2.6 cm** from the
 weapon's surface, p90 5.0 cm. Outliers: two Boomtube launchers (5.5, 11.6 cm)

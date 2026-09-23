@@ -207,7 +207,6 @@ const NW_CROUCH: ClipSpec = { db: 'weapons/no_weapon/locomotion/crouch.dba', cli
  * legs, as the game layers it. */
 export const WEAPON_POSES: Record<string, Record<string, readonly ClipSpec[]>> = {
   stocked: {
-    ready: [{ db: 'weapons/stocked/locomotion/stand.dba', clip: 'stocked_alerted_stand_idle_turn360_planted' }],
     raised: [{ db: 'weapons/stocked/locomotion/stand.dba', clip: 'stocked_alerted_stand_idle_turn360_raised' }],
     crouch: [{ db: 'weapons/stocked/locomotion/crouch.dba', clip: 'stocked_alerted_crouch_idle_01' }],
   },
@@ -220,6 +219,15 @@ export const WEAPON_POSES: Record<string, Record<string, readonly ClipSpec[]>> =
     crouch: [NW_CROUCH, { db: 'weapons/knife.dba', clip: 'knife_alerted_crouch_idle_upperbody_01' }],
   },
 };
+
+/** There is no "ready" (weapon lowered) stance. The stocked set's candidate,
+ * `stocked_alerted_stand_idle_turn360_planted`, is a turn in place whose last
+ * frame is the raised stance exactly -- weapon bone, both hands, head and hips
+ * all 0 cm from `_raised` -- so a "ready" button changed nothing on screen.
+ * The poses offered with a weapon are therefore rest and idle, which put it
+ * back in its holster, raised, which draws it, and crouch, which keeps what is
+ * in the hand. */
+const DRAW_ORDER: readonly string[] = ['primary', 'sidearm', 'knife', 'gadget'];
 
 /** The unarmed poses, as clip lists. */
 const UNARMED_POSES: Record<string, readonly ClipSpec[]> = {
@@ -539,6 +547,9 @@ export class Kitbasher {
 
   /** The port whose item is in the hand. */
   private holdingPort: string | null = null;
+
+  /** The last port held, which `raised` draws from again. */
+  private lastHeld: string | null = null;
 
   /** Each attachment point as the rig built it, to restore when the piece
    * that moved it comes off. */
@@ -1032,8 +1043,8 @@ export class Kitbasher {
     // The held item came off with its holster: nothing is in the hand, so a
     // weapon stance would be holding air. The removal is the news, so it keeps
     // the status line.
-    if (gear.removed.length && !this.holdingPort && ['ready', 'raised'].includes(this.state.pose)) {
-      await this.setPose('idle');
+    if (gear.lostHold) {
+      await this.setPose(this.unarmedPose());
       this.publish({ status });
     }
   }
@@ -1044,12 +1055,11 @@ export class Kitbasher {
     this.wearing.delete(slot);
     this.applyOverrides();
     const gear = this.revalidateGear();
-    this.publish({
-      ports: gear.ports,
-      status: gear.removed.length
-        ? `${slot} removed; ${gear.removed.join(', ')} came off with it`
-        : `${slot} removed`,
-    });
+    const status = gear.removed.length
+      ? `${slot} removed; ${gear.removed.join(', ')} came off with it`
+      : `${slot} removed`;
+    this.publish({ ports: gear.ports, status });
+    if (gear.lostHold) void this.setPose(this.unarmedPose()).then(() => this.publish({ status }));
   }
 
   clear(): void {
@@ -1059,6 +1069,7 @@ export class Kitbasher {
     this.applyOverrides();
     const gear = this.revalidateGear();
     this.publish({ ports: gear.ports, status: 'cleared' });
+    if (gear.lostHold) void this.setPose(this.unarmedPose()).then(() => this.publish({ status: 'cleared' }));
   }
 
   /** Fill the empty slots to match the piece on the torso, or whatever is on.
@@ -1105,12 +1116,41 @@ export class Kitbasher {
     return plan.picks.length;
   }
 
-  /** The poses on offer: unarmed ones, or those of the held item's set. */
+  /** The poses on offer. `raised` joins them whenever something carried has a
+   * stance to raise it in, held or not: it draws it. */
   poseOptions(): string[] {
-    const held = this.holdingPort ? this.carried.get(this.holdingPort) : null;
-    const set = held?.item.anim_set ? WEAPON_POSES[held.item.anim_set] : undefined;
-    if (!set) return Object.keys(UNARMED_POSES);
-    return ['rest', ...Object.keys(set)];
+    return this.drawable() ? ['rest', 'idle', 'raised', 'crouch'] : Object.keys(UNARMED_POSES);
+  }
+
+  /** What `raised` draws when nothing is in the hand: the last thing held if
+   * it is still carried, else the first carried weapon, rifles first. */
+  private drawable(): string | null {
+    const stanced = (port: string) => {
+      const item = this.carried.get(port)?.item;
+      return Boolean(item && HOLDABLE.has(item.slot as GearSlot) && item.anim_set && WEAPON_POSES[item.anim_set]);
+    };
+    if (this.holdingPort && stanced(this.holdingPort)) return this.holdingPort;
+    if (this.lastHeld && stanced(this.lastHeld)) return this.lastHeld;
+    const ports = [...this.carried.keys()].filter(stanced);
+    ports.sort((a, b) => DRAW_ORDER.indexOf(this.carried.get(a)!.item.slot)
+      - DRAW_ORDER.indexOf(this.carried.get(b)!.item.slot));
+    return ports[0] ?? null;
+  }
+
+  /** Put the held item back in its holster, or take one out, without posing. */
+  private setHeld(port: string | null): void {
+    if (port === this.holdingPort) return;
+    const previous = this.holdingPort ? this.carried.get(this.holdingPort) : undefined;
+    this.holdingPort = port;
+    if (port) this.lastHeld = port;
+    if (previous) this.mountCarried(previous);
+    const next = port ? this.carried.get(port) : undefined;
+    if (next) this.mountCarried(next);
+  }
+
+  /** The pose to fall back to when the hand empties: crouched stays crouched. */
+  private unarmedPose(): string {
+    return this.state.pose === 'crouch' ? 'crouch' : 'idle';
   }
 
   private clipsFor(label: string): readonly ClipSpec[] | null {
@@ -1140,7 +1180,20 @@ export class Kitbasher {
   async setPose(pose: Pose | string): Promise<void> {
     if (!this.rig) await this.init();
     if (this.disposed || !this.rig) return;
-    const label = typeof pose === 'string' ? pose : pose.label;
+    // "ready" was a pose once, and identical to raised; old callers get raised.
+    const asked = typeof pose === 'string' ? pose : pose.label;
+    const label = asked === 'ready' ? 'raised' : asked;
+    // Standing at ease or at rest puts the weapon away, as the game does;
+    // raising draws one. Crouch keeps whatever is in the hand.
+    if (label === 'rest' || label === 'idle') this.setHeld(null);
+    if (label === 'raised' && !this.holdingPort) {
+      const port = this.drawable();
+      if (!port) {
+        this.publish({ status: 'nothing carried to raise: holster a weapon first' });
+        return;
+      }
+      this.setHeld(port);
+    }
     const clips = this.clipsFor(label);
     if (clips === null) {
       this.publish({ status: `no ${label} pose for what is in the hand` });
@@ -1392,8 +1445,10 @@ export class Kitbasher {
     const wasHeld = this.holdingPort === port;
     if (wasHeld) this.holdingPort = null;
     this.evict();
-    this.publish({ status: `${displayName(carried.item)} put away` });
-    if (wasHeld) void this.setPose('idle');
+    const status = `${displayName(carried.item)} put away`;
+    this.publish({ status });
+    // The removal is the news, so it keeps the status line over the re-pose.
+    if (wasHeld) void this.setPose(this.unarmedPose()).then(() => this.publish({ status }));
   }
 
   /** Take everything off the belt and the back. */
@@ -1409,16 +1464,14 @@ export class Kitbasher {
       this.publish({ status: carried ? `${displayName(carried.item)} is not held in the hand` : 'nothing there to hold' });
       return;
     }
-    const previous = this.holdingPort ? this.carried.get(this.holdingPort) : undefined;
-    this.holdingPort = carried ? port : null;
-    if (previous) this.mountCarried(previous);
-    if (carried) this.mountCarried(carried);
+    this.setHeld(carried ? port : null);
     const set = carried?.item.anim_set ? WEAPON_POSES[carried.item.anim_set] : undefined;
     if (carried && !set) {
       this.publish({ status: `${displayName(carried.item)} in hand; there is no stance for it yet` });
       return;
     }
-    await this.setPose(carried ? 'raised' : 'idle');
+    // Choosing a weapon while crouched keeps the crouch; otherwise it comes up.
+    await this.setPose(carried ? (this.state.pose === 'crouch' ? 'crouch' : 'raised') : this.unarmedPose());
   }
 
   /** Re-seat carried gear after the armour changed, and say what came off.
@@ -1428,9 +1481,10 @@ export class Kitbasher {
    * and the status names it -- the same rule equip-set follows. Gear whose
    * port merely changed owner (a backpack went on, and now holds the rifles)
    * moves with it. */
-  private revalidateGear(): { removed: string[]; ports: Map<string, OwnedPort> } {
+  private revalidateGear(): { removed: string[]; ports: Map<string, OwnedPort>; lostHold: boolean } {
     const ports = resolvePorts(this.wearing);
     const { kept, removed } = revalidate(this.carried, ports);
+    const lostHold = removed.some(({ port }) => port === this.holdingPort);
     for (const { port, carried } of removed) {
       carried.instance.removeFromParent();
       this.carried.delete(port);
@@ -1440,7 +1494,7 @@ export class Kitbasher {
       carried.port = owned;
       this.mountCarried(carried);
     }
-    return { removed: tally(removed.map(({ carried }) => displayName(carried.item))), ports };
+    return { removed: tally(removed.map(({ carried }) => displayName(carried.item))), ports, lostHold };
   }
 
   /** Worn, or as it left the factory. Re-composites everything on the body. */

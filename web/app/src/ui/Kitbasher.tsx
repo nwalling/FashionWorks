@@ -61,6 +61,14 @@ function titleOfLine(catalogue: Catalogue, item: CatalogueItem): string {
 
 type Mode = 'armour' | 'gear';
 
+/** What each pose button does, which with a weapon includes where it goes. */
+const POSE_TITLES: Record<string, (holding: boolean) => string> = {
+  rest: (holding) => `The skeleton's rest pose${holding ? '; the weapon goes back in its holster' : ''}`,
+  idle: (holding) => (holding ? 'Stand at ease; the weapon goes back in its holster' : 'Stand at ease'),
+  raised: (holding) => (holding ? 'Weapon raised' : 'Draw a holstered weapon and raise it'),
+  crouch: (holding) => (holding ? 'Crouch with the weapon raised' : 'Crouch'),
+};
+
 export function Kitbasher(props: KitbasherProps): JSX.Element {
   const { client, catalogue: initialCatalogue, tokens, initialLoadout, onLoadoutChange, onEngine } = props;
   const engine = useRef<Engine | null>(null);
@@ -282,6 +290,7 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
               type="button"
               aria-pressed={state?.pose === pose}
               disabled={busy}
+              title={POSE_TITLES[pose]?.(Boolean(state?.holding))}
               onClick={() => void engine.current?.setPose(pose)}
             >
               {pose}
