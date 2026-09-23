@@ -136,7 +136,23 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
 
   return (
     <div className="fw-kit" data-fashionworks-kitbasher="">
-      <div className="fw-kit-bar" role="toolbar" aria-label="Body, pose, surface, set and backdrop">
+      <div className="fw-kit-bar" role="toolbar" aria-label="Slot, body, pose, surface, set and backdrop">
+        {/* The slots live up here rather than in the sidebar: six chips took
+            three rows of a narrow column, and that column's height is what the
+            armour listing needs. The toolbar already wraps. */}
+        <span className="fw-kit-group fw-kit-slots" role="tablist" aria-label="Slot">
+          {SLOTS.map((name) => (
+            <button
+              key={name}
+              type="button"
+              role="tab"
+              aria-selected={slot === name}
+              onClick={() => setSlot(name)}
+            >
+              {name} <span className="fw-kit-count">{catalogue.bySlot.get(name)?.length ?? 0}</span>
+            </button>
+          ))}
+        </span>
         <span className="fw-kit-group">
           <span className="fw-kit-label">body</span>
           {(['male', 'female'] as const).map((body) => (
@@ -207,19 +223,6 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
 
       <div className="fw-kit-body">
         <aside className="fw-kit-side">
-          <div className="fw-kit-slots" role="tablist" aria-label="Slot">
-            {SLOTS.map((name) => (
-              <button
-                key={name}
-                type="button"
-                role="tab"
-                aria-selected={slot === name}
-                onClick={() => setSlot(name)}
-              >
-                {name} <span className="fw-kit-count">{catalogue.bySlot.get(name)?.length ?? 0}</span>
-              </button>
-            ))}
-          </div>
           <input
             className="fw-kit-search"
             type="search"

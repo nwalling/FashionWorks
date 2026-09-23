@@ -87,10 +87,24 @@
   opacity: 0.8;
 }
 
+/* `grid-template-rows` is load-bearing, and its absence caused three bugs.
+ *
+ * Without it the single implicit row is `auto`, which sizes to its CONTENT and
+ * happily exceeds the grid container however definite the container's height
+ * is. `min-height: 0` does not help: it bounds the grid, not the row inside
+ * it. So the listing never became the overflow point and never grew a
+ * scrollbar, the panel ran on past the bottom of the window, and -- the one
+ * that looked unrelated -- the 3D view came out BLACK, because `.fw-view` was
+ * handed an oversized height, the canvas was sized to it, and the character
+ * was framed in the middle of a canvas whose middle was below the fold.
+ *
+ * `minmax(0, 1fr)` is the fix: the row takes the space it is given and no
+ * more, so the listing scrolls inside it and the canvas matches the window. */
 .fw-kit-body {
   flex: 1 1 auto;
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   min-height: 0;
 }
 
@@ -125,15 +139,11 @@
   gap: 8px;
 }
 
+/* In the toolbar now, so it wraps with everything else rather than stacking
+ * three rows deep in a 260px column. */
 .fw-kit-slots {
-  display: flex;
   flex-wrap: wrap;
   gap: 4px;
-}
-
-.fw-kit-slots button {
-  padding: 4px 9px;
-  font-size: 12px;
 }
 
 .fw-kit-search {
