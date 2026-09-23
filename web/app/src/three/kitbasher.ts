@@ -265,6 +265,9 @@ function sharedLeadingWords(a: string, b: string): number {
 export interface SetPlan {
   readonly picks: CatalogueItem[];
   readonly unfilled: ReadonlyArray<{ slot: Slot; reason: string; absent: boolean }>;
+  /** Picks taken from another product line -- a shared livery rather than a
+   * shared set. Legitimate, and worth saying out loud. */
+  readonly crossLine: ReadonlyArray<{ slot: Slot; name: string; line: string }>;
 }
 
 export function matchSet(
@@ -277,6 +280,7 @@ export function matchSet(
   const anchorShared = familyName(anchor);
   const edition = editionOf(displayName(anchor));
   const anchorMarks = parentheticals(displayName(anchor));
+  const anchorLine = anchorShared.split(' ')[0] ?? '';
   const paletteKey = anchor.tint?.layers?.[0]?.color ?? '';
 
   const score = (item: CatalogueItem): number => {
@@ -316,6 +320,7 @@ export function matchSet(
 
   const picks: CatalogueItem[] = [];
   const unfilled: Array<{ slot: Slot; reason: string; absent: boolean }> = [];
+  const crossLine: Array<{ slot: Slot; name: string; line: string }> = [];
   for (const slot of SLOTS) {
     if (wearing.has(slot)) continue;
     const ranked = (catalogue.bySlot.get(slot) ?? [])
@@ -324,6 +329,21 @@ export function matchSet(
     const best = ranked[0];
     if (best && best.points >= SET_MATCH_THRESHOLD) {
       picks.push(best.item);
+      // Say so when a pick comes from another product line.
+      //
+      // It is legitimate and sometimes the only option: "Crusader Edition" is
+      // a LIVERY, not a set -- 23 pieces across 12 product lines and three
+      // manufacturers, tagged `Texture_crus01` -- and ADP ships no Crusader
+      // helmet at all, so a Crusader look has to borrow one. Liveries spanning
+      // sets is the norm rather than the exception: `Texture_01` covers 37
+      // sets, and 8 of the 14 texture tags cover more than one.
+      //
+      // But borrowing silently is how a visitor ends up wondering why they are
+      // wearing a Balor helmet, so it is reported rather than hidden.
+      const pickLine = familyName(best.item).split(' ')[0] ?? '';
+      if (anchorLine && pickLine && pickLine !== anchorLine) {
+        crossLine.push({ slot, name: displayName(best.item), line: pickLine });
+      }
       continue;
     }
     // "Is there one at all?" is a question about the SET, not about the score.
@@ -361,7 +381,7 @@ export function matchSet(
       });
     }
   }
-  return { picks, unfilled };
+  return { picks, unfilled, crossLine };
 }
 
 export class Kitbasher {
@@ -693,12 +713,14 @@ export class Kitbasher {
       : 'nothing to add';
     const absent = plan.unfilled.filter((u) => u.absent).map((u) => u.slot);
     const short = plan.unfilled.filter((u) => !u.absent).map((u) => u.reason);
+    const borrowed = plan.crossLine.map((c) => `${c.slot} from ${c.line}`);
     const why = [
       absent.length ? `this set has no ${absent.join(' or ')}` : '',
       ...short,
+      ...borrowed,
     ].filter(Boolean);
     this.publish({
-      status: plan.unfilled.length ? `set: ${filled} · ${why.join(' · ')}` : `set complete: ${filled}`,
+      status: why.length ? `set: ${filled} · ${why.join(' · ')}` : `set complete: ${filled}`,
     });
     return plan.picks.length;
   }

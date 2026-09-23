@@ -1690,6 +1690,31 @@ The DCB is 316 MB and deliberately not held; the catalogue it produces is a few
 MB of JSON and is. First switch to a body 10.2s, every switch after it **under
 a second** -- measured 956ms back to male and 952ms to female again.
 
+### An "Edition" is a livery, and it spans product lines
+
+Checked because equipping a set from `ADP Core Crusader Edition` put a **Balor
+HCH** helmet on the head, which looked like the ADP-Arms class of bug and is
+not.
+
+**Crusader Edition is not an ADP thing.** 23 pieces carry it, across **12
+product lines** (ADP, Arden-SL, Balor, CBH-3, G-2, Morozov-CH/SH/SH-S,
+ORC-mkV, PAB-1, Strata, TCS-4) and **three manufacturers** (CDS, RRS, GRIN),
+each keeping its own `set` tag. What they share is a `Texture_crus01` tag.
+
+**Liveries spanning sets is the norm, not the exception.** Of 14 `Texture_*`
+tags, 8 cover more than one set: `Texture_01` covers **37**, `Texture_02` 16,
+`Texture_03` 12, `Texture_crus01` 11.
+
+**And ADP ships no Crusader helmet at all** -- only arms, legs and core. So a
+complete Crusader look *has* to borrow a helmet from another line; there is
+nothing else to take. The pick is right.
+
+What was wrong is that it happened silently. `matchSet` now returns the picks
+it took from another product line and the status says so -- "helmet from
+Balor" -- because a visitor who did not ask for a Balor helmet should not have
+to work out why they are wearing one. 142 of the picks across 573 anchors
+cross a line this way.
+
 ### Backdrops
 
 `viewer/src/components/Backdrop.tsx` puts a photographic plate behind the
