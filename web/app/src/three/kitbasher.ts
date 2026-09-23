@@ -85,6 +85,32 @@ const FRAME_MARGIN = 1.12;
  * otherwise put the camera inside its own near plane. */
 const MIN_FRAME_DISTANCE = 0.6;
 
+/** Bake resolution for a swatch. A 22px chip needs a mean, not a texture. */
+const SWATCH_BAKE = 64;
+
+/** Detail-layer resolution for a swatch. Decoding these is the dominant cost
+ * of a composite, and the mean barely moves between 512 and 64. */
+const SWATCH_LAYER = 64;
+
+/** One colour from a piece's submaterial means, as `#rrggbb`.
+ *
+ * An unweighted average, which over-weights a submaterial covering little of
+ * the piece -- a camera lens counts as much as a chest plate. Weighting by
+ * each submaterial's share of the mesh would be better and needs the mesh,
+ * which a listing has not loaded and should not load to draw a chip.
+ */
+function meanColour(means: Array<[number, number, number]>): string | null {
+  if (means.length === 0) return null;
+  const total = means.reduce(
+    (sum, m) => [sum[0] + m[0], sum[1] + m[1], sum[2] + m[2]] as [number, number, number],
+    [0, 0, 0] as [number, number, number],
+  );
+  const hex = total
+    .map((v) => Math.max(0, Math.min(255, Math.round(v / means.length))).toString(16).padStart(2, '0'))
+    .join('');
+  return `#${hex}`;
+}
+
 export interface Pose {
   readonly label: string;
   readonly dba: string | null;
@@ -126,6 +152,9 @@ export interface KitbasherState {
   /** Rebuilt on a body switch, because the geometry tree selects a different
    * mesh per skeleton. The listing renders from this, not from a prop. */
   readonly catalogue: Catalogue;
+  /** Composited swatch colours, by item id, for the pieces whose colour is not
+   * in a tint palette. Filled in lazily; absent means "not worked out yet". */
+  readonly swatches: ReadonlyMap<string, string>;
 }
 
 /** A tint palette from the catalogue.
@@ -317,12 +346,66 @@ export class Kitbasher {
       rigBones: 0,
       body,
       catalogue,
+      swatches: new Map(),
     };
   }
 
   /** The catalogue for the body currently on screen. */
   get catalogue(): Catalogue {
     return this.state.catalogue;
+  }
+
+  private readonly swatches = new Map<string, string>();
+
+  private readonly swatchAsked = new Set<string>();
+
+  /** One at a time. The worker is a single thread, and a family of twenty
+   * colourways asked for at once would starve whatever the visitor does next. */
+  private swatchQueue: Promise<void> = Promise.resolve();
+
+  /**
+   * Work out a piece's colour by compositing its surface, for the 1,045 items
+   * that carry no tint palette at all.
+   *
+   * Their colour lives in a `mtl_var` material rather than in a palette, so
+   * there is nothing to read without running the LayerBlend composite -- which
+   * is why these chips were blank. Averaging the material's raw layer colours
+   * instead is the tempting shortcut and is wrong: it over-weights layers the
+   * blend mask barely shows, and mushes a whole Odyssey family to one grey.
+   * The mean of the *composited* albedo is what the piece actually looks like.
+   *
+   * Cheap on purpose. A mean needs no resolution, so this bakes at
+   * {@link SWATCH_BAKE} instead of 1024 and decodes detail layers at
+   * {@link SWATCH_LAYER} instead of 512. Same average, a fraction of the work.
+   */
+  requestSwatch(item: CatalogueItem): void {
+    if (this.swatchAsked.has(item.id)) return;
+    const mtl = item.materials[0];
+    if (!mtl) return;
+    this.swatchAsked.add(item.id);
+
+    this.swatchQueue = this.swatchQueue.then(async () => {
+      if (this.disposed) return;
+      try {
+        const material = (await this.client.material(mtl)).material;
+        const fetchTexture = async (path: string, maxSize: number) =>
+          (await this.client.texture(path, Math.min(maxSize, SWATCH_LAYER))).texture;
+        const composited = await compositeSurfaces(material, paletteOf(item), fetchTexture, {
+          wear: this.state.wear,
+          size: SWATCH_BAKE,
+          layerSize: SWATCH_LAYER,
+        });
+        if (this.disposed) return;
+        const hex = meanColour([...composited.means.values()]);
+        if (hex) {
+          this.swatches.set(item.id, hex);
+          this.publish({ swatches: new Map(this.swatches) });
+        }
+      } catch {
+        // A blank chip is a better outcome than a listing that throws. The id
+        // stays in `swatchAsked` so a broken piece is not retried forever.
+      }
+    });
   }
 
   subscribe(listener: (state: KitbasherState) => void): () => void {

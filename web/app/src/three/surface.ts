@@ -115,12 +115,30 @@ export interface Composited {
  * 268 of 491 canonical items carry none, and that shader supplies no albedo, so
  * without a stand-in they render blown-out white.
  */
+export interface CompositeOptions {
+  readonly wear?: boolean;
+  /** Bake resolution. `BAKE_SIZE` for a surface that goes on a mesh; far
+   * smaller when all that is wanted is the mean colour, which is what a
+   * listing swatch needs. A 64px bake reads the same average as a 1024px one
+   * and costs a fraction of the texture decode and the read-back. */
+  readonly size?: number;
+  /** Resolution of the tiling detail layers. The dominant cost of a composite
+   * is decoding these, and a mean does not need them sharp. */
+  readonly layerSize?: number;
+}
+
 export async function compositeSurfaces(
   material: MaterialPayload,
   palette: PaletteEntry[],
   fetchTexture: FetchTexture,
-  wear = true,
+  wearOrOptions: boolean | CompositeOptions = true,
 ): Promise<Composited> {
+  const options: CompositeOptions = typeof wearOrOptions === 'boolean'
+    ? { wear: wearOrOptions }
+    : wearOrOptions;
+  const wear = options.wear ?? true;
+  const bakeSize = options.size ?? BAKE_SIZE;
+  const layerSize = options.layerSize ?? LAYER_SIZE;
   const started = performance.now();
 
   // One offscreen context for the whole piece. Creating one per submaterial
@@ -129,7 +147,7 @@ export async function compositeSurfaces(
   const gl = canvas.getContext('webgl2', { antialias: false });
   if (!gl) throw new Error('WebGL2 is required to composite armour surfaces');
   const program = createProgram(gl);
-  const target = createTarget(gl, BAKE_SIZE);
+  const target = createTarget(gl, bakeSize);
 
   // Every distinct layer texture the piece needs, fetched once and packed into
   // one array. A submaterial samples up to eight layers; binding them
@@ -148,9 +166,9 @@ export async function compositeSurfaces(
   const sliceOf = new Map<string, number>();
   const meanOf = new Map<string, number>();
   for (const path of wanted) {
-    const payload = await fetchTexture(path, LAYER_SIZE);
+    const payload = await fetchTexture(path, layerSize);
     if (!payload) continue;
-    const rgba = square(payload, LAYER_SIZE);
+    const rgba = square(payload, layerSize);
     // The mean is measured on the bytes the shader samples, so the metal
     // normalisation is self-consistent with what is uploaded.
     meanOf.set(path, linearMean(rgba));
@@ -158,13 +176,13 @@ export async function compositeSurfaces(
     slices.push(rgba);
   }
   const diffuseArray = createLayerArray(
-    gl, slices.length ? slices : [new Uint8Array(LAYER_SIZE * LAYER_SIZE * 4)], LAYER_SIZE,
+    gl, slices.length ? slices : [new Uint8Array(layerSize * layerSize * 4)], layerSize,
   );
   // No gloss array yet: the per-pixel gloss lives in the `_ddna` alpha, which
   // needs its own decode. The shader falls back to the layer's own Shininess,
   // which is what the pipeline used before that decode existed.
   const glossArray = createLayerArray(
-    gl, [new Uint8Array(LAYER_SIZE * LAYER_SIZE * 4).fill(255)], LAYER_SIZE,
+    gl, [new Uint8Array(layerSize * layerSize * 4).fill(255)], layerSize,
   );
   const blank = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, blank);
@@ -177,7 +195,7 @@ export async function compositeSurfaces(
   const control = async (path: string | undefined) => {
     if (!path) return null;
     if (!controls.has(path)) {
-      const payload = await fetchTexture(path, BAKE_SIZE);
+      const payload = await fetchTexture(path, bakeSize);
       if (!payload) {
         controls.set(path, null);
       } else {
@@ -235,7 +253,7 @@ export async function compositeSurfaces(
       return packed;
     });
 
-    const result = render(gl, program, target, BAKE_SIZE, {
+    const result = render(gl, program, target, bakeSize, {
       layers,
       palette,
       blend: await control(sub.textures.blend),
@@ -260,10 +278,10 @@ export async function compositeSurfaces(
 
     surfaces.set(sub.name, {
       albedo: toTexture(
-        { path: sub.name, width: BAKE_SIZE, height: BAKE_SIZE, rgba: result.albedo }, true,
+        { path: sub.name, width: bakeSize, height: bakeSize, rgba: result.albedo }, true,
       ),
       orm: toTexture(
-        { path: sub.name, width: BAKE_SIZE, height: BAKE_SIZE, rgba: result.orm }, false,
+        { path: sub.name, width: bakeSize, height: bakeSize, rgba: result.orm }, false,
       ),
     });
   }

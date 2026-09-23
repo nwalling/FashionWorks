@@ -129,6 +129,22 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
     setBackdrop(null);
     viewer.current?.setBackdrop(null);
   };
+  // Work out the colours of the family on screen, for the pieces that carry no
+  // tint palette. Only the visible family: compositing is real work, and the
+  // catalogue has a thousand such pieces.
+  const family = onBody ? (catalogue.families.get(familyRoot(onBody)) ?? []) : [];
+  const familyKey = family.map((f) => f.id).join(',');
+  useEffect(() => {
+    for (const variant of family) {
+      if (!swatchColour(variant) && !state?.swatches.has(variant.id)) {
+        engine.current?.requestSwatch(variant);
+      }
+    }
+    // `familyKey` rather than `family`: a new array every render would ask
+    // again on every render, and the engine would have to dedupe a flood.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [familyKey, state?.swatches]);
+
   // A backdrop is the visitor's own file and never leaves the page; the object
   // URL is released when it is replaced, cleared, or the component goes.
   useEffect(() => () => { if (backdrop) URL.revokeObjectURL(backdrop); }, [backdrop]);
@@ -240,7 +256,7 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
                 {familyOf(onBody).length} colors
               </span>
               {familyOf(onBody).map((variant) => {
-                const colour = swatchColour(variant);
+                const colour = swatchColour(variant) ?? state?.swatches.get(variant.id);
                 return (
                   <button
                     key={variant.id}
