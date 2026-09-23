@@ -94,19 +94,38 @@ const SWATCH_LAYER = 64;
 
 /** One colour from a piece's submaterial means, as `#rrggbb`.
  *
- * An unweighted average, which over-weights a submaterial covering little of
- * the piece -- a camera lens counts as much as a chest plate. Weighting by
- * each submaterial's share of the mesh would be better and needs the mesh,
- * which a listing has not loaded and should not load to draw a chip.
+ * Weighted by each submaterial's share of the mesh's triangles, so a camera
+ * lens no longer counts as much as a chest plate. Unweighted, the Defiance
+ * helmet's `camera_m` -- a lens a few hundred triangles across -- pulled the
+ * chip as hard as the shell around it.
+ *
+ * Falls back to an unweighted mean when the weights are not known, which is
+ * the case for a piece whose mesh will not load. A slightly-off chip beats no
+ * chip.
  */
-function meanColour(means: Array<[number, number, number]>): string | null {
-  if (means.length === 0) return null;
-  const total = means.reduce(
-    (sum, m) => [sum[0] + m[0], sum[1] + m[1], sum[2] + m[2]] as [number, number, number],
-    [0, 0, 0] as [number, number, number],
-  );
-  const hex = total
-    .map((v) => Math.max(0, Math.min(255, Math.round(v / means.length))).toString(16).padStart(2, '0'))
+function meanColour(
+  means: ReadonlyMap<string, [number, number, number]>,
+  weights?: ReadonlyMap<string, number> | null,
+): string | null {
+  const entries = [...means.entries()];
+  if (entries.length === 0) return null;
+
+  const weightOf = (name: string) => (weights ? weights.get(name) ?? 0 : 1);
+  let total = weights ? entries.reduce((sum, [name]) => sum + weightOf(name), 0) : entries.length;
+  // A mesh whose material ids never line up with the .mtl leaves every weight
+  // at zero; an unweighted mean is still better than nothing.
+  const useWeights = Boolean(weights) && total > 0;
+  if (!useWeights) total = entries.length;
+
+  const rgb = [0, 0, 0];
+  for (const [name, mean] of entries) {
+    const w = useWeights ? weightOf(name) : 1;
+    rgb[0]! += mean[0] * w;
+    rgb[1]! += mean[1] * w;
+    rgb[2]! += mean[2] * w;
+  }
+  const hex = rgb
+    .map((v) => Math.max(0, Math.min(255, Math.round(v / total))).toString(16).padStart(2, '0'))
     .join('');
   return `#${hex}`;
 }
@@ -208,6 +227,31 @@ export function decodeLoadout(encoded: string, catalogue: Catalogue): CatalogueI
  */
 export const SET_MATCH_THRESHOLD = 8;
 
+/** Slot words, which end the product part of a display name. Mirrors the
+ * pipeline's `_NAME_SLOT_WORD`. */
+const SLOT_WORD = /^(helmet|helm|core|torso|arms|arm|legs|leg|backpack|pack|undersuit|suit|flight)$/i;
+
+/** What a name says after its slot word: "Sunchaser", "(Modified)", or "".
+ *
+ * **Not `colourwayName`, which depends on how big the item's family is.** That
+ * takes the words a family has in common, so a family of ONE -- which is what
+ * every "(Modified)" piece is -- shares its whole name and comes out as
+ * "Standard" every time. Two unrelated singletons then "matched" editions and
+ * scored three points for it. Reading the name against the slot word instead
+ * gives the same answer whatever the family looks like.
+ */
+function editionOf(name: string): string {
+  const words = name.split(/\s+/).filter(Boolean);
+  const at = words.findIndex((w) => SLOT_WORD.test(w.replace(/["'()]/g, '')));
+  return at >= 0 ? words.slice(at + 1).join(' ') : '';
+}
+
+/** The `(...)` markers in a name, lowercased. An explicit statement that a
+ * piece is a different build, rather than another colour of the same one. */
+function parentheticals(name: string): Set<string> {
+  return new Set((name.match(/\([^)]*\)/g) ?? []).map((m) => m.toLowerCase()));
+}
+
 /** How many leading words two product names share. */
 function sharedLeadingWords(a: string, b: string): number {
   const left = a.split(/\s+/).filter(Boolean);
@@ -231,8 +275,8 @@ export function matchSet(
   const familyName = (item: CatalogueItem) =>
     sharedName((catalogue.families.get(familyRoot(item)) ?? [item]).map(displayName));
   const anchorShared = familyName(anchor);
-  // The words after the slot -- "(Modified)", "Tactical" -- are the edition.
-  const edition = colourwayName(displayName(anchor), anchorShared);
+  const edition = editionOf(displayName(anchor));
+  const anchorMarks = parentheticals(displayName(anchor));
   const paletteKey = anchor.tint?.layers?.[0]?.color ?? '';
 
   const score = (item: CatalogueItem): number => {
@@ -256,7 +300,15 @@ export function matchSet(
     const shared = sharedLeadingWords(itemShared, anchorShared);
     if (shared >= 1) points += 4;
     if (shared >= 2) points += 2;
-    if (colourwayName(displayName(item), itemShared) === edition) points += 3;
+    if (editionOf(displayName(item)) === edition) points += 3;
+    // A parenthesised marker the anchor does not carry is a different product,
+    // not a colourway of this one. Equipping a set from "Defiance Core
+    // Sunchaser" was pulling "Defiance Legs (Modified)" over the Sunchaser
+    // legs, because a one-member family's "edition" came out as Standard for
+    // both and scored a match that was not there.
+    for (const mark of parentheticals(displayName(item))) {
+      if (!anchorMarks.has(mark)) points -= 4;
+    }
     if (paletteKey && item.tint?.layers?.[0]?.color === paletteKey) points += 2;
     if (item.weight_class === anchor.weight_class) points += 1;
     return points;
@@ -357,6 +409,42 @@ export class Kitbasher {
 
   private readonly swatches = new Map<string, string>();
 
+  /** Triangle share per submaterial, keyed by the mesh that defines it.
+   *
+   * **Keyed by the mesh, not the item, because a colourway family shares one.**
+   * That is what makes weighting affordable here: twenty Odyssey colourways
+   * resolve one mesh between them, not twenty. */
+  private readonly meshWeights = new Map<string, Map<string, number> | null>();
+
+  private async weightsFor(
+    item: CatalogueItem,
+    material: MaterialPayload,
+  ): Promise<ReadonlyMap<string, number> | null> {
+    const source = item.geometry[0]?.source;
+    if (!source) return null;
+    const cached = this.meshWeights.get(source);
+    if (cached !== undefined) return cached;
+
+    let weights: Map<string, number> | null = null;
+    try {
+      const mesh = (await this.client.mesh(source)).mesh;
+      weights = new Map<string, number>();
+      for (const submesh of mesh.submeshes) {
+        // The id can point past the end of the list -- the Sunchaser helmet
+        // declares seven groups against six submaterials. An orphan group has
+        // no colour to weight, so it is left out rather than guessed at.
+        const name = material.submaterials[submesh.materialId]?.name;
+        if (!name) continue;
+        weights.set(name, (weights.get(name) ?? 0) + submesh.count / 3);
+      }
+    } catch {
+      // A prop or a mesh that will not load: fall back to an unweighted mean.
+      weights = null;
+    }
+    this.meshWeights.set(source, weights);
+    return weights;
+  }
+
   private readonly swatchAsked = new Set<string>();
 
   /** One at a time. The worker is a single thread, and a family of twenty
@@ -396,7 +484,9 @@ export class Kitbasher {
           layerSize: SWATCH_LAYER,
         });
         if (this.disposed) return;
-        const hex = meanColour([...composited.means.values()]);
+        const weights = await this.weightsFor(item, material);
+        if (this.disposed) return;
+        const hex = meanColour(composited.means, weights);
         if (hex) {
           this.swatches.set(item.id, hex);
           this.publish({ swatches: new Map(this.swatches) });
