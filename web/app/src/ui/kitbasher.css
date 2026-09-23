@@ -191,9 +191,17 @@
 .fw-kit-ways {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
   padding-top: 8px;
   border-top: 1px solid var(--sc-border);
+}
+
+/* Full width, so the swatches wrap underneath it rather than beside it. */
+.fw-kit-ways-label {
+  flex: 0 0 100%;
+  color: var(--sc-subtle);
+  font-size: 11px;
 }
 
 /* A colourway swatch's background is the item's own palette colour, set
