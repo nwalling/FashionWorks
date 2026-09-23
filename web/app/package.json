@@ -1,7 +1,7 @@
 {
   "name": "@fashionworks/web",
   "private": false,
-  "version": "0.6.0",
+  "version": "0.6.1",
   "type": "module",
   "description": "Browse and combine Star Citizen FPS armour, entirely in the visitor's browser, from their own Data.p4k.",
   "scripts": {

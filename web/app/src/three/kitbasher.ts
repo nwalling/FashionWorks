@@ -517,6 +517,9 @@ export class Kitbasher {
 
   private restRotations = new Map<string, Quaternion>();
 
+  /** Where the hips sit at rest; a pose lowers them to keep the feet down. */
+  private restHips: Vector3 | null = null;
+
   private readonly equipped = new Map<Slot, Loaded>();
 
   private readonly wearing = new Map<Slot, CatalogueItem>();
@@ -743,6 +746,7 @@ export class Kitbasher {
     if (this.disposed) return;
     this.rig = buildRig(built.bones);
     this.restRotations = new Map(this.rig.bones.map((b) => [b.name, b.quaternion.clone()]));
+    this.restHips = this.rig.byName.get('Hips')?.position.clone() ?? null;
     this.attachmentDefaults = new Map(built.bones
       .filter((b) => b.attachment)
       .map((b) => {
@@ -884,6 +888,7 @@ export class Kitbasher {
         const prop = payload as PropPayload;
         const object = new Mesh(buildGeometry(prop, count).geometry, materials);
         object.frustumCulled = false;
+        shaded(object);
         if (prop.mount) {
           object.matrixAutoUpdate = false;
           object.matrix.copy(mountMatrix(prop.mount));
@@ -892,6 +897,7 @@ export class Kitbasher {
       } else {
         const object = new SkinnedMesh(buildGeometry(payload, count).geometry, materials);
         object.frustumCulled = false;
+        shaded(object);
         objects.push(object);
       }
     }
@@ -1145,6 +1151,7 @@ export class Kitbasher {
     const rig = this.rig;
     const reset = () => {
       for (const bone of rig.bones) bone.quaternion.copy(this.restRotations.get(bone.name)!);
+      if (this.restHips) rig.byName.get('Hips')?.position.copy(this.restHips);
     };
     const posed = [];
     try {
@@ -1155,8 +1162,11 @@ export class Kitbasher {
     }
     if (this.disposed) return;
     reset();
+    rig.root.updateMatrixWorld(true);
+    const restGround = footHeight(rig);
     for (const clip of posed) applyClip(rig, clip.pose.locals);
     rig.root.updateMatrixWorld(true);
+    seatFeet(rig, restGround);
     rig.skeleton.update();
     const last = posed[posed.length - 1];
     this.publish({
@@ -1240,6 +1250,7 @@ export class Kitbasher {
       const mesh = new Mesh(buildGeometry(part.mesh, count).geometry, materials);
       mesh.name = part.name;
       mesh.frustumCulled = false;
+      shaded(mesh);
       group.add(mesh);
       all.push(...materials);
     }
@@ -1531,6 +1542,46 @@ function tally(names: readonly string[]): string[] {
   const counts = new Map<string, number>();
   for (const name of names) counts.set(name, (counts.get(name) ?? 0) + 1);
   return [...counts].map(([name, n]) => (n > 1 ? `${n} × ${name}` : name));
+}
+
+/** Lowest world height of the foot and toe bones.
+ *
+ * Clips apply rotations only, which keeps bone lengths ours but leaves the hips
+ * at standing height: a crouch bent the knees and lifted the boots 30 cm off
+ * the floor. The grid never showed it; the floor shadow, landing well clear of
+ * the boots, did. */
+const FOOT_BONES = ['LeftToeBase', 'RightToeBase', 'LeftFoot', 'RightFoot'];
+
+function footHeight(rig: BuiltRig): number | null {
+  const point = new Vector3();
+  let lowest: number | null = null;
+  for (const name of FOOT_BONES) {
+    const bone = rig.byName.get(name);
+    if (!bone) continue;
+    bone.getWorldPosition(point);
+    lowest = lowest === null ? point.y : Math.min(lowest, point.y);
+  }
+  return lowest;
+}
+
+/** Lower (or raise) the hips so the lowest foot is where it is at rest, which
+ * is on the floor. The same rule the local viewer's poses use. */
+function seatFeet(rig: BuiltRig, restGround: number | null): void {
+  const hips = rig.byName.get('Hips');
+  const posedGround = footHeight(rig);
+  if (!hips?.parent || restGround === null || posedGround === null) return;
+  const from = hips.parent.worldToLocal(new Vector3(0, 0, 0));
+  const to = hips.parent.worldToLocal(new Vector3(0, restGround - posedGround, 0));
+  hips.position.add(to.sub(from));
+  rig.root.updateMatrixWorld(true);
+}
+
+/** Everything worn or carried casts the key light's shadow and takes it: onto
+ * the floor, and from a helmet onto a collar or a rifle onto a back plate. A
+ * clone copies both flags, so a carried instance inherits them. */
+function shaded(object: Object3D): void {
+  object.castShadow = true;
+  object.receiveShadow = true;
 }
 
 /** A loaded piece: what goes in the scene, what it moves, and what it costs. */

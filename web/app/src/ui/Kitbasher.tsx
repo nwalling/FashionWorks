@@ -26,7 +26,7 @@ import {
   type GearSlot,
   type Slot,
 } from '../archive/catalogue';
-import { portLabel, portServes } from '../gear/ports';
+import { portLabel, portServes, portShort } from '../gear/ports';
 import { Kitbasher as Engine, type KitbasherState } from '../three/kitbasher';
 import type { Tokens } from '../theme';
 import { Viewer, type ViewerHandle } from './Viewer';
@@ -373,52 +373,58 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
-          {mode === 'gear' && (
-            // Which holsters this slot's gear can go in, and what is in them.
-            // Picking one targets it; the × takes its item off.
-            <div className="fw-kit-ports" role="radiogroup" aria-label="Holster">
-              <span className="fw-kit-ways-label">
-                {holsters.length
-                  ? `${holsters.length} holster${holsters.length === 1 ? '' : 's'}`
-                  : `nothing worn has a holster for a ${gearSlot}`}
-              </span>
-              {holsters.map(({ port, owner }) => {
-                const inside = carrying.get(port.name);
-                return (
-                  <span key={port.name} className="fw-kit-port">
+          {mode === 'gear' && (() => {
+            // Which holsters this slot's gear can go in, one line of short
+            // chips: a filled one is marked, the targeted one is lit, and the
+            // single × takes the targeted holster's item off. Two-line chips
+            // with a × each stacked twelve magazine points five rows deep.
+            const targeted = target ? carrying.get(target) : undefined;
+            return (
+              <div className="fw-kit-ports" role="radiogroup" aria-label="Holster">
+                <span className="fw-kit-ports-label">
+                  {holsters.length ? 'holsters' : `nothing worn has a holster for a ${gearSlot}`}
+                </span>
+                {holsters.map(({ port, owner }) => {
+                  const inside = carrying.get(port.name);
+                  return (
                     <button
+                      key={port.name}
                       type="button"
                       role="radio"
+                      className="fw-kit-port"
+                      data-full={inside ? '' : undefined}
                       aria-checked={target === port.name}
-                      aria-pressed={target === port.name}
-                      title={`${portLabel(port)}, on the ${owner}${inside ? `: ${displayName(inside)}` : ''}`}
+                      aria-label={`${portLabel(port)}: ${inside ? displayName(inside) : 'empty'}`}
+                      title={`${portLabel(port)}, on the ${owner}: ${inside ? displayName(inside) : 'empty'}`}
                       onClick={() => setTarget(target === port.name ? null : port.name)}
                     >
-                      {portLabel(port)}
-                      <span className="fw-kit-item-meta">{inside ? titleOf(inside) : 'empty'}</span>
+                      {portShort(port)}
                     </button>
-                    {inside && (
-                      <button
-                        type="button"
-                        className="fw-kit-port-remove"
-                        aria-label={`Take the ${displayName(inside)} off`}
-                        disabled={busy}
-                        onClick={() => engine.current?.uncarry(port.name)}
-                      >
-                        ×
-                      </button>
-                    )}
-                  </span>
-                );
-              })}
-            </div>
-          )}
+                  );
+                })}
+                {target && targeted && (
+                  <button
+                    type="button"
+                    className="fw-kit-port-remove"
+                    aria-label={`Take the ${displayName(targeted)} off`}
+                    title={`Take the ${displayName(targeted)} off`}
+                    disabled={busy}
+                    onClick={() => engine.current?.uncarry(target)}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            );
+          })()}
           {onBody && familyOf(onBody).length > 1 && (
             <div className="fw-kit-ways" role="radiogroup" aria-label="Color">
               {/* Labelled, because a row of small squares at the foot of a long
                   listing reads as decoration rather than as a control. */}
               <span className="fw-kit-ways-label">
-                {familyOf(onBody).length} colors
+                {/* In gear mode the holster chips no longer name what is in
+                    them, so this says which piece the colours are for. */}
+                {mode === 'gear' ? `${titleOf(onBody)} · ` : ''}{familyOf(onBody).length} colors
               </span>
               {familyOf(onBody).map((variant) => {
                 const colour = swatchColour(variant) ?? state?.swatches.get(variant.id);

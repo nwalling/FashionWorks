@@ -5,6 +5,7 @@ import {
   describePorts,
   portFor,
   portLabel,
+  portShort,
   portServes,
   refusal,
   resolvePorts,
@@ -122,6 +123,8 @@ describe('holsters', () => {
   it('are named as a person would say them, and matched to gear slots', () => {
     expect(portLabel(RIFLE_LEFT)).toBe('back left');
     expect(portLabel(GRENADE(3))).toBe('grenade 3');
+    expect(portShort(RIFLE_LEFT)).toBe('left');
+    expect(portShort(GRENADE(3))).toBe('3');
     expect(portServes(RIFLE_RIGHT, 'primary')).toBe(true);
     expect(portServes(RIFLE_RIGHT, 'grenade')).toBe(false);
     expect(portServes(RIFLE_LEFT, 'gadget')).toBe(true);

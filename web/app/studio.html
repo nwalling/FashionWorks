@@ -9,6 +9,12 @@
     --sc-text:#EAF2F6; --sc-subtle:#9FB6C2; --sc-accent:#FF8A34; --sc-badge:#5AD1E6;
     --sc-accent-text:#FF8A34; --sc-accent-ink:#0a1219;
   }
+  /* Light-leaning, as dolomite is: `studio.html?theme=dolomite`. */
+  html[data-theme="dolomite"] {
+    --sc-dark:#F4F6F8; --sc-card:#FFFFFF; --sc-border:#C6D0D8; --sc-field:#ECF0F3;
+    --sc-text:#101C26; --sc-subtle:#4E606E; --sc-accent:#A64A08; --sc-badge:#0E6476;
+    --sc-accent-text:#A64A08; --sc-accent-ink:#FFFFFF;
+  }
   html, body { margin:0; height:100%; background:var(--sc-dark); color:var(--sc-text);
                font:14px/1.5 ui-sans-serif, system-ui, sans-serif; }
   #log { position:fixed; right:8px; bottom:4px; z-index:5; font-size:11px; color:var(--sc-subtle); }

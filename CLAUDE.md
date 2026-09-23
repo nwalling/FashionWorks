@@ -1866,6 +1866,40 @@ bone the rig has, and guesses only when there is none. On the Defiance arms:
 `$RenderToTexture`; drawn, the Animus launcher's sight was a flat grey card.
 Hidden.
 
+### The floor shadow, and poses that floated (2026-09-23)
+
+The web kitbasher never had a shadow -- the local viewer's `ContactShadows`
+blob did not come across. What it has now is the **key light's own shadow
+map**: every worn and carried mesh casts and receives, and `three/ground.ts`
+draws a floor that takes it. 23 carried items on a full set, 398k triangles
+plus the shadow pass: 60 fps.
+
+**The floor filters the shadow itself (PCSS).** The engine's PCF uses the same
+few-millimetre kernel everywhere, which drew a hard black cut-out under armour
+lit mostly by ambient fill. A blocker search gives the occluder's height above
+the floor and the kernel widens with it, at `PENUMBRA_PER_METRE` 0.05: crisp at
+the boot, about 12 cm at the helmet's shadow. The armour keeps the engine's
+filter for its self-shadowing, where occluders are centimetres away. How dark
+a full shadow is comes from the lights -- blocking a 2.2 key at 45 degrees
+against 1.3 ambient and the rim leaves half -- not from taste.
+
+**Blend the floor premultiplied.** Mixing colour and alpha separately between
+"shadowed" and "lit" put a half-lit texel at half the *text* colour and a third
+opacity, which drew every penumbra as a pale halo brighter than the floor.
+
+**A shadow on a near-black page is invisible**, so on a dark theme the lit floor
+is lifted 7% toward the text colour -- a pool the shadow is cut out of. On a
+light theme and over a backdrop only the shadow draws. All three fade out
+radially so there is no edge.
+
+**The shadow showed that poses floated.** Clips apply rotations only, so the
+hips stayed at their standing 1.0 m while a crouch bent the knees: the boots
+were **30 cm** off the floor, and the raised stance, which flexes the knees,
+**10 cm**. The grid never gave it away. `setPose` now seats the feet the way
+the local viewer's `applyPose` always did -- the hips drop until the lowest foot
+or toe bone is back at its rest height. Measured: crouch head **0.988** against
+the pipeline's 0.99, hips 0.393; raised head 1.542, hips 0.900; idle unchanged.
+
 ### Backdrops
 
 `viewer/src/components/Backdrop.tsx` puts a photographic plate behind the

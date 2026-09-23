@@ -68,6 +68,25 @@ export function portLabel(port: Port): string {
   return port.name.replace(/_/g, ' ');
 }
 
+/** A holster's name in a chip's width: a whole slot's holsters sit on one
+ * line of the side panel, twelve of them for magazines under an ammo pack.
+ * The full name goes in the chip's tooltip. */
+export function portShort(port: Port): string {
+  const n = port.name.toLowerCase();
+  const number = /_(\d+)$/.exec(n)?.[1] ?? '';
+  if (port.select_tag === 'backLeft' || n === 'wep_stocked_2') return 'left';
+  if (port.select_tag === 'backRight' || n === 'wep_stocked_3') return 'right';
+  if (n === 'wep_sidearm') return 'hip';
+  if (n === 'utility_attach_1') return 'L thigh';
+  if (n === 'utility_attach_2') return 'R thigh';
+  if (n.startsWith('gadget_attach')) return 'back';
+  if (n.startsWith('grenade_attach') || n.startsWith('magazine_attach')) return number;
+  if (n.startsWith('magattach')) return `P${number}`;
+  if (n.startsWith('medpen_attach')) return `med ${number}`;
+  if (n.startsWith('oxypen_attach')) return `oxy ${number}`;
+  return portLabel(port);
+}
+
 /** What a gear item is, in a word, for a sentence. */
 export function itemNoun(item: CatalogueItem): string {
   const attach = item.attach;

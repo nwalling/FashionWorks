@@ -18,6 +18,8 @@ const log = document.getElementById('log')!;
 const say = (line: string) => { log.textContent = line; };
 
 async function main(): Promise<void> {
+  const theme = new URLSearchParams(location.search).get('theme');
+  if (theme) document.documentElement.setAttribute('data-theme', theme);
   const head = await fetch('/__p4k', { method: 'HEAD' });
   const total = Number(head.headers.get('content-length') ?? 0);
   if (!total) {

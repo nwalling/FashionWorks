@@ -278,44 +278,53 @@
   }
 }
 
-/* The holsters a gear slot can use, each with what hangs in it. Same row
- * treatment as the colour swatches, at the top of the column where it stays
- * on screen. */
+/* The holsters a gear slot can use, on one line under the search. Chips are
+ * swatch height and as narrow as their names; a filled holster is outlined in
+ * the accent and the targeted one is lit. Twelve magazine points under an
+ * ammo pack is the one case wider than the column: it wraps to a second short
+ * line, because scrolling sideways cut the eighth chip in half and hid the
+ * rest. */
 .fw-kit-ports {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   flex: 0 0 auto;
   padding-bottom: 8px;
   border-bottom: 1px solid var(--sc-border);
 }
 
-.fw-kit-port {
-  display: inline-flex;
-  align-items: stretch;
+.fw-kit-ports-label {
+  flex: 0 0 auto;
+  margin-right: 2px;
+  color: var(--sc-subtle);
+  font-size: 11px;
+  white-space: nowrap;
 }
 
-.fw-kit-port > button:first-child {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 1px;
-  text-align: left;
+.fw-kit .fw-kit-port,
+.fw-kit .fw-kit-port-remove {
+  flex: 0 0 auto;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 6px;
+  font-size: 11px;
+  white-space: nowrap;
+  color: var(--sc-subtle);
 }
 
-.fw-kit-port > button[aria-checked="true"] {
+.fw-kit .fw-kit-port[data-full] {
+  color: var(--sc-text);
+  border-color: var(--sc-accent, var(--sc-text));
+}
+
+.fw-kit .fw-kit-port[aria-checked="true"] {
   background: var(--sc-accent);
   color: var(--sc-accent-ink, var(--sc-dark));
   border-color: transparent;
 }
 
-.fw-kit-port > button[aria-checked="true"] .fw-kit-item-meta {
-  color: inherit;
-  opacity: 0.8;
-}
-
-.fw-kit-port-remove {
-  margin-left: 2px;
-  padding: 0 8px;
+.fw-kit .fw-kit-port-remove {
+  color: var(--sc-text);
 }
