@@ -1795,7 +1795,8 @@ Hill Horror" share only "The". The medical bay's anatomy meshes (named
 ### Holsters, gear and the held weapon -- built (2026-09-23)
 
 LOADOUT.md is the plan; this is what building it established. Phases 0-4 are
-done in the web kitbasher; the local Blender viewer does not draw gear.
+done in the web kitbasher. Phase 5 is dropped: the local Blender viewer does
+not draw gear, by decision, and does not need to.
 
 **Armour declares its holsters** as `SItemPortContainerComponentParams.Ports`,
 and the count follows the torso's weight with no exceptions across 1,741

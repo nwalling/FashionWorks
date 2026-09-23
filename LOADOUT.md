@@ -2,9 +2,10 @@
 
 A plan, scoped against build 1.0.191.55227 on 2026-09-23, and **built the same
 day: Phases 0-4 are done in the web kitbasher** (`@fashionworks/web` 0.6.0).
-Phase 5 -- gear in the local Blender viewer -- is not, because it was written
-to depend on a decision nobody has made yet. "Status" below says what each
-phase measured when it was run, and where reality differed from the plan.
+Phase 5 -- gear in the local Blender viewer -- is **dropped**: decided on
+2026-09-23 that the Blender viewer does not need weapons, so the plan is
+complete. "Status" below says what each phase measured when it was run, and
+where reality differed from the plan.
 Everything under "What the data says" was measured against the real archive.
 
 ## Status
@@ -16,7 +17,7 @@ Everything under "What the data says" was measured against the real archive.
 | 2 -- holsters, every class | done | Rifle both sides, size-5 launcher refused on the left with the reason and taken on the right, pistol, knife, multitool, 4 grenades, 4 pens, 8 magazines, 4 more on an ammo-carrier pack; a fifth of each refused as full. Heavy to light core: "one rifle holster, two grenade points, four magazine points; P4-AR Rifle, 2 x MK-4 Frag Grenade came off". 20 items, 373k scene triangles: 59 fps. |
 | 3 -- in hand, raised pose | done | Rifle raised and crouched, pistol and knife raised, both bodies, magazine travelling with the weapon. Left hand: median 2.6 cm from the weapon's surface over 53 meshes, p90 5.0 -- no IK. |
 | 4 -- share URL, sets, hardening | done | v2 string round-trips armour, gear and the held port; a v1 string still decodes. Equip-set re-validates gear. Package budgets hold. |
-| 5 -- local viewer | **not done** | Waiting on the open question below: whether the Blender viewer should draw gear at all. The Python side of Phase 1 is done, so the manifest already carries everything it would need. |
+| 5 -- local viewer | **dropped** | Decided: the Blender viewer does not need weapons. The Python side of Phase 1 stays, so the manifest carries gear and ports at parity with the port; nothing local renders them. |
 
 Where it differed from the plan:
 
@@ -39,8 +40,8 @@ Where it differed from the plan:
 
 It targets the web kitbasher (`web/`), which is where the product lives now,
 with the Python pipeline kept at catalogue parity the same way the rest of the
-port is. Rendering weapons in the local Blender viewer is a separate, optional
-last phase.
+port is. Rendering weapons in the local Blender viewer was a separate, optional
+last phase, and has been dropped.
 
 ## In short
 
@@ -371,7 +372,7 @@ The Python catalogue admits the same record roots (`dcb.DEFAULT_FILTERS` gains
 `fields.py` gets the port and loadout field paths, `manifest.py` goes to
 schema 4 with `ports`/`attach`, and `full_diff` stays at **100% on every field
 in both directions** -- the discipline that caught the 140 phantoms. Rendering
-weapons locally is Phase 5, and optional.
+weapons locally was Phase 5, and is dropped.
 
 ## Phases
 
@@ -436,9 +437,11 @@ pointed here; CLAUDE.md's verified facts updated with what the phases measured.
 budgets pass; the 40-check hosting test on Hangarworks is untouched, because
 nothing on the host changes.
 
-**Phase 5 — Local viewer parity (optional)**
+**Phase 5 — Local viewer parity (dropped)**
 
-Only if the Blender viewer is still wanted as a renderer: `scx convert` for
+Not being built: the Blender viewer does not need weapons. Recorded as it was
+scoped, in case that changes. Only if the Blender viewer is still wanted as a
+renderer: `scx convert` for
 `.cdf`-rooted props (cgf-converter takes a `.chr` to Collada and a `.skin` with
 `-dae`), `normalize_armor` placing them by the same locator rule, the React
 viewer's `SlotPanel` growing the gear tabs.
@@ -480,5 +483,5 @@ Built with the plan's defaults; each is a one-line change if the answer differs.
 - **Magazines:** built as user-placed from the magazine tab; a weapon's own
   magazine rides in the weapon. Auto-filling to match the primary is not done.
 - **UI:** built as the armour/gear switch.
-- **Does the local Blender viewer need weapons at all?** Still open, and the
-  reason Phase 5 has not been done.
+- **Does the local Blender viewer need weapons at all?** No -- decided
+  2026-09-23. Phase 5 is dropped.
