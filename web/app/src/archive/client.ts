@@ -296,6 +296,12 @@ export class ArchiveClient {
     return this.request('pose', { type: 'pose', path, clip });
   }
 
+  /** A gear item's parts, helpers and mount. `locator` is the helper on the
+   * item that meets the port's bone; empty for a held item. */
+  async gear(path: string, locator = '') {
+    return this.request('gear', { type: 'gear', path, locator });
+  }
+
   /** A material for an item whose record names none: by class name, then by
    * the mesh. `null` when the archive has nothing plausible. */
   async discoverMaterial(className: string, meshPath: string, meshMaterial: string | null = null) {

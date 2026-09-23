@@ -17,6 +17,7 @@ pub mod blend;
 pub mod catalog;
 pub mod composite;
 pub mod discover;
+pub mod gear;
 pub mod gold;
 pub mod material;
 pub mod mesh;
@@ -328,14 +329,43 @@ pub fn build_catalogue(dcb: &[u8], ini: &str, skeleton: &str) -> Result<String, 
     });
     build::assign_sets(&mut items);
     build::link_variants(&mut items);
+    let gear = build_gear(&database, &palettes, &makers, &loc);
 
     serde_json::to_string(&serde_json::json!({
         "skeleton": skeleton,
         "localization_keys": loc.len(),
         "palettes": palettes.len(),
         "items": items,
+        "gear": gear,
     }))
     .map_err(|e| JsValue::from_str(&format!("serialising the catalogue: {e}")))
+}
+
+/// Every gear item, sorted and linked into colourway families. Body-agnostic:
+/// a rifle is the same rifle whoever carries it.
+pub fn build_gear(
+    database: &starbreaker_datacore::Database,
+    palettes: &catalog::PaletteIndex,
+    makers: &std::collections::HashMap<String, serde_json::Value>,
+    loc: &catalog::Localization,
+) -> Vec<serde_json::Value> {
+    let mut gear: Vec<serde_json::Value> = catalog::db::gear_records(database)
+        .iter()
+        .filter_map(|r| catalog::gear::build_gear_item(&r.value, palettes, makers, loc))
+        .filter(|g| g["geometry"].as_array().is_some_and(|a| !a.is_empty()))
+        .collect();
+    gear.sort_by(|a, b| {
+        let key = |v: &serde_json::Value| {
+            (
+                v["slot"].as_str().unwrap_or("").to_string(),
+                v["name"].as_str().unwrap_or("").to_ascii_lowercase(),
+                v["class_name"].as_str().unwrap_or("").to_string(),
+            )
+        };
+        key(a).cmp(&key(b))
+    });
+    catalog::gear::link_gear_variants(&mut gear);
+    gear
 }
 
 #[wasm_bindgen]
@@ -375,7 +405,7 @@ impl Archive {
         // own bone list is returned as-is, which is what the geometry check
         // wants and what a renderer cannot use.
         let report = self.rig.as_ref().map(|rig| {
-            let report = armature::rebind(rig, &loaded.bones, &mut loaded.joints, &mut loaded.weights);
+            let report = armature::rebind(rig, &loaded.bones, &loaded.bone_parents, &mut loaded.joints, &mut loaded.weights);
             loaded.bones = rig.bones.iter().map(|b| b.name.clone()).collect();
             report
         });
@@ -567,6 +597,7 @@ fn mesh_to_js(
             &"redistributed".into(),
             &(report.redistributed as f64).into(),
         )?;
+        js_sys::Reflect::set(&rebind, &"inherited".into(), &(report.inherited as f64).into())?;
         js_sys::Reflect::set(&rebind, &"guessed".into(), &(report.guessed as f64).into())?;
         set("rebind", &rebind.into())?;
     } else {
@@ -866,10 +897,13 @@ impl Archive {
             .map(|e| e.bytes)
             .unwrap_or_default();
 
-        let loaded = mesh::load(&cga, &cgam).map_err(|e| JsValue::from_str(&e))?;
+        let mut loaded = mesh::load(&cga, &cgam).map_err(|e| JsValue::from_str(&e))?;
+        let prop = socket::Prop::parse(&cga);
+        if let Some(prop) = &prop {
+            gear::place_nodes(&mut loaded, &prop.nodes);
+        }
         let out = mesh_to_js(&loaded, None)?;
 
-        let prop = socket::Prop::parse(&cga);
         let bone = self
             .rig
             .as_ref()
@@ -925,13 +959,158 @@ impl Archive {
         js_sys::Reflect::set(&object, &"grips".into(), &grips.into())?;
 
         let helpers = js_sys::Array::new();
+        // And where each one is, in the prop's own space: a backpack carries
+        // its own `wep_stocked_attach_2/3_override` and `gadget_attach_1_override`
+        // nodes, which is where a pack-wearer's rifles hang.
+        let transforms = js_sys::Object::new();
         if let Some(prop) = &prop {
             for node in prop.helpers() {
                 helpers.push(&JsValue::from_str(&node.name));
+                let values: Vec<f32> = node.bone_to_world.iter().flatten().copied().collect();
+                js_sys::Reflect::set(
+                    &transforms,
+                    &node.name.as_str().into(),
+                    &js_sys::Float32Array::from(&values[..]).into(),
+                )?;
             }
         }
         js_sys::Reflect::set(&object, &"helpers".into(), &helpers.into())?;
+        js_sys::Reflect::set(&object, &"helperTransforms".into(), &transforms.into())?;
         Ok(object.into())
+    }
+}
+
+#[wasm_bindgen]
+impl Archive {
+    /// Load a gear item -- a weapon, knife, pen, grenade, magazine -- and work
+    /// out where it mounts. See [`gear`].
+    ///
+    /// `path` is the item's root geometry: a `.cdf` for most weapons, a plain
+    /// `.cgf` for knives and magazines. `locator` is the helper on the *item*
+    /// that the port names as its side of the mount (`attach_offset_left_01`);
+    /// empty for a held item, which sits on the hand bone by its own origin.
+    ///
+    /// Returns `parts` (each a mesh in the item's own space, with the `.mtl`
+    /// the definition names for it), `helpers` (every locator by name, row-major
+    /// 3x4 in the archive frame) and `mount` (the item's local matrix when
+    /// parented to the port's bone, or null).
+    #[wasm_bindgen(js_name = loadGear)]
+    pub fn load_gear(&self, path: &str, locator: &str) -> Result<JsValue, JsValue> {
+        let bytes = self.read_asset(path)?;
+        let mut parts: Vec<gear::Part> = Vec::new();
+        let helpers = if path.to_ascii_lowercase().ends_with(".cdf") {
+            let cdf = gear::parse_cdf(&bytes).map_err(|e| JsValue::from_str(&e))?;
+            // The model is usually a `.chr` -- helpers only -- but some weapons
+            // name a `.cga` there, a rigid mesh that *is* the weapon, with its
+            // helpers as NMC nodes. The Arlington's definition lists nothing
+            // else but an unbound round, so skipping the model drew no rifle.
+            let model = cdf.model.as_deref().and_then(|m| self.read_asset(m).ok().map(|b| (m, b)));
+            let mut helpers = gear::Helpers::new();
+            if let Some((path, model_bytes)) = &model {
+                if path.to_ascii_lowercase().ends_with(".chr") {
+                    helpers = gear::chr_helpers(model_bytes);
+                } else {
+                    helpers = gear::nmc_helpers(model_bytes);
+                    if let Ok(mesh) = self.load_raw_mesh(path) {
+                        parts.push(gear::Part {
+                            name: "model".into(),
+                            mesh,
+                            material: cdf.material.clone().map(with_mtl),
+                        });
+                    }
+                }
+            }
+            for attachment in cdf.attachments.iter().filter(|a| a.renderable()) {
+                let Ok(mut mesh) = self.load_raw_mesh(&attachment.binding) else { continue };
+                if attachment.kind == "CA_BONE" {
+                    let bone = attachment
+                        .bone
+                        .as_deref()
+                        .and_then(|b| gear::helper(&helpers, b))
+                        .copied()
+                        .unwrap_or(socket::IDENTITY);
+                    let rel = socket::from_quat(attachment.rel_rotation, attachment.rel_position);
+                    gear::transform_mesh(&mut mesh, &socket::multiply(&bone, &rel));
+                }
+                parts.push(gear::Part {
+                    name: attachment.name.clone(),
+                    mesh,
+                    material: attachment.material.clone().or_else(|| cdf.material.clone()).map(with_mtl),
+                });
+            }
+            helpers
+        } else {
+            let mesh = self.load_raw_mesh(path).map_err(|e| JsValue::from_str(&e))?;
+            parts.push(gear::Part { name: String::new(), mesh, material: None });
+            gear::nmc_helpers(&bytes)
+        };
+
+        let out = js_sys::Object::new();
+        let list = js_sys::Array::new();
+        for part in &parts {
+            let entry = js_sys::Object::new();
+            js_sys::Reflect::set(&entry, &"name".into(), &JsValue::from_str(&part.name))?;
+            js_sys::Reflect::set(
+                &entry,
+                &"material".into(),
+                &part.material.as_deref().map_or(JsValue::NULL, JsValue::from_str),
+            )?;
+            js_sys::Reflect::set(&entry, &"mesh".into(), &mesh_to_js(&part.mesh, None)?)?;
+            list.push(&entry);
+        }
+        js_sys::Reflect::set(&out, &"parts".into(), &list.into())?;
+
+        let flat = |m: &socket::Transform| -> JsValue {
+            let values: Vec<f32> = m.iter().flatten().copied().collect();
+            js_sys::Float32Array::from(&values[..]).into()
+        };
+        let named = js_sys::Object::new();
+        for (name, m) in &helpers {
+            js_sys::Reflect::set(&named, &name.as_str().into(), &flat(m))?;
+        }
+        js_sys::Reflect::set(&out, &"helpers".into(), &named.into())?;
+        let mount = if locator.is_empty() { None } else { gear::mount(&helpers, locator) };
+        js_sys::Reflect::set(&out, &"mount".into(), &mount.as_ref().map_or(JsValue::NULL, flat))?;
+        Ok(out.into())
+    }
+
+    /// An asset's bytes, however its path is spelled.
+    fn read_asset(&self, path: &str) -> Result<Vec<u8>, JsValue> {
+        let index = self
+            .find_asset(path)
+            .ok_or_else(|| JsValue::from_str(&format!("not in this archive: {path}")))?;
+        Ok(p4k::read_entry(self.reader.source(), &self.entries[index])
+            .map_err(|e| JsValue::from_str(&e))?
+            .bytes)
+    }
+
+    /// A mesh and its vertex half (`.skinm`, `.cgfm`, `.cgam`), unrigged, with
+    /// a rigid mesh's node-space groups put where their nodes say.
+    fn load_raw_mesh(&self, path: &str) -> Result<mesh::LoadedMesh, String> {
+        let index = self.find_asset(path).ok_or_else(|| format!("not in this archive: {path}"))?;
+        let head = p4k::read_entry(self.reader.source(), &self.entries[index])?.bytes;
+        let body = self
+            .find_asset(&format!("{path}m"))
+            .and_then(|i| p4k::read_entry(self.reader.source(), &self.entries[i]).ok())
+            .map(|e| e.bytes)
+            .unwrap_or_default();
+        let mut loaded = mesh::load(&head, &body)?;
+        if !path.to_ascii_lowercase().ends_with(".skin") {
+            if let Some(prop) = socket::Prop::parse(&head) {
+                gear::place_nodes(&mut loaded, &prop.nodes);
+            }
+        }
+        Ok(loaded)
+    }
+}
+
+/// A material path as the definitions write it -- sometimes with `.mtl`,
+/// sometimes without -- as the archive names the file.
+fn with_mtl(path: String) -> String {
+    if path.to_ascii_lowercase().ends_with(".mtl") {
+        path
+    } else {
+        format!("{path}.mtl")
     }
 }
 

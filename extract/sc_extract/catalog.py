@@ -35,6 +35,17 @@ TEST_PATTERNS = re.compile(r"(^|_)(test|debug|placeholder|template|wip|dev)(_|$)
 # The only record type that describes a wearable item. Everything else in the
 # export is there to be looked up, not catalogued.
 ENTITY_RECORD_TYPE = "EntityClassDefinition"
+
+# Where wearable records live. The Rust port filters on this path.
+HUMAN_ITEMS = "entities/scitem/characters/human/"
+
+
+def in_gear_scope(record: Record) -> bool:
+    """Whether a record comes from where gear lives. See ``gear.GEAR_SCOPES``."""
+    from .gear import GEAR_SCOPES
+
+    path = str(record.path).replace("\\", "/").lower()
+    return any(scope in path for scope in GEAR_SCOPES)
 NPC_PATTERNS = re.compile(r"(^|_)(npc|ai|crew_ai)(_|$)", re.IGNORECASE)
 
 # Records that carry an armor attach type but are not wearable: shop displays
@@ -747,6 +758,8 @@ def build_item(
         # The mesh is named indirectly; `scx extract` resolves it.
         flags.append("cdf")
 
+    from .gear import ports_for  # gear builds on this module
+
     return Item(
         id=record.id,
         class_name=record.class_name,
@@ -769,6 +782,7 @@ def build_item(
         socket=socket_for(slot, bind_mode_for(geometry)),
         assets=Assets(glb=None, thumb=None),
         flags=flags,
+        ports=ports_for(record),
     )
 
 
@@ -799,6 +813,13 @@ def build(
         # built 140 fewer items and the diff was finally run in both directions.
         if record.record_type != ENTITY_RECORD_TYPE:
             continue
+        # Wearables only. The export carries gear records now
+        # (`**/entities/scitem/weapons/**`), and a class-name slot hint would
+        # happily read a weapon as armour. Excluding the gear scopes leaves
+        # exactly what the export held before them -- the Rust port reaches the
+        # same set by including `HUMAN_ITEMS`.
+        if in_gear_scope(record):
+            continue
         stats.considered += 1
         item = build_item(record, index, loc, skeleton=skeleton)
         if item is None:
@@ -815,9 +836,12 @@ def build(
     assign_sets(items)
     link_variants(items)
 
+    from .gear import build_gear
+
     manifest = Manifest(
         game_version=game_version,
         skeletons={skeleton: Skeleton(chr=SKELETON_CHR.get(skeleton), glb=f"base/{skeleton}.glb")},
         items=items,
+        gear=build_gear(index, loc),
     )
     return manifest, stats

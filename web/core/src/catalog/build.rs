@@ -117,7 +117,7 @@ fn is_null_guid(value: &str) -> bool {
 /// even when the manufacturer record is missing from the export. The record's
 /// `Name` is itself a localisation key (`@manufacturer_NameCDS`), not display
 /// text.
-fn manufacturer_for(
+pub(crate) fn manufacturer_for(
     record: &Value,
     makers: &HashMap<String, Value>,
     loc: &Localization,
@@ -231,6 +231,7 @@ pub fn build_item(
         "bind_mode": bind_mode,
         "socket": socket_for(slot, bind_mode),
         "flags": flags,
+        "ports": super::gear::ports_for(record),
     }))
 }
 

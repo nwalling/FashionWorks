@@ -21,10 +21,43 @@ export interface CatalogueItem {
   tint?: { layers?: Array<{ color: string; spec: string; glossiness: number }> } | null;
   geometry: Array<{ source: string; side: string | null }>;
   materials: string[];
+  /** The holsters this piece declares. Armour and gear both carry them: a
+   * torso's back holsters, a rifle's magazine port. */
+  ports?: Port[];
+  /** Gear only: what a port checks the item against. */
+  attach?: { type: string; subtype: string; size: number; tags: string[] };
+  /** Gear only: which animation set holds it. */
+  anim_set?: string | null;
+  /** Gear only: what it ships with, by port -- a rifle's magazine. */
+  default_children?: Array<{ port: string; class_name: string }>;
+}
+
+/** An item port that hangs something off a bone: a holster. LOADOUT.md. */
+export interface Port {
+  name: string;
+  types: Array<{ type: string; subtypes: string[] }>;
+  min_size: number;
+  max_size: number;
+  /** The bone (or, on a backpack, the node) the item hangs from. */
+  helper: string | null;
+  /** The locator on the *item* that meets the helper. */
+  offset: string | null;
+  /** `backLeft` / `backRight` on the rifle holsters. */
+  select_tag: string | null;
 }
 
 export const SLOTS = ['helmet', 'torso', 'arms', 'legs', 'undersuit', 'backpack'] as const;
 export type Slot = (typeof SLOTS)[number];
+
+/** What a character carries rather than wears. */
+export const GEAR_SLOTS = [
+  'primary', 'sidearm', 'knife', 'gadget', 'grenade', 'magazine', 'consumable',
+] as const;
+export type GearSlot = (typeof GEAR_SLOTS)[number];
+
+export function isGearSlot(slot: string): slot is GearSlot {
+  return (GEAR_SLOTS as readonly string[]).includes(slot);
+}
 
 /** Flags that keep a record out of the listing.
  *
@@ -46,6 +79,12 @@ export interface Catalogue {
    * everything sold under one product name -- the Defiance core in all its
    * colours *and* its (Modified) build, which has a mesh of its own. */
   readonly lines: Map<string, CatalogueItem[]>;
+  /** Weapons, knives, grenades, magazines, pens and gadgets. */
+  readonly gear: CatalogueItem[];
+  readonly gearBySlot: Map<GearSlot, CatalogueItem[]>;
+  /** Every item, armour and gear, by class name -- how a rifle finds the
+   * magazine it ships with. */
+  readonly byClass: Map<string, CatalogueItem>;
 }
 
 /** Words that end the product part of a name. Mirrors the pipeline's
@@ -84,6 +123,7 @@ export function productLine(item: CatalogueItem): string | null {
  * the slot word is put back, so the row still says what it is. */
 export function lineTitle(line: readonly CatalogueItem[]): string {
   const names = line.map(displayName);
+  if (line[0] && isGearSlot(line[0].slot)) return commonWords(names);
   const shared = sharedName(names);
   if (line.length < 2 || shared.split(/\s+/).some((w) => SLOT_WORD.test(w.replace(/["'()]/g, '')))) {
     return shared;
@@ -91,6 +131,24 @@ export function lineTitle(line: readonly CatalogueItem[]): string {
   const words = displayName(lineRepresentative(line)).split(/\s+/);
   const slotWord = words.find((w) => SLOT_WORD.test(w.replace(/["'()]/g, '')));
   return slotWord ? `${shared} ${slotWord}` : shared;
+}
+
+/** The words every name has, in the first name's order, quoted editions
+ * aside: `P4-AR Rifle` from `P4-AR Rifle` and `P4-AR "Blacklist" Rifle`.
+ *
+ * Gear puts its edition in the *middle* of its name, so the leading words
+ * armour titles by stop at the product -- every rifle row read "P4-AR" or
+ * "A03" with nothing to say what it was. */
+export function commonWords(names: readonly string[]): string {
+  if (names.length === 0) return '';
+  if (names.length === 1) return names[0]!;
+  const words = (name: string) => name
+    .replace(/"[^"]*"/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+  const others = names.slice(1).map((n) => new Set(words(n).map((w) => w.toLowerCase())));
+  const kept = words(names[0]!).filter((w) => others.every((set) => set.has(w.toLowerCase())));
+  return kept.length ? kept.join(' ') : sharedName([...names]);
 }
 
 /** Which listing row a piece belongs under.
@@ -151,12 +209,23 @@ function isAnatomy(item: CatalogueItem): boolean {
 }
 
 export function readCatalogue(json: string): Catalogue {
-  const parsed = JSON.parse(json) as { items: CatalogueItem[] };
+  const parsed = JSON.parse(json) as { items: CatalogueItem[]; gear?: CatalogueItem[] };
   const items = parsed.items.filter(
     (item) => item.geometry.length > 0
       && !item.flags.some((f) => HIDDEN_FLAGS.includes(f))
       && !isAnatomy(item),
   );
+  // Gear has no body-specific mesh, no sets and no bind mode; it gets the
+  // defaults the listing and the engine expect of an item.
+  const gear = (parsed.gear ?? [])
+    .map((g): CatalogueItem => ({
+      ...g,
+      set: g.set ?? null,
+      bind_mode: 'gear',
+      socket: null,
+      weight_class: g.weight_class ?? null,
+    }))
+    .filter((g) => g.geometry.length > 0 && !g.flags.some((f) => HIDDEN_FLAGS.includes(f)));
 
   const bySlot = new Map<Slot, CatalogueItem[]>(SLOTS.map((s) => [s, []]));
   const families = new Map<string, CatalogueItem[]>();
@@ -170,8 +239,20 @@ export function readCatalogue(json: string): Catalogue {
   for (const list of bySlot.values()) {
     list.sort((a, b) => displayName(a).localeCompare(displayName(b)));
   }
+  const gearBySlot = new Map<GearSlot, CatalogueItem[]>(GEAR_SLOTS.map((s) => [s, []]));
+  for (const item of gear) {
+    gearBySlot.get(item.slot as GearSlot)?.push(item);
+    const root = familyRoot(item);
+    const family = families.get(root) ?? [];
+    family.push(item);
+    families.set(root, family);
+  }
+  for (const list of gearBySlot.values()) {
+    list.sort((a, b) => displayName(a).localeCompare(displayName(b)));
+  }
+
   const lines = new Map<string, CatalogueItem[]>();
-  for (const list of bySlot.values()) {
+  for (const list of [...bySlot.values(), ...gearBySlot.values()]) {
     for (const item of list) {
       const key = lineKey(item);
       const line = lines.get(key) ?? [];
@@ -179,7 +260,11 @@ export function readCatalogue(json: string): Catalogue {
       lines.set(key, line);
     }
   }
-  return { items, bySlot, families, lines };
+  // Including hidden gear: a rifle names its magazine by class, and the
+  // magazine it ships with may be a record the listing would not show.
+  const byClass = new Map<string, CatalogueItem>();
+  for (const item of [...items, ...(parsed.gear ?? [])]) byClass.set(item.class_name.toLowerCase(), item);
+  return { items, bySlot, families, lines, gear, gearBySlot, byClass };
 }
 
 /** Every piece sold under the same product name in the same slot. */

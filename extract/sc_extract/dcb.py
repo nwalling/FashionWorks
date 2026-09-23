@@ -66,6 +66,8 @@ def _cache_key(p4k: Path) -> str:
 # own path, so each pattern must lead with "**/".
 DEFAULT_FILTERS = (
     "**/entities/scitem/characters/human/**",  # the wearables themselves
+    "**/entities/scitem/weapons/**",  # guns, knives, grenades, magazines, gadgets
+    "**/entities/scitem/consumables/**",  # medpens and oxygen pens
     "**/scitemmanufacturer/**",  # manufacturer codes and names
     "**/tintpalettes/**",  # per-item colour palettes
 )

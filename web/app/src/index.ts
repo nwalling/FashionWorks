@@ -44,9 +44,22 @@ export {
   displayName,
   swatchColour,
   SLOTS,
+  GEAR_SLOTS,
+  isGearSlot,
   HIDDEN_FLAGS,
 } from './archive/catalogue';
-export type { Catalogue, CatalogueItem, Slot } from './archive/catalogue';
+export type { Catalogue, CatalogueItem, Slot, GearSlot, Port } from './archive/catalogue';
+export {
+  resolvePorts,
+  refusal,
+  portFor,
+  portLabel,
+  portServes,
+  describePorts,
+  isHolster,
+  PORT_OWNERS,
+} from './gear/ports';
+export type { OwnedPort } from './gear/ports';
 
 // The kitbasher itself, below the `FashionWorks` wrapper: a host that has its
 // own archive handling, or a verification page that opens one over HTTP, can
@@ -58,6 +71,8 @@ export {
   POSES,
   encodeLoadout,
   decodeLoadout,
+  decodeGear,
+  WEAPON_POSES,
   matchSet,
   paletteOf,
 } from './three/kitbasher';

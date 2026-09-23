@@ -162,7 +162,9 @@ pub struct RebindReport {
     pub stray: usize,
     /// Vertices whose weight was renormalised onto their surviving bones.
     pub redistributed: usize,
-    /// Vertices with nothing left, which needed a guess.
+    /// Vertices with nothing left, placed by the piece's own hierarchy.
+    pub inherited: usize,
+    /// Vertices with nothing left and no ancestor either, which needed a guess.
     pub guessed: usize,
     /// Vertices left with no weight at all. Should be zero.
     pub unweighted: usize,
@@ -176,10 +178,36 @@ pub struct RebindReport {
 pub fn rebind(
     armature: &Armature,
     mesh_bones: &[String],
+    mesh_parents: &[Option<usize>],
     joints: &mut [u16],
     weights: &mut [f32],
 ) -> RebindReport {
     let map = armature.remap(mesh_bones);
+
+    // Where each stray bone would go by the piece's own hierarchy: its nearest
+    // ancestor the armature has. **This is the answer the piece itself gives**,
+    // and it beats any guess from names. The Defiance arms carry wrist pistons
+    // -- `LeftWrist_Piston01_End`, a child of `LeftHand` -- and 1,828 vertices
+    // weighted to nothing else. The name guess found a same-side bone sharing
+    // a word and put them where the hand is at rest; raising the arm to hold a
+    // rifle then stretched them into long lines hanging from the forearm.
+    let ancestor: Vec<Option<u16>> = (0..mesh_bones.len())
+        .map(|i| {
+            let mut cursor = mesh_parents.get(i).copied().flatten();
+            let mut hops = 0;
+            while let Some(at) = cursor {
+                if let Some(Some(target)) = map.get(at) {
+                    return Some(*target);
+                }
+                hops += 1;
+                if hops > mesh_bones.len() {
+                    break;
+                }
+                cursor = mesh_parents.get(at).copied().flatten();
+            }
+            None
+        })
+        .collect();
     let mut report = RebindReport {
         mapped: map.iter().filter(|m| m.is_some()).count(),
         stray: map.iter().filter(|m| m.is_none()).count(),
@@ -246,11 +274,27 @@ pub fn rebind(
                     .map(|(joint, weight)| (map[joint as usize].unwrap_or(dominant), weight))
                     .collect()
             }
+            None if influences.iter().all(|(joint, _)| ancestor.get(*joint as usize).copied().flatten().is_some()) => {
+                // Nothing survived, but every stray bone has an ancestor the
+                // armature has: follow the piece's own hierarchy, keeping the
+                // proportions between influences.
+                report.inherited += 1;
+                let mut merged: Influences = Vec::new();
+                for (joint, weight) in &influences {
+                    let target = ancestor[*joint as usize].expect("checked above");
+                    match merged.iter_mut().find(|(j, _)| *j == target) {
+                        Some((_, w)) => *w = w.saturating_add(*weight),
+                        None => merged.push((target, *weight)),
+                    }
+                }
+                merged
+            }
             None => {
-                // Nothing survived. The guess prefers a same-side bone sharing
-                // a word, then the busiest bone on that side, then the mesh's
-                // dominant bone -- side first, because matching on words alone
-                // put a right wrist cuff on the left forearm.
+                // Nothing survived and the hierarchy does not say. The guess
+                // prefers a same-side bone sharing a word, then the busiest
+                // bone on that side, then the mesh's dominant bone -- side
+                // first, because matching on words alone put a right wrist cuff
+                // on the left forearm.
                 report.guessed += 1;
                 let stray_names: Vec<&str> = influences
                     .iter()
@@ -370,7 +414,7 @@ mod tests {
         let mesh_bones = vec!["Hips".to_string(), "Spine".to_string()];
         let mut joints = vec![0u16, 1, 0, 0];
         let mut weights = vec![0.75f32, 0.25, 0.0, 0.0];
-        let report = rebind(&armature, &mesh_bones, &mut joints, &mut weights);
+        let report = rebind(&armature, &mesh_bones, &[], &mut joints, &mut weights);
         assert_eq!(report.stray, 0);
         assert_eq!(report.guessed, 0);
         // Hips is armature index 1, Spine is 2.
@@ -387,7 +431,7 @@ mod tests {
         let mesh_bones = vec!["RightForeArm".to_string(), "RightWrist_CuffTwist".to_string()];
         let mut joints = vec![0u16, 1, 0, 0];
         let mut weights = vec![0.5f32, 0.5, 0.0, 0.0];
-        let report = rebind(&armature, &mesh_bones, &mut joints, &mut weights);
+        let report = rebind(&armature, &mesh_bones, &[], &mut joints, &mut weights);
         assert_eq!(report.stray, 1, "the cuff bone is not on the armature");
         assert_eq!(report.guessed, 0, "it had a surviving bone of its own");
         assert_eq!(joints[0], armature.index_of("RightForeArm").unwrap() as u16);
@@ -406,7 +450,7 @@ mod tests {
         // candidates, and one weighted only to the stray right-side cuff.
         let mut joints = vec![0u16, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0];
         let mut weights = vec![1.0f32, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0];
-        let report = rebind(&armature, &mesh_bones, &mut joints, &mut weights);
+        let report = rebind(&armature, &mesh_bones, &[], &mut joints, &mut weights);
         assert_eq!(report.guessed, 1);
         assert_eq!(
             joints[8],
@@ -417,6 +461,27 @@ mod tests {
     }
 
     #[test]
+    fn an_orphan_follows_the_piece_s_own_hierarchy_before_any_guess() {
+        // A wrist piston hangs off the hand in the piece's own skeleton. The
+        // name guess put it on a bone sharing a word; the hierarchy puts it on
+        // the hand, which is where it moves with.
+        let mut armature = base();
+        armature.push(&bone("LeftHand", Some(4)), false);
+        let mesh_bones = vec![
+            "LeftForeArm".to_string(),            // 0, survives
+            "LeftHand".to_string(),               // 1, survives
+            "LeftWrist_Piston01_End".to_string(), // 2, stray, child of LeftHand
+        ];
+        let parents = vec![None, Some(0), Some(1)];
+        let mut joints = vec![0u16, 0, 0, 0, 2, 0, 0, 0];
+        let mut weights = vec![1.0f32, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0];
+        let report = rebind(&armature, &mesh_bones, &parents, &mut joints, &mut weights);
+        assert_eq!(report.inherited, 1);
+        assert_eq!(report.guessed, 0);
+        assert_eq!(joints[4], armature.index_of("LeftHand").unwrap() as u16);
+    }
+
+    #[test]
     fn nothing_is_left_unweighted() {
         // Dropping stray weight outright left 1080 of 30901 torso vertices
         // unweighted, and the exporter then pinned that cloth to the origin.
@@ -424,7 +489,7 @@ mod tests {
         let mesh_bones = vec!["Hips".to_string(), "ac_flap_x03_y02".to_string()];
         let mut joints = vec![1u16, 0, 0, 0];
         let mut weights = vec![1.0f32, 0.0, 0.0, 0.0];
-        let report = rebind(&armature, &mesh_bones, &mut joints, &mut weights);
+        let report = rebind(&armature, &mesh_bones, &[], &mut joints, &mut weights);
         assert_eq!(report.unweighted, 0);
         let total: f32 = weights.iter().sum();
         assert!((total - 1.0).abs() < 1e-5, "got {total}");

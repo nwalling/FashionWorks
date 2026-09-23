@@ -361,6 +361,7 @@ dependencies = [
  "starbreaker-3d",
  "starbreaker-chunks",
  "starbreaker-common",
+ "starbreaker-cryxml",
  "starbreaker-datacore",
  "starbreaker-dds",
  "starbreaker-p4k",

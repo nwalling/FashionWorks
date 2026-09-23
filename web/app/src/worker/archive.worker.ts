@@ -65,6 +65,9 @@ export type ToWorker = (
   | { type: 'pose'; path: string; clip: string }
   /** Find a material for an item whose record names none. */
   | { type: 'discover'; className: string; meshPath: string; meshMaterial: string | null }
+  /** Load a gear item -- weapon, knife, pen, grenade, magazine -- and its
+   * mount for the named locator on the item (empty for none). */
+  | { type: 'gear'; path: string; locator: string }
 ) & {
   /** Set on every request that expects an answer, and echoed on the answer.
    *
@@ -169,6 +172,9 @@ export interface PropPayload extends MeshPayload {
    * tell a pack mounted backwards from one mounted correctly. */
   grips: { left?: Float32Array; right?: Float32Array };
   helpers: string[];
+  /** Where each helper node sits, in the prop's own space, row-major 3x4. A
+   * backpack's `wep_stocked_attach_*_override` nodes are where rifles hang. */
+  helperTransforms?: Record<string, Float32Array>;
 }
 
 export interface MeshPayload {
@@ -182,13 +188,21 @@ export interface MeshPayload {
   submeshes: Array<{ materialId: number; start: number; count: number }>;
   materialFile: string | null;
   /** Null when the mesh was loaded without a rig. */
-  rebind: { mapped: number; stray: number; redistributed: number; guessed: number } | null;
+  rebind: { mapped: number; stray: number; redistributed: number; inherited?: number; guessed: number } | null;
   min: Float32Array;
   max: Float32Array;
   unweighted: number;
   /** The attachment points this piece re-declares, from its own skeleton.
    * Archive frame, parent-relative. Absent for a rigid prop. */
   overrides?: AttachmentOverride[];
+}
+
+/** A gear item, in its own space: parts to draw, helpers by name, and the
+ * mount for the locator asked for. Transforms are row-major 3x4, archive frame. */
+export interface GearPayload {
+  parts: Array<{ name: string; material: string | null; mesh: MeshPayload }>;
+  helpers: Record<string, Float32Array>;
+  mount: Float32Array | null;
 }
 
 export interface AttachmentOverride {
@@ -212,6 +226,7 @@ export type FromWorker = (
   | { type: 'prop'; path: string; prop: PropPayload; ms: number }
   | { type: 'pose'; pose: PosePayload; ms: number }
   | { type: 'discovered'; path: string | null }
+  | { type: 'gear'; path: string; gear: GearPayload; ms: number }
   | { type: 'failed'; message: string }
 ) & { id?: number };
 
@@ -312,6 +327,7 @@ let opened: {
     loadTexture(path: string, mip: number): [number, number, Uint8Array];
     textureSizes(path: string): Uint32Array;
     discoverMaterial(className: string, meshPath: string, meshMaterial?: string): string | undefined;
+    loadGear(path: string, locator: string): unknown;
   };
   /** Built catalogues, by body type.
    *
@@ -456,6 +472,17 @@ async function run(message: ToWorker): Promise<void> {
       // A texture that will not decode is not fatal: the surface falls back.
       reply({ type: 'texture', texture: null, ms: performance.now() - started, reads, fetched });
     }
+    return;
+  }
+
+  if (message.type === 'gear') {
+    if (!opened) {
+      reply({ type: 'failed', message: 'no archive is open' });
+      return;
+    }
+    const started = performance.now();
+    const gear = opened.archive.loadGear(message.path, message.locator) as GearPayload;
+    reply({ type: 'gear', path: message.path, gear, ms: performance.now() - started });
     return;
   }
 

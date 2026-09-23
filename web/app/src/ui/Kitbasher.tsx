@@ -2,7 +2,7 @@
  *
  * A listing down the side, the body in the middle, a strip of controls on
  * top. The DOM here is plain and the state comes from `Kitbasher` (the class),
- * which owns the scene objects and publishes what it is wearing.
+ * which owns the scene objects and publishes what it is wearing and carrying.
  *
  * Colours are all tokens through `kitbasher.css`; nothing here has a hex value.
  */
@@ -13,6 +13,8 @@ import type { ArchiveClient } from '../archive/client';
 import {
   colourwayName,
   displayName,
+  GEAR_SLOTS,
+  isGearSlot,
   lineKey,
   lineOf,
   lineRepresentative,
@@ -21,9 +23,11 @@ import {
   SLOTS,
   type Catalogue,
   type CatalogueItem,
+  type GearSlot,
   type Slot,
 } from '../archive/catalogue';
-import { Kitbasher as Engine, POSES, type KitbasherState } from '../three/kitbasher';
+import { portLabel, portServes } from '../gear/ports';
+import { Kitbasher as Engine, type KitbasherState } from '../three/kitbasher';
 import type { Tokens } from '../theme';
 import { Viewer, type ViewerHandle } from './Viewer';
 import './kitbasher.css';
@@ -34,6 +38,9 @@ import './kitbasher.css';
  * A virtual list would be the real answer; this is the honest placeholder.
  */
 export const MAX_ROWS = 400;
+
+/** Gear the hand can hold: the rest is thrown, loaded or injected. */
+const HOLDABLE = new Set<string>(['primary', 'sidearm', 'knife', 'gadget']);
 
 export interface KitbasherProps {
   readonly client: ArchiveClient;
@@ -52,15 +59,22 @@ function titleOfLine(catalogue: Catalogue, item: CatalogueItem): string {
   return lineTitle(lineOf(catalogue, item));
 }
 
+type Mode = 'armour' | 'gear';
+
 export function Kitbasher(props: KitbasherProps): JSX.Element {
   const { client, catalogue: initialCatalogue, tokens, initialLoadout, onLoadoutChange, onEngine } = props;
   const engine = useRef<Engine | null>(null);
   const [state, setState] = useState<KitbasherState | null>(null);
-  const [slot, setSlot] = useState<Slot>('torso');
+  const [mode, setMode] = useState<Mode>('armour');
+  const [armourSlot, setArmourSlot] = useState<Slot>('torso');
+  const [gearSlot, setGearSlot] = useState<GearSlot>('primary');
+  // The holster the next gear pick goes into; null picks the first free one.
+  const [target, setTarget] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [backdrop, setBackdrop] = useState<string | null>(null);
   const viewer = useRef<ViewerHandle | null>(null);
   const picker = useRef<HTMLInputElement>(null);
+  const slot: Slot | GearSlot = mode === 'armour' ? armourSlot : gearSlot;
 
   // The engine is built once the scene exists, and torn down with the view.
   const onScene = useCallback((handle: ViewerHandle) => {
@@ -80,7 +94,7 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
       const opener = torsos.find((i) => displayName(i).includes('Sunchaser'))
         ?? torsos.find((i) => !i.variant_of);
       if (opener) await built.equip(opener);
-      await built.setPose(POSES[1]!);
+      await built.setPose('idle');
     })();
     // Returned for symmetry; the Viewer never calls this back, so the engine
     // is disposed from the unmount effect below instead.
@@ -93,7 +107,7 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
     engine.current = null;
   }, []);
 
-  // The loadout, outward, whenever what is worn changes.
+  // The loadout, outward, whenever what is worn or carried changes.
   const lastLoadout = useRef<string | null>(null);
   useEffect(() => {
     if (!state || !engine.current) return;
@@ -105,10 +119,27 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
   }, [state, onLoadoutChange]);
 
   const wearing = state?.wearing ?? new Map<Slot, CatalogueItem>();
-  const onBody = wearing.get(slot);
+  const carrying = state?.carrying ?? new Map<string, CatalogueItem>();
   // The engine rebuilds this on a body switch, so the listing follows it
   // rather than the prop it started from.
   const catalogue = state?.catalogue ?? initialCatalogue;
+
+  // The holsters that serve the gear slot on screen, in the order the armour
+  // declares them.
+  const holsters = useMemo(() => (mode === 'gear'
+    ? [...(state?.ports ?? new Map()).values()].filter((p) => portServes(p.port, gearSlot))
+    : []), [mode, gearSlot, state?.ports]);
+
+  // What the side panel's colour row is about: the armour piece in this slot,
+  // or the gear in the targeted holster (else the first holster of this slot
+  // that has anything in it).
+  const onBody: CatalogueItem | undefined = mode === 'armour'
+    ? wearing.get(armourSlot)
+    : (target ? carrying.get(target) : undefined)
+      ?? holsters.map((h) => carrying.get(h.port.name)).find(Boolean);
+  const onBodyPort = mode === 'gear' && onBody
+    ? [...carrying].find(([, item]) => item.id === onBody.id)?.[0] ?? null
+    : null;
 
   // One row per product line: its colours and editions appear as swatches
   // above, rather than as twenty near-identical rows -- and a (Modified)
@@ -117,7 +148,8 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
     const needle = search.trim().toLowerCase();
     const seen = new Set<string>();
     const rows: CatalogueItem[] = [];
-    for (const item of catalogue.bySlot.get(slot) ?? []) {
+    const source = isGearSlot(slot) ? catalogue.gearBySlot.get(slot) : catalogue.bySlot.get(slot);
+    for (const item of source ?? []) {
       const key = lineKey(item);
       if (seen.has(key)) continue;
       seen.add(key);
@@ -132,6 +164,11 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
 
   const familyOf = (item: CatalogueItem) => lineOf(catalogue, item);
   const titleOf = (item: CatalogueItem) => titleOfLine(catalogue, item);
+
+  const pick = (item: CatalogueItem, port: string | null = target) => {
+    if (isGearSlot(item.slot)) void engine.current?.carry(item, port);
+    else void engine.current?.equip(item);
+  };
 
   const chooseBackdrop = (file: File | undefined) => {
     if (!file) return;
@@ -165,24 +202,60 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
   // URL is released when it is replaced, cleared, or the component goes.
   useEffect(() => () => { if (backdrop) URL.revokeObjectURL(backdrop); }, [backdrop]);
 
+  // A target that no longer exists -- the armour carrying it came off -- is
+  // forgotten rather than left pointing at nothing.
+  useEffect(() => {
+    if (target && !(state?.ports ?? new Map()).has(target)) setTarget(null);
+  }, [target, state?.ports]);
+
   const busy = state?.busy ?? true;
+  const poses = engine.current?.poseOptions() ?? ['rest', 'idle', 'crouch'];
+  const holdable = [...carrying].filter(([, item]) => HOLDABLE.has(item.slot));
+  const tabs = mode === 'armour' ? SLOTS : GEAR_SLOTS;
+  const countOf = (name: string) => (isGearSlot(name)
+    ? catalogue.gearBySlot.get(name)?.length
+    : catalogue.bySlot.get(name as Slot)?.length) ?? 0;
 
   return (
     <div className="fw-kit" data-fashionworks-kitbasher="">
       <div className="fw-kit-bar" role="toolbar" aria-label="Slot, body, pose, surface, set and backdrop">
+        {/* Armour or gear: the one control that decides what the slot tabs
+            and the listing are about. Seven gear slots beside six armour ones
+            would not fit a toolbar that already wraps. */}
+        <span className="fw-kit-group" role="radiogroup" aria-label="What to browse">
+          {(['armour', 'gear'] as const).map((name) => (
+            <button
+              key={name}
+              type="button"
+              role="radio"
+              aria-checked={mode === name}
+              aria-pressed={mode === name}
+              onClick={() => { setMode(name); setSearch(''); }}
+            >
+              {name}
+            </button>
+          ))}
+        </span>
         {/* The slots live up here rather than in the sidebar: six chips took
             three rows of a narrow column, and that column's height is what the
-            armour listing needs. The toolbar already wraps. */}
+            listing needs. The toolbar already wraps. */}
         <span className="fw-kit-group fw-kit-slots" role="tablist" aria-label="Slot">
-          {SLOTS.map((name) => (
+          {tabs.map((name) => (
             <button
               key={name}
               type="button"
               role="tab"
               aria-selected={slot === name}
-              onClick={() => setSlot(name)}
+              onClick={() => {
+                if (isGearSlot(name)) {
+                  setGearSlot(name);
+                  setTarget(null);
+                } else {
+                  setArmourSlot(name);
+                }
+              }}
             >
-              {name} <span className="fw-kit-count">{catalogue.bySlot.get(name)?.length ?? 0}</span>
+              {name} <span className="fw-kit-count">{countOf(name)}</span>
             </button>
           ))}
         </span>
@@ -203,18 +276,47 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
         </span>
         <span className="fw-kit-group">
           <span className="fw-kit-label">pose</span>
-          {POSES.map((pose) => (
+          {poses.map((pose) => (
             <button
-              key={pose.label}
+              key={pose}
               type="button"
-              aria-pressed={state?.pose === pose.label}
+              aria-pressed={state?.pose === pose}
               disabled={busy}
               onClick={() => void engine.current?.setPose(pose)}
             >
-              {pose.label}
+              {pose}
             </button>
           ))}
         </span>
+        {holdable.length > 0 && (
+          <span className="fw-kit-group" role="radiogroup" aria-label="In hand">
+            <span className="fw-kit-label">hold</span>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={!state?.holding}
+              aria-pressed={!state?.holding}
+              disabled={busy}
+              onClick={() => void engine.current?.hold(null)}
+            >
+              nothing
+            </button>
+            {holdable.map(([port, item]) => (
+              <button
+                key={port}
+                type="button"
+                role="radio"
+                aria-checked={state?.holding === port}
+                aria-pressed={state?.holding === port}
+                disabled={busy}
+                title={`Hold the ${displayName(item)}, from the ${portLabel(state!.ports.get(port)!.port)} holster`}
+                onClick={() => void engine.current?.hold(port)}
+              >
+                {titleOf(item)}
+              </button>
+            ))}
+          </span>
+        )}
         <span className="fw-kit-group">
           <span className="fw-kit-label">surface</span>
           <button
@@ -236,7 +338,12 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
           >
             equip set
           </button>
-          <button type="button" disabled={wearing.size === 0} onClick={() => engine.current?.clear()}>
+          <button
+            type="button"
+            disabled={mode === 'armour' ? wearing.size === 0 : carrying.size === 0}
+            title={mode === 'armour' ? 'Take all armour off' : 'Take all gear off'}
+            onClick={() => (mode === 'armour' ? engine.current?.clear() : engine.current?.clearGear())}
+          >
             clear
           </button>
         </span>
@@ -259,11 +366,53 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
           <input
             className="fw-kit-search"
             type="search"
-            placeholder={`Search ${catalogue.items.length.toLocaleString()} pieces…`}
+            placeholder={mode === 'armour'
+              ? `Search ${catalogue.items.length.toLocaleString()} pieces…`
+              : `Search ${catalogue.gear.length.toLocaleString()} pieces of gear…`}
             autoComplete="off"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
+          {mode === 'gear' && (
+            // Which holsters this slot's gear can go in, and what is in them.
+            // Picking one targets it; the × takes its item off.
+            <div className="fw-kit-ports" role="radiogroup" aria-label="Holster">
+              <span className="fw-kit-ways-label">
+                {holsters.length
+                  ? `${holsters.length} holster${holsters.length === 1 ? '' : 's'}`
+                  : `nothing worn has a holster for a ${gearSlot}`}
+              </span>
+              {holsters.map(({ port, owner }) => {
+                const inside = carrying.get(port.name);
+                return (
+                  <span key={port.name} className="fw-kit-port">
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={target === port.name}
+                      aria-pressed={target === port.name}
+                      title={`${portLabel(port)}, on the ${owner}${inside ? `: ${displayName(inside)}` : ''}`}
+                      onClick={() => setTarget(target === port.name ? null : port.name)}
+                    >
+                      {portLabel(port)}
+                      <span className="fw-kit-item-meta">{inside ? titleOf(inside) : 'empty'}</span>
+                    </button>
+                    {inside && (
+                      <button
+                        type="button"
+                        className="fw-kit-port-remove"
+                        aria-label={`Take the ${displayName(inside)} off`}
+                        disabled={busy}
+                        onClick={() => engine.current?.uncarry(port.name)}
+                      >
+                        ×
+                      </button>
+                    )}
+                  </span>
+                );
+              })}
+            </div>
+          )}
           {onBody && familyOf(onBody).length > 1 && (
             <div className="fw-kit-ways" role="radiogroup" aria-label="Color">
               {/* Labelled, because a row of small squares at the foot of a long
@@ -283,7 +432,7 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
                     style={colour ? { background: colour } : undefined}
                     title={colourwayName(displayName(variant), titleOf(variant))}
                     disabled={busy}
-                    onClick={() => void engine.current?.equip(variant)}
+                    onClick={() => pick(variant, onBodyPort)}
                   />
                 );
               })}
@@ -294,12 +443,14 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
               <p className="fw-kit-empty">{search ? 'nothing matches' : 'nothing in this slot'}</p>
             )}
             {pool.slice(0, MAX_ROWS).map((item) => {
-              const family = familyOf(item);
-              const selected = Boolean(onBody && lineKey(onBody) === lineKey(item));
+              const line = familyOf(item);
+              const selected = mode === 'armour'
+                ? Boolean(onBody && lineKey(onBody) === lineKey(item))
+                : [...carrying.values()].some((c) => lineKey(c) === lineKey(item));
               const meta = [
                 item.manufacturer?.code ?? '',
-                item.weight_class ?? '',
-                family.length > 1 ? `${family.length} colors` : '',
+                item.weight_class ?? (item.attach?.size ? `size ${item.attach.size}` : ''),
+                line.length > 1 ? `${line.length} colors` : '',
               ].filter(Boolean).join(' · ');
               return (
                 <button
@@ -309,7 +460,7 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
                   aria-selected={selected}
                   className="fw-kit-item"
                   disabled={busy}
-                  onClick={() => void engine.current?.equip(item)}
+                  onClick={() => pick(item)}
                 >
                   <span className="fw-kit-item-name">{titleOf(item)}</span>
                   <span className="fw-kit-item-meta">{meta}</span>

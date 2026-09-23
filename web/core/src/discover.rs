@@ -22,10 +22,10 @@
 
 use std::collections::HashMap;
 
-/// Only materials under here can belong to a wearable. The archive holds
-/// 1.37 M entries, and a class-name stem is short enough to collide with an
-/// unrelated ship or prop material somewhere else.
-const SCOPE: &str = "objects/characters/";
+/// Only materials under these can belong to a wearable or a piece of gear.
+/// The archive holds 1.37 M entries, and a class-name stem is short enough to
+/// collide with an unrelated ship or prop material somewhere else.
+const SCOPES: [&str; 2] = ["objects/characters/", "objects/fps_weapons/"];
 
 #[derive(Debug, Default)]
 pub struct MtlIndex {
@@ -47,7 +47,7 @@ impl MtlIndex {
     pub fn build<'a>(paths: impl IntoIterator<Item = &'a str>) -> MtlIndex {
         let mut index = MtlIndex::default();
         for path in paths {
-            if !path.starts_with(SCOPE) || !path.ends_with(".mtl") {
+            if !SCOPES.iter().any(|scope| path.starts_with(scope)) || !path.ends_with(".mtl") {
                 continue;
             }
             let (dir, stem) = split(path);
@@ -131,6 +131,7 @@ mod tests {
             "objects/characters/human/male_v7/armor/cds/m_cds_heavy_armor_01_01.mtl",
             "objects/characters/human/male_v7/armor/qrt/m_qrt_utility_heavy_core_02_01.mtl",
             "objects/spaceships/ships/cds_combat_light_backpack_02.mtl",
+            "objects/fps_weapons/gadgets/crlf/medical_pen/gdgt_fps_crlf_medical_pen_mat.mtl",
         ])
     }
 
@@ -152,7 +153,7 @@ mod tests {
     #[test]
     fn nothing_outside_the_characters_tree_is_a_candidate() {
         // A ship material sharing the stem would otherwise be a match.
-        assert!(index().by_stem.values().all(|p| p.starts_with(SCOPE)));
+        assert!(index().by_stem.values().all(|p| SCOPES.iter().any(|s| p.starts_with(s))));
     }
 
     #[test]
@@ -166,6 +167,18 @@ mod tests {
             index.by_mesh("objects/characters/human/male_v7/armor/cds/m_cds_heavy_armor_01_arms.skin", None),
             Some("objects/characters/human/male_v7/armor/cds/m_cds_heavy_armor_01_01.mtl".into()),
             "lowest suffix first",
+        );
+    }
+
+    #[test]
+    fn gear_pairs_by_what_its_mesh_names() {
+        // A medpen's definition names no material; its mesh does.
+        assert_eq!(
+            index().by_mesh(
+                "objects/fps_weapons/gadgets/crlf/medical_pen/gdgt_fps_crlf_medical_pen_parts.skin",
+                Some("gdgt_fps_crlf_medical_pen_mat"),
+            ),
+            Some("objects/fps_weapons/gadgets/crlf/medical_pen/gdgt_fps_crlf_medical_pen_mat.mtl".into()),
         );
     }
 

@@ -167,6 +167,13 @@ describe('product lines', () => {
     ])).toBe('Defiance Core');
   });
 
+  it('titles a gear row with the words all its members share', () => {
+    expect(lineTitle([
+      item({ id: 'a', name: 'P4-AR Rifle', slot: 'primary' }),
+      item({ id: 'b', name: 'P4-AR "Blacklist" Rifle', slot: 'primary' }),
+    ])).toBe('P4-AR Rifle');
+  });
+
   it('shows the plainest member on the row', () => {
     const line = [
       item({ id: 'ed', name: 'ADP Core Crusader Edition' }),

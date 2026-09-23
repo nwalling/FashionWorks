@@ -83,6 +83,35 @@ pub fn armor_records(db: &Database) -> Vec<ArmorRecord> {
     out
 }
 
+/// Every gear record -- weapons, knives, grenades, magazines, pens, gadgets --
+/// in the database. Scoped by path as the Python's DCB export is; which of
+/// them is gear the builder decides from the attach type.
+pub fn gear_records(db: &Database) -> Vec<ArmorRecord> {
+    let mut out = Vec::new();
+    for record in db.records_by_type_name(ENTITY_CLASS) {
+        let source = db.resolve_string(record.file_name_offset);
+        if !super::gear::in_scope(source) {
+            continue;
+        }
+        let mut buf = Vec::new();
+        if export::write_json_compact(db, record, &mut buf).is_err() {
+            continue;
+        }
+        let Ok(value) = serde_json::from_slice::<Value>(&buf) else {
+            continue;
+        };
+        let class_name = value
+            .get("_RecordName_")
+            .and_then(Value::as_str)
+            .map(super::class_name_of)
+            .unwrap_or_default()
+            .to_string();
+        let attach_type = super::raw_attach_type(&value).unwrap_or_default().to_string();
+        out.push(ArmorRecord { class_name, attach_type, source_path: source.to_string(), value });
+    }
+    out
+}
+
 /// Every record of one struct type, as JSON, keyed by lowercased name.
 ///
 /// Lowercased because a reference and the record it points at do not always

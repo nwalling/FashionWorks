@@ -15,6 +15,8 @@
 import {
   Bone,
   Box3,
+  Group,
+  Matrix4,
   type Material,
   Mesh,
   Object3D,
@@ -40,13 +42,23 @@ import {
   type CatalogueItem,
   type Slot,
 } from '../archive/catalogue';
+import type { GearSlot } from '../archive/catalogue';
 import type {
   AttachmentOverride,
+  GearPayload,
   MaterialPayload,
   MeshPayload,
   PropPayload,
 } from '../worker/archive.worker';
 import { buildGeometry } from './geometry';
+import {
+  describePorts,
+  portFor,
+  portLabel,
+  resolvePorts,
+  revalidate,
+  type OwnedPort,
+} from '../gear/ports';
 import { meshTexture, plainMaterial, surfaceMaterial, texturesWanted } from './materials';
 import { applyClip, bonePosition, boneRotation, buildRig, mountMatrix, type BuiltRig } from './rig';
 import { compositeSurfaces, dataTexture, type CompositeGeometry, type PaletteEntry } from './surface';
@@ -175,6 +187,54 @@ export const POSES: readonly Pose[] = [
   },
 ];
 
+/** One clip, by database path under the body's animation root. */
+interface ClipSpec {
+  readonly db: string;
+  readonly clip: string;
+}
+
+const NW_IDLE: ClipSpec = { db: 'weapons/no_weapon/locomotion/stand.dba', clip: 'nw_stand_idle_turn360_planted' };
+const NW_CROUCH: ClipSpec = { db: 'weapons/no_weapon/locomotion/crouch.dba', clip: 'nw_neutral_crouch_idle' };
+
+/** Poses with something in the hand, by the animation set that holds it.
+ *
+ * Every clip here was dumped against our armature before it was used: the
+ * stocked raised idle resolves 148 bones with none unresolved and animates
+ * `RightWeaponBone` itself, which is the bone the game hangs the held weapon
+ * on -- so the gun is in the hands without any IK of ours. A list is applied
+ * in order over the rest pose: the pistol set has only an **upper-body** idle
+ * (89 bones, hips untouched), so it rides on the unarmed standing idle for the
+ * legs, as the game layers it. */
+export const WEAPON_POSES: Record<string, Record<string, readonly ClipSpec[]>> = {
+  stocked: {
+    ready: [{ db: 'weapons/stocked/locomotion/stand.dba', clip: 'stocked_alerted_stand_idle_turn360_planted' }],
+    raised: [{ db: 'weapons/stocked/locomotion/stand.dba', clip: 'stocked_alerted_stand_idle_turn360_raised' }],
+    crouch: [{ db: 'weapons/stocked/locomotion/crouch.dba', clip: 'stocked_alerted_crouch_idle_01' }],
+  },
+  pistol: {
+    raised: [NW_IDLE, { db: 'weapons/pistol/locomotion/stand.dba', clip: 'pistol_alerted_stand_idle_upperbody_01' }],
+    crouch: [{ db: 'weapons/pistol/locomotion/crouch.dba', clip: 'pistol_alerted_crouch_idle_iron_01' }],
+  },
+  knife: {
+    raised: [NW_IDLE, { db: 'weapons/knife.dba', clip: 'knife_alerted_stand_idle_upperbody_01' }],
+    crouch: [NW_CROUCH, { db: 'weapons/knife.dba', clip: 'knife_alerted_crouch_idle_upperbody_01' }],
+  },
+};
+
+/** The unarmed poses, as clip lists. */
+const UNARMED_POSES: Record<string, readonly ClipSpec[]> = {
+  rest: [],
+  idle: [NW_IDLE],
+  crouch: [NW_CROUCH],
+};
+
+/** The animation directory for each body. */
+const BODY_ANIMATIONS: Record<Body, string> = { male: 'male_v7', female: 'female_v2' };
+
+/** Gear the hand can hold. Grenades, magazines and pens are thrown, loaded or
+ * injected in the game, never carried in the hand at rest. */
+const HOLDABLE: ReadonlySet<string> = new Set(['primary', 'sidearm', 'knife', 'gadget']);
+
 /** What the kitbasher needs from the view. `Viewer` builds and themes it. */
 export interface KitbasherScene {
   readonly scene: Scene;
@@ -199,6 +259,12 @@ export interface KitbasherState {
   /** Composited swatch colours, by item id, for the pieces whose colour is not
    * in a tint palette. Filled in lazily; absent means "not worked out yet". */
   readonly swatches: ReadonlyMap<string, string>;
+  /** Gear on the body, by the port that holds it. */
+  readonly carrying: ReadonlyMap<string, CatalogueItem>;
+  /** Every holster the armour on the body provides, by port name. */
+  readonly ports: ReadonlyMap<string, OwnedPort>;
+  /** The port whose item is in the hand, or null. */
+  readonly holding: string | null;
 }
 
 /** A tint palette from the catalogue.
@@ -228,17 +294,48 @@ export function paletteOf(item: CatalogueItem): PaletteEntry[] {
  * stable across game builds because they are the DataCore's own. Six GUIDs
  * come to about 220 characters, which is fine for a fragment.
  */
-export function encodeLoadout(wearing: ReadonlyMap<Slot, CatalogueItem>): string {
-  return SLOTS.filter((s) => wearing.has(s)).map((s) => wearing.get(s)!.id).join(',');
+export function encodeLoadout(
+  wearing: ReadonlyMap<Slot, CatalogueItem>,
+  carrying: ReadonlyMap<string, CatalogueItem> = new Map(),
+  holding: string | null = null,
+): string {
+  // Version 2 appends `;port=id` per piece of gear and `;hold=port`. The first
+  // segment is exactly version 1, so an old link still decodes, and the
+  // string stays opaque to the host.
+  const parts = [SLOTS.filter((s) => wearing.has(s)).map((s) => wearing.get(s)!.id).join(',')];
+  for (const [port, item] of carrying) parts.push(`${port}=${item.id}`);
+  if (holding) parts.push(`hold=${holding}`);
+  return parts.join(';');
 }
 
 export function decodeLoadout(encoded: string, catalogue: Catalogue): CatalogueItem[] {
   if (!encoded) return [];
   const byId = new Map(catalogue.items.map((i) => [i.id, i]));
-  return encoded
+  return (encoded.split(';')[0] ?? '')
     .split(',')
     .map((id) => byId.get(id.trim()))
     .filter((item): item is CatalogueItem => Boolean(item));
+}
+
+/** The gear half of a version-2 loadout: what hangs where, and what is held. */
+export function decodeGear(
+  encoded: string,
+  catalogue: Catalogue,
+): { carrying: Array<{ port: string; item: CatalogueItem }>; holding: string | null } {
+  const byId = new Map(catalogue.gear.map((i) => [i.id, i]));
+  const carrying: Array<{ port: string; item: CatalogueItem }> = [];
+  let holding: string | null = null;
+  for (const part of encoded.split(';').slice(1)) {
+    const [key, value] = part.split('=');
+    if (!key || !value) continue;
+    if (key === 'hold') {
+      holding = value;
+      continue;
+    }
+    const item = byId.get(value.trim());
+    if (item) carrying.push({ port: key.trim(), item });
+  }
+  return { carrying, holding };
 }
 
 /** Equip a whole set around an anchor piece: which item, per empty slot.
@@ -434,6 +531,12 @@ export class Kitbasher {
   /** Materials found for items whose record names none, by item id. */
   private readonly discovered = new Map<string, string | null>();
 
+  /** Gear on the body, by the port that holds it. */
+  private readonly carried = new Map<string, Carried>();
+
+  /** The port whose item is in the hand. */
+  private holdingPort: string | null = null;
+
   /** Each attachment point as the rig built it, to restore when the piece
    * that moved it comes off. */
   private attachmentDefaults = new Map<string, { parent: Object3D; position: Vector3; quaternion: Quaternion }>();
@@ -460,6 +563,9 @@ export class Kitbasher {
       body,
       catalogue,
       swatches: new Map(),
+      carrying: new Map(),
+      ports: new Map(),
+      holding: null,
     };
   }
 
@@ -616,7 +722,13 @@ export class Kitbasher {
 
   private publish(patch: Partial<KitbasherState>): void {
     if (this.disposed) return;
-    this.state = { ...this.state, ...patch, wearing: new Map(this.wearing) };
+    this.state = {
+      ...this.state,
+      ...patch,
+      wearing: new Map(this.wearing),
+      carrying: new Map([...this.carried].map(([port, c]) => [port, c.item])),
+      holding: this.holdingPort,
+    };
     for (const listener of this.listeners) listener(this.state);
   }
 
@@ -662,6 +774,12 @@ export class Kitbasher {
     this.publish({ busy: true, status: `switching to the ${body} body…` });
 
     const worn = [...this.wearing.values()].map((item) => item.id);
+    // Gear is the same item on either body; it comes back into the same ports.
+    const gear = [...this.carried].map(([port, c]) => ({ port, id: c.item.id }));
+    const held = this.holdingPort;
+    for (const carried of this.carried.values()) carried.instance.removeFromParent();
+    this.carried.clear();
+    this.holdingPort = null;
     this.clear();
     // The cache is keyed by body, so nothing has to be thrown away; the old
     // body's meshes stay loaded and switching back is instant.
@@ -685,7 +803,14 @@ export class Kitbasher {
       await this.equip(item);
       restored += 1;
     }
-    await this.setPose(POSES.find((p) => p.label === this.state.pose) ?? POSES[0]!);
+    const gearById = new Map(this.state.catalogue.gear.map((i) => [i.id, i]));
+    for (const { port, id } of gear) {
+      const item = gearById.get(id);
+      if (item) await this.carry(item, port);
+    }
+    if (held && this.carried.has(held)) this.holdingPort = held;
+    for (const carried of this.carried.values()) this.mountCarried(carried);
+    await this.setPose(this.poseOptions().includes(this.state.pose) ? this.state.pose : 'rest');
 
     this.publish({
       busy: false,
@@ -771,7 +896,13 @@ export class Kitbasher {
       }
     }
 
-    const loaded = measure(key, objects, materials, payloads.flatMap((p) => p.overrides ?? []));
+    const loaded = measure(
+      key,
+      objects,
+      materials,
+      payloads.flatMap((p) => p.overrides ?? []),
+      socket ? (payloads[0] as PropPayload | undefined)?.helperTransforms : undefined,
+    );
     this.cache.set(key, loaded);
     this.evict();
     return loaded;
@@ -781,6 +912,10 @@ export class Kitbasher {
    * one that is on the body. */
   private evict(): void {
     const worn = new Set(this.equipped.values());
+    for (const carried of this.carried.values()) {
+      worn.add(carried.template);
+      if (carried.magazine) worn.add(carried.magazine.template);
+    }
     let total = 0;
     for (const loaded of this.cache.values()) total += loaded.bytes;
     for (const [key, loaded] of this.cache) {
@@ -875,6 +1010,7 @@ export class Kitbasher {
     this.equipped.set(slot, loaded);
     this.wearing.set(slot, item);
     this.applyOverrides();
+    const gear = this.revalidateGear();
     // The piece this replaced may be evictable now.
     this.evict();
 
@@ -883,7 +1019,17 @@ export class Kitbasher {
       0,
     );
     this.frameLoadout();
-    this.publish({ busy: false, status: `${name} · ${triangles.toLocaleString()} triangles` });
+    const status = gear.removed.length
+      ? `${name}: ${describePorts(gear.ports)}; ${gear.removed.join(', ')} came off`
+      : `${name} · ${triangles.toLocaleString()} triangles`;
+    this.publish({ busy: false, ports: gear.ports, status });
+    // The held item came off with its holster: nothing is in the hand, so a
+    // weapon stance would be holding air. The removal is the news, so it keeps
+    // the status line.
+    if (gear.removed.length && !this.holdingPort && ['ready', 'raised'].includes(this.state.pose)) {
+      await this.setPose('idle');
+      this.publish({ status });
+    }
   }
 
   unequip(slot: Slot): void {
@@ -891,7 +1037,13 @@ export class Kitbasher {
     this.equipped.delete(slot);
     this.wearing.delete(slot);
     this.applyOverrides();
-    this.publish({ status: `${slot} removed` });
+    const gear = this.revalidateGear();
+    this.publish({
+      ports: gear.ports,
+      status: gear.removed.length
+        ? `${slot} removed; ${gear.removed.join(', ')} came off with it`
+        : `${slot} removed`,
+    });
   }
 
   clear(): void {
@@ -899,7 +1051,8 @@ export class Kitbasher {
     this.equipped.clear();
     this.wearing.clear();
     this.applyOverrides();
-    this.publish({ status: 'cleared' });
+    const gear = this.revalidateGear();
+    this.publish({ ports: gear.ports, status: 'cleared' });
   }
 
   /** Fill the empty slots to match the piece on the torso, or whatever is on.
@@ -946,23 +1099,337 @@ export class Kitbasher {
     return plan.picks.length;
   }
 
-  async setPose(pose: Pose): Promise<void> {
+  /** The poses on offer: unarmed ones, or those of the held item's set. */
+  poseOptions(): string[] {
+    const held = this.holdingPort ? this.carried.get(this.holdingPort) : null;
+    const set = held?.item.anim_set ? WEAPON_POSES[held.item.anim_set] : undefined;
+    if (!set) return Object.keys(UNARMED_POSES);
+    return ['rest', ...Object.keys(set)];
+  }
+
+  private clipsFor(label: string): readonly ClipSpec[] | null {
+    const held = this.holdingPort ? this.carried.get(this.holdingPort) : null;
+    const set = held?.item.anim_set ? WEAPON_POSES[held.item.anim_set] : undefined;
+    if (label === 'rest') return [];
+    if (set) return set[label] ?? set.raised ?? null;
+    return UNARMED_POSES[label] ?? null;
+  }
+
+  /** Retarget one clip, from this body's own animations where it has them.
+   *
+   * The two skeletons carry the same 220 bone names, so a clip authored for
+   * one retargets onto the other; the female rig ships the stocked and pistol
+   * sets, and only an upper-body knife idle, so a clip missing there is taken
+   * from the male set rather than skipped. */
+  private async poseClip(spec: ClipSpec) {
+    const own = `Animations/Characters/Human/${BODY_ANIMATIONS[this.state.body]}/${spec.db}`;
+    try {
+      return await this.client.pose(own, spec.clip);
+    } catch (error) {
+      if (this.state.body === 'male') throw error;
+      return this.client.pose(`Animations/Characters/Human/${BODY_ANIMATIONS.male}/${spec.db}`, spec.clip);
+    }
+  }
+
+  async setPose(pose: Pose | string): Promise<void> {
     if (!this.rig) await this.init();
     if (this.disposed || !this.rig) return;
-    if (!pose.dba || !pose.clip) {
-      for (const bone of this.rig.bones) bone.quaternion.copy(this.restRotations.get(bone.name)!);
-      this.rig.root.updateMatrixWorld(true);
-      this.rig.skeleton.update();
-      this.publish({ pose: pose.label, status: 'rest pose' });
+    const label = typeof pose === 'string' ? pose : pose.label;
+    const clips = this.clipsFor(label);
+    if (clips === null) {
+      this.publish({ status: `no ${label} pose for what is in the hand` });
       return;
     }
-    const posed = await this.client.pose(pose.dba, pose.clip);
+    // From rest every time, so a layered clip never inherits the last pose's
+    // legs, and a bone one clip leaves alone is not left where another put it.
+    const rig = this.rig;
+    const reset = () => {
+      for (const bone of rig.bones) bone.quaternion.copy(this.restRotations.get(bone.name)!);
+    };
+    const posed = [];
+    try {
+      for (const spec of clips) posed.push(await this.poseClip(spec));
+    } catch (error) {
+      this.publish({ status: `${label}: ${error instanceof Error ? error.message : String(error)}` });
+      return;
+    }
     if (this.disposed) return;
-    applyClip(this.rig, posed.pose.locals);
+    reset();
+    for (const clip of posed) applyClip(rig, clip.pose.locals);
+    rig.root.updateMatrixWorld(true);
+    rig.skeleton.update();
+    const last = posed[posed.length - 1];
     this.publish({
-      pose: pose.label,
-      status: `${pose.label}: ${posed.pose.animated} of ${posed.pose.clipBones} clip bones`,
+      pose: label,
+      status: last
+        ? `${label}: ${last.pose.animated} of ${last.pose.clipBones} clip bones`
+        : 'rest pose',
     });
+  }
+
+  // ---------------------------------------------------------------- gear
+
+  /** Load a gear item's parts, composited, as a template to clone from.
+   *
+   * One template per item, whatever port it goes in: four identical grenades
+   * share their geometry and surfaces and differ only in where they hang. */
+  private async loadGear(item: CatalogueItem): Promise<Loaded> {
+    const key = `gear:${item.id}:${this.state.wear}`;
+    const hit = this.cache.get(key);
+    if (hit) {
+      this.cache.delete(key);
+      this.cache.set(key, hit);
+      return hit;
+    }
+    const source = item.geometry[0]?.source;
+    if (!source) throw new Error('no geometry');
+    const payload: GearPayload = (await this.client.gear(source, '')).gear;
+    const base = payload.parts[0]?.material?.toLowerCase() ?? null;
+    const group = new Group();
+    group.name = displayName(item);
+    const all: Material[] = [];
+    const empty: MaterialPayload = { submaterials: [], library: {} };
+    const fetchTexture = async (path: string, maxSize: number) =>
+      (await this.client.texture(path, maxSize)).texture;
+
+    for (const part of payload.parts) {
+      // The record's colourway material replaces the definition's own on the
+      // parts that use it; a chambered round keeps its ammunition material.
+      let mtl = part.material;
+      if (item.materials[0] && (!mtl || mtl.toLowerCase() === base)) mtl = item.materials[0];
+      if (!mtl) mtl = await this.materialPathFor(item, part.mesh.materialFile);
+      let material = empty;
+      if (mtl) {
+        try {
+          material = (await this.client.material(mtl)).material;
+        } catch {
+          material = empty;
+        }
+      }
+      const composited = await compositeSurfaces(material, paletteOf(item), fetchTexture, {
+        wear: this.state.wear,
+        // A rifle is a torso's length and earns the full bake; a magazine, a
+        // pen or a grenade is a few centimetres, and eight of them on a belt
+        // at 1024 each would cost more than the armour they hang on.
+        size: item.slot === 'primary' || item.slot === 'sidearm' ? 1024 : 512,
+        geometry: [{ uvs: part.mesh.uvs, indices: part.mesh.indices, submeshes: part.mesh.submeshes }],
+        detail: true,
+      });
+      const byPath = new Map<string, Texture>();
+      for (const sub of material.submaterials) {
+        for (const want of texturesWanted(sub)) {
+          if (byPath.has(want.path)) continue;
+          const texture = (await this.client.texture(want.path, 1024)).texture;
+          if (texture) {
+            byPath.set(
+              want.path,
+              meshTexture(dataTexture(texture.rgba, texture.width, texture.height, want.srgb), want.srgb),
+            );
+          }
+        }
+      }
+      const count = Math.max(1, material.submaterials.length);
+      const materials: Material[] = material.submaterials.length
+        ? material.submaterials.map((sub) => (composited.surfaces.has(sub.name)
+          ? surfaceMaterial(sub, composited, { byPath })
+          : plainMaterial(sub, { byPath })))
+        : [plainMaterial({
+          name: '', shader: 'Illum', tintable: false, textures: {}, layers: [],
+          glow: 0, opacity: 1, alphaTest: 0, shininess: 0.45,
+        }, { byPath })];
+      const mesh = new Mesh(buildGeometry(part.mesh, count).geometry, materials);
+      mesh.name = part.name;
+      mesh.frustumCulled = false;
+      group.add(mesh);
+      all.push(...materials);
+    }
+    const loaded = measure(key, [group], all, [], payload.helpers);
+    this.cache.set(key, loaded);
+    this.evict();
+    return loaded;
+  }
+
+  /** A helper's transform on an item, in the scene's frame. */
+  private static helperMatrix(helpers: Record<string, Float32Array> | undefined, name: string | null) {
+    if (!helpers || !name) return null;
+    const key = Object.keys(helpers).find((k) => k.toLowerCase() === name.toLowerCase());
+    return key ? mountMatrix(helpers[key]!) : null;
+  }
+
+  /** An item's matrix when its `locator` is put on a host: the locator's
+   * inverse. Identity when the item does not carry it -- the origin, visibly
+   * wrong, rather than a mirrored guess. */
+  private static mountFor(helpers: Record<string, Float32Array> | undefined, locator: string | null): Matrix4 {
+    return Kitbasher.helperMatrix(helpers, locator)?.invert() ?? new Matrix4();
+  }
+
+  /** What a port's item hangs from: a node on the backpack, when the pack
+   * owns the port, else the rig's bone of that name. */
+  private hostFor(owned: OwnedPort): Object3D | null {
+    const helper = owned.port.helper;
+    if (!helper || !this.rig) return null;
+    const piece = this.equipped.get(owned.owner);
+    if (piece?.helpers && owned.item.bind_mode === 'socket') {
+      const key = Object.keys(piece.helpers).find((k) => k.toLowerCase() === helper.toLowerCase());
+      const node = piece.objects[0];
+      if (key && node) {
+        let host = piece.hosts.get(key);
+        if (!host) {
+          host = new Object3D();
+          host.name = key;
+          host.matrixAutoUpdate = false;
+          host.matrix.copy(mountMatrix(piece.helpers[key]!));
+          node.add(host);
+          piece.hosts.set(key, host);
+        }
+        return host;
+      }
+    }
+    return this.rig.byName.get(helper) ?? null;
+  }
+
+  private mountCarried(carried: Carried): void {
+    carried.instance.removeFromParent();
+    carried.instance.matrixAutoUpdate = false;
+    if (this.holdingPort === carried.port.port.name) {
+      // In the hand: the item's own origin on the hand bone, as the body's
+      // `weapon_attach_hand_right` port declares -- it names no item locator.
+      carried.instance.matrix.identity();
+      (this.rig?.byName.get('RightWeaponBone') ?? this.view.scene).add(carried.instance);
+      return;
+    }
+    const host = this.hostFor(carried.port);
+    carried.instance.matrix.copy(Kitbasher.mountFor(carried.template.helpers, carried.port.port.offset));
+    (host ?? this.view.scene).add(carried.instance);
+  }
+
+  /** The magazine a weapon ships with, seated on the weapon's own port. */
+  private async attachMagazine(carried: Carried): Promise<void> {
+    const entry = carried.item.default_children?.find((d) => d.port.toLowerCase() === 'magazine_attach');
+    const magazine = entry ? this.catalogue.byClass.get(entry.class_name.toLowerCase()) : undefined;
+    if (!magazine) return;
+    let template: Loaded;
+    try {
+      template = await this.loadGear(magazine);
+    } catch {
+      return;
+    }
+    const port = carried.item.ports?.find((p) => p.name.toLowerCase() === 'magazine_attach');
+    const at = Kitbasher.helperMatrix(carried.template.helpers, port?.helper ?? 'magAttach') ?? new Matrix4();
+    const instance = template.objects[0]!.clone();
+    instance.matrixAutoUpdate = false;
+    instance.matrix.copy(at).multiply(Kitbasher.mountFor(template.helpers, port?.offset ?? null));
+    carried.instance.add(instance);
+    carried.magazine = { item: magazine, template };
+  }
+
+  /** Put a piece of gear on the body: in `port` if it will take it, else the
+   * first free holster that will. Says why when nothing will. */
+  async carry(item: CatalogueItem, port?: string | null): Promise<boolean> {
+    if (!this.rig) await this.init();
+    if (this.disposed || !this.rig) return false;
+    const name = displayName(item);
+    const ports = resolvePorts(this.wearing);
+    const occupied = new Set(this.carried.keys());
+    // Choosing an occupied port swaps what is in it.
+    if (port) occupied.delete(port);
+    const choice = portFor(item, ports, occupied, port);
+    if ('reason' in choice) {
+      this.publish({ ports, status: `${name}: ${choice.reason}` });
+      return false;
+    }
+    const owned = choice.port;
+    this.publish({ busy: true, status: `${name}…` });
+    let template: Loaded;
+    try {
+      template = await this.loadGear(item);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      // Four gear records point at files this build of the game does not
+      // ship; say that rather than print a path.
+      const why = message.startsWith('not in this archive')
+        ? 'its model is not in this build of the game'
+        : message;
+      this.publish({ busy: false, status: `${name}: ${why}` });
+      return false;
+    }
+    if (this.disposed) return false;
+    const previous = this.carried.get(owned.port.name);
+    if (previous) previous.instance.removeFromParent();
+    const carried: Carried = {
+      item, template, instance: template.objects[0]!.clone(), magazine: null, port: owned,
+    };
+    this.carried.set(owned.port.name, carried);
+    await this.attachMagazine(carried);
+    this.mountCarried(carried);
+    this.evict();
+    this.frameLoadout();
+    this.publish({
+      busy: false,
+      ports,
+      status: `${name} · ${portLabel(owned.port)}${owned.owner === 'backpack' ? ' on the backpack' : ''}`,
+    });
+    return true;
+  }
+
+  /** Take a piece of gear off. */
+  uncarry(port: string): void {
+    const carried = this.carried.get(port);
+    if (!carried) return;
+    carried.instance.removeFromParent();
+    this.carried.delete(port);
+    const wasHeld = this.holdingPort === port;
+    if (wasHeld) this.holdingPort = null;
+    this.evict();
+    this.publish({ status: `${displayName(carried.item)} put away` });
+    if (wasHeld) void this.setPose('idle');
+  }
+
+  /** Take everything off the belt and the back. */
+  clearGear(): void {
+    for (const port of [...this.carried.keys()]) this.uncarry(port);
+  }
+
+  /** Hold a carried item, or nothing. The item leaves its holster for the
+   * hand, as in the game, and the pose follows its animation set. */
+  async hold(port: string | null): Promise<void> {
+    const carried = port ? this.carried.get(port) : undefined;
+    if (port && (!carried || !HOLDABLE.has(carried.item.slot as GearSlot))) {
+      this.publish({ status: carried ? `${displayName(carried.item)} is not held in the hand` : 'nothing there to hold' });
+      return;
+    }
+    const previous = this.holdingPort ? this.carried.get(this.holdingPort) : undefined;
+    this.holdingPort = carried ? port : null;
+    if (previous) this.mountCarried(previous);
+    if (carried) this.mountCarried(carried);
+    const set = carried?.item.anim_set ? WEAPON_POSES[carried.item.anim_set] : undefined;
+    if (carried && !set) {
+      this.publish({ status: `${displayName(carried.item)} in hand; there is no stance for it yet` });
+      return;
+    }
+    await this.setPose(carried ? 'raised' : 'idle');
+  }
+
+  /** Re-seat carried gear after the armour changed, and say what came off.
+   *
+   * A heavy core swapped for a light one takes `wep_stocked_2`, two grenade
+   * points and four magazine points with it; whatever hung there comes off,
+   * and the status names it -- the same rule equip-set follows. Gear whose
+   * port merely changed owner (a backpack went on, and now holds the rifles)
+   * moves with it. */
+  private revalidateGear(): { removed: string[]; ports: Map<string, OwnedPort> } {
+    const ports = resolvePorts(this.wearing);
+    const { kept, removed } = revalidate(this.carried, ports);
+    for (const { port, carried } of removed) {
+      carried.instance.removeFromParent();
+      this.carried.delete(port);
+      if (this.holdingPort === port) this.holdingPort = null;
+    }
+    for (const { carried, owned } of kept) {
+      carried.port = owned;
+      this.mountCarried(carried);
+    }
+    return { removed: tally(removed.map(({ carried }) => displayName(carried.item))), ports };
   }
 
   /** Worn, or as it left the factory. Re-composites everything on the body. */
@@ -974,13 +1441,17 @@ export class Kitbasher {
   }
 
   loadout(): string {
-    return encodeLoadout(this.wearing);
+    const carrying = new Map([...this.carried].map(([port, c]) => [port, c.item]));
+    return encodeLoadout(this.wearing, carrying, this.holdingPort);
   }
 
   async restore(encoded: string): Promise<number> {
     const items = decodeLoadout(encoded, this.catalogue);
     for (const item of items) await this.equip(item);
-    return items.length;
+    const gear = decodeGear(encoded, this.catalogue);
+    for (const { port, item } of gear.carrying) await this.carry(item, port);
+    if (gear.holding && this.carried.has(gear.holding)) await this.hold(gear.holding);
+    return items.length + gear.carrying.length;
   }
 
   /** Point the camera at whatever is on the body, filling the panel.
@@ -1006,6 +1477,10 @@ export class Kitbasher {
         bounds.expandByObject(object);
         any = true;
       }
+    }
+    for (const carried of this.carried.values()) {
+      bounds.expandByObject(carried.instance);
+      any = true;
     }
     if (!any) return;
     const { camera, controls } = this.view;
@@ -1040,6 +1515,8 @@ export class Kitbasher {
 
   dispose(): void {
     this.disposed = true;
+    for (const carried of this.carried.values()) carried.instance.removeFromParent();
+    this.carried.clear();
     this.clear();
     for (const loaded of this.cache.values()) loaded.dispose();
     this.cache.clear();
@@ -1049,6 +1526,13 @@ export class Kitbasher {
   }
 }
 
+/** Names with repeats counted: four magazines read "4 × P4-AR Magazine". */
+function tally(names: readonly string[]): string[] {
+  const counts = new Map<string, number>();
+  for (const name of names) counts.set(name, (counts.get(name) ?? 0) + 1);
+  return [...counts].map(([name, n]) => (n > 1 ? `${n} × ${name}` : name));
+}
+
 /** A loaded piece: what goes in the scene, what it moves, and what it costs. */
 interface Loaded {
   readonly key: string;
@@ -1056,7 +1540,22 @@ interface Loaded {
   readonly overrides: AttachmentOverride[];
   /** Estimated bytes held, GPU and CPU together. */
   readonly bytes: number;
+  /** A rigid piece's helper nodes, in its own space: a backpack's holsters,
+   * a rifle's `magAttach`. */
+  readonly helpers?: Record<string, Float32Array>;
+  /** Hosts made for those helpers, so a holster is made once. */
+  readonly hosts: Map<string, Object3D>;
   dispose(): void;
+}
+
+/** A piece of gear on the body. */
+interface Carried {
+  readonly item: CatalogueItem;
+  /** The loaded item this is a clone of: geometry and surfaces are shared. */
+  readonly template: Loaded;
+  readonly instance: Object3D;
+  magazine: { item: CatalogueItem; template: Loaded } | null;
+  port: OwnedPort;
 }
 
 /** Everything a loaded piece owns, measured, with a way to free it. */
@@ -1065,6 +1564,7 @@ function measure(
   objects: Object3D[],
   materials: Material[],
   overrides: AttachmentOverride[],
+  helpers?: Record<string, Float32Array>,
 ): Loaded {
   const textures = new Set<Texture>();
   for (const material of materials) {
@@ -1087,18 +1587,22 @@ function measure(
     bytes += texels * 4 * 1.34 + (image.data?.length ?? 0);
   }
   const geometries = new Set<Mesh['geometry']>();
-  for (const object of objects) {
-    const geometry = (object as Mesh).geometry;
-    if (!geometry) continue;
-    geometries.add(geometry);
-    for (const attribute of Object.values(geometry.attributes)) bytes += attribute.array.byteLength * 2;
-    bytes += (geometry.index?.array.byteLength ?? 0) * 2;
+  for (const root of objects) {
+    root.traverse((object) => {
+      const geometry = (object as Mesh).geometry;
+      if (!geometry || geometries.has(geometry)) return;
+      geometries.add(geometry);
+      for (const attribute of Object.values(geometry.attributes)) bytes += attribute.array.byteLength * 2;
+      bytes += (geometry.index?.array.byteLength ?? 0) * 2;
+    });
   }
   return {
     key,
     objects,
     overrides,
     bytes,
+    helpers,
+    hosts: new Map(),
     dispose() {
       for (const texture of textures) texture.dispose();
       for (const material of materials) material.dispose();

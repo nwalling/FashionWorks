@@ -248,7 +248,15 @@ export function plainMaterial(sub: Submaterial, textures: SurfaceTextures): Mate
     });
   }
 
-  const screen = ['monitor', 'uimesh', 'displayscreen', 'hologram', 'uiplane'].some((s) => shader.includes(s));
+  // A HUD plane or hologram shows UI the game renders at runtime -- the
+  // texture is `$RenderToTexture`, nothing in the archive -- and in the shop it
+  // is transparent until powered. Drawn, it was a flat grey card floating
+  // beside a launcher's sight.
+  if (['uiplane', 'hologram'].some((s) => shader.includes(s))) {
+    return new MeshBasicMaterial({ visible: false, name: sub.name });
+  }
+
+  const screen = ['monitor', 'uimesh', 'displayscreen'].some((s) => shader.includes(s));
   if (screen) {
     // A switched-off display with a faint glow; the UI it shows in game is
     // rendered at runtime and is not in the archive to draw.

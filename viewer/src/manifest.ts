@@ -4,7 +4,7 @@ import { z } from 'zod';
  * Mirror of `extract/sc_extract/manifest.py`. Bump SCHEMA_VERSION on both
  * sides together; the loader refuses a manifest it was not written for.
  */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export const SLOTS = ['helmet', 'torso', 'arms', 'legs', 'backpack', 'undersuit'] as const;
 export type Slot = (typeof SLOTS)[number];
@@ -42,6 +42,17 @@ const assetsSchema = z.object({
   thumb: z.string().nullable().default(null),
 });
 
+/** An item port that hangs something off a bone: a holster. */
+const portSchema = z.object({
+  name: z.string(),
+  types: z.array(z.object({ type: z.string(), subtypes: z.array(z.string()).default([]) })).default([]),
+  min_size: z.number().default(0),
+  max_size: z.number().default(0),
+  helper: z.string().nullable().default(null),
+  offset: z.string().nullable().default(null),
+  select_tag: z.string().nullable().default(null),
+});
+
 export const itemSchema = z.object({
   id: z.string(),
   class_name: z.string(),
@@ -71,7 +82,28 @@ export const itemSchema = z.object({
   assets: assetsSchema.default({ glb: null, thumb: null }),
   flags: z.array(z.string()).default([]),
   tags: z.array(z.string()).default([]),
+  // The holsters this piece declares (v4). See LOADOUT.md.
+  ports: z.array(portSchema).default([]),
 });
+
+/** A weapon, knife, pen, grenade, magazine or gadget (v4). This viewer does
+ * not draw gear -- the web kitbasher does -- but it must read a manifest that
+ * carries it. */
+export const gearSchema = z.object({
+  id: z.string(),
+  class_name: z.string(),
+  name: z.string(),
+  slot: z.string(),
+  attach: z.record(z.unknown()).default({}),
+  anim_set: z.string().nullable().default(null),
+  variant_of: z.string().nullable().default(null),
+  variants: z.array(z.string()).default([]),
+  geometry: z.array(geometrySchema).default([]),
+  materials: z.array(z.string()).default([]),
+  default_children: z.array(z.object({ port: z.string(), class_name: z.string() })).default([]),
+  ports: z.array(portSchema).default([]),
+  flags: z.array(z.string()).default([]),
+}).passthrough();
 
 export const manifestSchema = z.object({
   schema_version: z.number(),
@@ -82,6 +114,7 @@ export const manifestSchema = z.object({
     .default({}),
   sockets: z.array(z.string()).default([]),
   items: z.array(itemSchema).default([]),
+  gear: z.array(gearSchema).default([]),
 });
 
 export type Item = z.infer<typeof itemSchema>;

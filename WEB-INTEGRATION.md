@@ -172,6 +172,12 @@ host is never asked to render a spinner or an error page.
 never the query string — a fragment never reaches the server, so every shared
 loadout is served from the same cached HTML.
 
+It carries gear as well as armour since 0.6.0, so it is longer: six armour
+pieces are about 220 characters, and a full belt of twenty gear items adds
+about 1.1 KB. Still comfortably inside what browsers keep in a fragment, and
+nothing about how the host stores or passes it changes. Links made before
+0.6.0 still restore.
+
 ---
 
 ## 4. Theming: it inherits, it does not define

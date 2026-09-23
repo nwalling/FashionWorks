@@ -1792,9 +1792,10 @@ Galena/Tamarack, Carnifex -- except after an article: "The Butcher" and "The
 Hill Horror" share only "The". The medical bay's anatomy meshes (named
 "Body", under `body/anatomy/`) are hidden.
 
-### Holsters are item ports, and the archive has the held weapon too (2026-09-23)
+### Holsters, gear and the held weapon -- built (2026-09-23)
 
-Scoped in `LOADOUT.md`; the facts are measured, the design is not built.
+LOADOUT.md is the plan; this is what building it established. Phases 0-4 are
+done in the web kitbasher; the local Blender viewer does not draw gear.
 
 **Armour declares its holsters** as `SItemPortContainerComponentParams.Ports`,
 and the count follows the torso's weight with no exceptions across 1,741
@@ -1802,34 +1803,67 @@ records: a light core carries `wep_stocked_3`, two grenade and four magazine
 points; medium `wep_stocked_2..3`, three and six; heavy two, four and eight.
 Legs carry `wep_sidearm`, `utility_attach_1..2`, `medPen_attach_1..2` and
 `oxyPen_attach_1..2` at every weight. Backpacks carry `wep_stocked_2..3` and
-`gadget_attach_1`. Arms and helmets carry none. A Large (size 5) weapon fits
-only `wep_stocked_3`.
+`gadget_attach_1`; four ammo carriers add `magAttach_1..4`. A Large (size 5)
+weapon fits only `wep_stocked_3`. Catalogued as `ports` on every item (schema
+4), 100% agreement between the Python and the port.
 
-**Every bone a port names is already in the armature** -- the 36 grafted
-attachment points are exactly these -- and **every holsterable item carries
-the locator the port names**, `attach_offset_left_01`/`_right_01`: as `.chr`
-bones on `.cdf`-rooted items (rifle, pistol, pen, grenade, multitool) and as NMC
-nodes on `.cgf` items (knife, magazine). Placement is the backpack's
-`bone_world · locator⁻¹`, unchanged.
+**A piece's `_override` bones are it moving those points** -- see "The web
+viewer's surfaces, rebuilt". The outermost piece declaring a point wins, and
+the same rule decides which piece *owns* a holster: backpack over torso over
+undersuit. A backpack carries its own `wep_stocked_attach_2/3_override` nodes
+either side of the pack, and a rifle moves onto them when a pack goes on.
 
-**A backpack carries its own holster helpers.** `cds_combat_heavy_backpack_01.cga`
-has `wep_stocked_attach_2/3_override` nodes at x = ∓0.194 in its own frame,
-which is where a pack-wearer's rifles sit. Nothing in the records says which
-owner wins when torso and backpack both declare a port; the plan reads it as
-the outermost, and checks that against a screenshot first.
+**Gear is a catalogue of its own**, 505 records under `scitem/weapons/` and
+`scitem/consumables/`: 279 primaries (54 distinct meshes), 72 sidearms, 28
+knives, 46 gadgets, 59 magazines, 19 pens and **two grenades** -- the build
+ships only those. 100% field agreement both ways (`full_diff` compares numbers
+to 1e-12: a 230/255 glossiness rounds differently in Python and Rust).
 
-**The held weapon sits on `RightWeaponBone`** (the body's
-`weapon_attach_hand_right`, no item locator), a base-skeleton bone under
-`RightHand`. `stocked_alerted_stand_idle_turn360_raised` animates that bone
-directly and retargets today: 148 bones, 0 unresolved, through `anim-dump`.
-The pistol set has only an upper-body idle (89 bones); the female rig ships the
-same 42 weapon databases and the same raised clip.
+**A weapon's colourway is the `SubGeometry` child its `geometryTags` names.**
+`SCItemWeaponComponentParams.geometryTags` on `behr_rifle_ballistic_01_tint01`
+says `Tint01`, and the child tagged `Tint01` carries `behr_weapon_black`. 309
+records set it and 297 find their child; the rest carry the colourway on the
+root. The root is the item and the tagged children are other records'
+alternates -- the reverse of armour, where the root is the carry crate.
 
-**Weapons are `LayerBlend_V2`** with the same `TintPaletteTree` palettes, 231
-of which the DCB export already holds. A colourway sits on the geometry
-**root** with its own `.mtl` or palette; the tagged `SubGeometry` children are
-alternates for other records -- the reverse of armour, where the root is the
-crate.
+**Every holsterable item carries the port's locator**, `attach_offset_left_01`/
+`_right_01`: as `.chr` bones on `.cdf` weapons, as NMC nodes on `.cgf` knives
+and magazines. The knife's NMC locator has exactly the rotation the P4-AR's
+`.chr` one has, so the two conventions agree. A knife on `utility_attach_2`
+sits across the front of the right thigh because the legs' own bone is
+oriented that way; the pistol on the same leg comes out barrel-down.
+
+**Two gear shapes the loader had to learn.** A `.cdf` can name a `.cga` as its
+model rather than a `.chr` -- the Arlington's definition lists nothing else
+but an unbound round, so skipping the model drew no rifle. And a multi-part
+`.cga` stores each group's vertices in its **NMC node's** space: the Arlington
+is ten nodes (barrel, bolt, covers, selectors), and without `bone_to_world` it
+came out as slabs at the origin. `gear::place_nodes` applies it, to props too.
+4 of 145 distinct gear meshes point at files this build does not ship.
+
+**The held weapon sits on `RightWeaponBone` by its own origin** -- the body's
+`weapon_attach_hand_right` names no item locator -- and
+`stocked_alerted_stand_idle_turn360_raised` animates that bone, so the rifle
+is in the hands from the clip alone. Pistol and knife sets have only
+upper-body idles and ride on the unarmed stand/crouch.
+
+**The left hand needs no IK.** Measured in the raised pose across all 53
+distinct stocked meshes: the left knuckle sits a **median 2.6 cm** from the
+weapon's surface, p90 5.0 cm. Outliers: two Boomtube launchers (5.5, 11.6 cm)
+and the short CQ7 (30.5 cm). The plan's rule was IK above "a couple of
+centimetres"; this is at it.
+
+**Orphaned skin weight follows the piece's own hierarchy before any guess.**
+Raising the arms stretched long lines off the Defiance arms: 1,828 vertices
+weighted only to wrist pistons, which the name guess put on a bone that does
+not follow the hand. `LeftWrist_Piston01_End` is a child of `LeftHand` in the
+piece's own skeleton; `armature::rebind` now walks that chain to the first
+bone the rig has, and guesses only when there is none. On the Defiance arms:
+1,828 inherited, 0 guessed. The pipeline's Blender rebind still guesses.
+
+**A HUD plane is runtime UI.** `UIPlane`/`Hologram` submaterials bind
+`$RenderToTexture`; drawn, the Animus launcher's sight was a flat grey card.
+Hidden.
 
 ### Backdrops
 

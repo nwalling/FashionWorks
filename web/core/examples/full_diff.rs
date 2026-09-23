@@ -61,10 +61,11 @@ fn main() {
     // Every field the port produces. `swatch` and `assets` are deliberately
     // absent: they are filled in later by the convert and variants stages, not
     // by the catalogue.
-    const FIELDS: [&str; 20] = [
+    const FIELDS: [&str; 21] = [
         "class_name", "name", "name_key", "description", "description_key", "slot",
         "sub_slot", "weight_class", "manufacturer", "set", "variant_of", "variants",
         "tint", "tags", "geometry", "materials", "bind_mode", "socket", "flags", "stats",
+        "ports",
     ];
     let mut agree: HashMap<&str, (usize, usize, Vec<String>)> = HashMap::new();
     let mut unmatched = 0;
@@ -180,6 +181,82 @@ fn main() {
         for e in ex { println!("                  {e}"); }
     }
     println!("\nOVERALL {:.3}%  (bar: 99.5%)", ok as f64 / total.max(1) as f64 * 100.0);
+
+    // Gear, both ways, every field. LOADOUT.md Phase 1.
+    let gear = fashionworks_core::build_gear(&database, &palettes, &makers, &loc);
+    let want_gear: HashMap<&str, &Value> = manifest["gear"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|i| Some((i["id"].as_str()?, i))).collect())
+        .unwrap_or_default();
+    const GEAR_FIELDS: [&str; 18] = [
+        "class_name", "name", "name_key", "description", "description_key", "slot",
+        "manufacturer", "attach", "anim_set", "variant_of", "variants", "tint", "geometry",
+        "materials", "default_children", "ports", "flags", "tags",
+    ];
+    let mut gear_total = 0usize;
+    let mut gear_ok = 0usize;
+    let mut gear_bad: HashMap<&str, Vec<String>> = HashMap::new();
+    let mut gear_unmatched = 0usize;
+    for got in &gear {
+        let Some(exp) = got["id"].as_str().and_then(|id| want_gear.get(id)) else {
+            gear_unmatched += 1;
+            continue;
+        };
+        for field in GEAR_FIELDS {
+            let a = got.get(field).unwrap_or(&Value::Null);
+            let b = exp.get(field).unwrap_or(&Value::Null);
+            let same = if field == "variants" {
+                let norm = |v: &Value| {
+                    let mut s: Vec<String> = v.as_array()
+                        .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+                        .unwrap_or_default();
+                    s.sort();
+                    s
+                };
+                norm(a) == norm(b)
+            } else {
+                close(a, b)
+            };
+            gear_total += 1;
+            if same {
+                gear_ok += 1;
+            } else {
+                let list = gear_bad.entry(field).or_default();
+                if list.len() < 3 {
+                    let show = |v: &Value| if std::env::var("FULL").is_ok() { v.to_string() } else { truncate(v) };
+                    list.push(format!("{}: {} vs {}", got["class_name"].as_str().unwrap_or(""), show(a), show(b)));
+                }
+            }
+        }
+    }
+    let gear_built: std::collections::HashSet<&str> = gear.iter().filter_map(|g| g["id"].as_str()).collect();
+    let gear_missing = want_gear.keys().filter(|id| !gear_built.contains(*id)).count();
+    println!(
+        "\nGEAR built {}, manifest {}, unmatched {gear_unmatched}, missing {gear_missing}, fields {:.3}%",
+        gear.len(), want_gear.len(), gear_ok as f64 / gear_total.max(1) as f64 * 100.0,
+    );
+    for (field, examples) in &gear_bad {
+        println!("  {field}");
+        for e in examples { println!("      {e}"); }
+    }
+}
+
+/// JSON equality with numbers compared to a relative 1e-12, so a float that
+/// Python and Rust round differently in its last digit -- a palette
+/// glossiness of 230/255 came out ...255 on one side and ...256 on the other --
+/// is not reported as a disagreement about the data.
+fn close(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => {
+            let (x, y) = (x.as_f64().unwrap_or(f64::NAN), y.as_f64().unwrap_or(f64::NAN));
+            x == y || (x - y).abs() <= 1e-12 * x.abs().max(y.abs())
+        }
+        (Value::Array(x), Value::Array(y)) => x.len() == y.len() && x.iter().zip(y).all(|(p, q)| close(p, q)),
+        (Value::Object(x), Value::Object(y)) => {
+            x.len() == y.len() && x.iter().all(|(k, v)| y.get(k).is_some_and(|w| close(v, w)))
+        }
+        _ => a == b,
+    }
 }
 
 fn truncate(v: &Value) -> String {

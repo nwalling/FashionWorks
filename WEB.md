@@ -966,6 +966,10 @@ marked rather than missing.
 alert, a Discord beta, and an FAQ entry on the site.
 **Exit:** the traffic budget holds under beta traffic.
 
+**Phase 7 -- Gear and holsters.** Planned and tracked in `LOADOUT.md`:
+weapons, knives, grenades, magazines and pens in the holsters the armour
+declares, and a raised pose with the weapon in hand. Phases 0-4 are done.
+
 ## Risks
 
 1. **The knowledge port, not the code port, is the real cost.** The blend table

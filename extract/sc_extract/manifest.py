@@ -12,12 +12,18 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 Slot = Literal["helmet", "torso", "arms", "legs", "backpack", "undersuit"]
 SLOTS: tuple[str, ...] = ("helmet", "torso", "arms", "legs", "backpack", "undersuit")
 
 BindMode = Literal["skinned", "socket"]
+
+# Gear: what a character carries rather than wears. LOADOUT.md.
+GearSlot = Literal["primary", "sidearm", "knife", "gadget", "grenade", "magazine", "consumable"]
+GEAR_SLOTS: tuple[str, ...] = (
+    "primary", "sidearm", "knife", "gadget", "grenade", "magazine", "consumable",
+)
 
 
 @dataclass
@@ -96,6 +102,37 @@ class Item:
     assets: Assets = field(default_factory=Assets)
     flags: list[str] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
+    # The holsters this piece declares: ``SItemPortContainerComponentParams``
+    # ports that hang an item off a bone. See ``gear.ports_for``.
+    ports: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass
+class GearItem:
+    """A weapon, knife, pen, grenade, magazine or gadget."""
+
+    id: str
+    class_name: str
+    name: str
+    slot: str
+    name_key: str | None = None
+    description: str | None = None
+    description_key: str | None = None
+    manufacturer: Manufacturer = field(default_factory=Manufacturer)
+    # ``AttachDef``: what a port checks an item against.
+    attach: dict[str, Any] = field(default_factory=dict)
+    # Which animation set holds it: stocked, pistol, knife, multitool, grenade.
+    anim_set: str | None = None
+    variant_of: str | None = None
+    variants: list[str] = field(default_factory=list)
+    tint: dict[str, Any] | None = None
+    geometry: list[Geometry] = field(default_factory=list)
+    materials: list[str] = field(default_factory=list)
+    # What it ships with: a rifle's magazine.
+    default_children: list[dict[str, str]] = field(default_factory=list)
+    ports: list[dict[str, Any]] = field(default_factory=list)
+    flags: list[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -112,6 +149,7 @@ class Manifest:
     skeletons: dict[str, Skeleton] = field(default_factory=dict)
     sockets: list[str] = field(default_factory=list)
     items: list[Item] = field(default_factory=list)
+    gear: list[GearItem] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if not self.generated_at:
@@ -136,6 +174,7 @@ class Manifest:
             "skeletons": {k: asdict(v) for k, v in self.skeletons.items()},
             "sockets": list(self.sockets),
             "items": [asdict(item) for item in self.items],
+            "gear": [asdict(item) for item in self.gear],
         }
 
     def write(self, path: Path) -> Path:
@@ -165,6 +204,13 @@ class Manifest:
             ]
             known = {f for f in Item.__dataclass_fields__}
             items.append(Item(**{k: v for k, v in raw.items() if k in known}))
+        gear: list[GearItem] = []
+        for raw in data.get("gear", []) or []:
+            raw = dict(raw)
+            raw["manufacturer"] = Manufacturer(**(raw.get("manufacturer") or {}))
+            raw["geometry"] = [Geometry(**g) for g in raw.get("geometry", [])]
+            known = {f for f in GearItem.__dataclass_fields__}
+            gear.append(GearItem(**{k: v for k, v in raw.items() if k in known}))
         return cls(
             schema_version=int(data.get("schema_version", SCHEMA_VERSION)),
             game_version=str(data.get("game_version", "unknown")),
@@ -172,4 +218,5 @@ class Manifest:
             skeletons={k: Skeleton(**v) for k, v in (data.get("skeletons") or {}).items()},
             sockets=list(data.get("sockets") or []),
             items=items,
+            gear=gear,
         )

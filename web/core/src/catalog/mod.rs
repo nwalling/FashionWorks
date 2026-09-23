@@ -18,6 +18,7 @@ use serde_json::Value;
 pub mod build;
 pub mod db;
 mod fields;
+pub mod gear;
 mod flags;
 pub mod localization;
 pub mod sets;

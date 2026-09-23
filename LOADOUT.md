@@ -1,9 +1,41 @@
 # LOADOUT.md — Weapons, holsters and the raised pose
 
-A plan, scoped against build 1.0.191.55227 on 2026-09-23. **Nothing in it is
-implemented.** Everything under "What the data says" was measured against the
-real archive today and is real; the design follows from it, and the phases
-say what to build and how each one proves itself.
+A plan, scoped against build 1.0.191.55227 on 2026-09-23, and **built the same
+day: Phases 0-4 are done in the web kitbasher** (`@fashionworks/web` 0.6.0).
+Phase 5 -- gear in the local Blender viewer -- is not, because it was written
+to depend on a decision nobody has made yet. "Status" below says what each
+phase measured when it was run, and where reality differed from the plan.
+Everything under "What the data says" was measured against the real archive.
+
+## Status
+
+| phase | state | what it measured |
+| --- | --- | --- |
+| 0 -- one rifle on the back | done | P4-AR on the heavy core's `wep_stocked_attach_2_override` and on the CSP-68H's own side node, both bodies. Holstered: muzzle at (-0.146, 1.096, 0.202), grip (-0.05, 1.345, 0.2), against a left shoulder at (-0.196, 1.502, 0.021) and hip at (-0.099, 0.997, -0.006) -- vertical beside the spine, stock up. |
+| 1 -- catalogue | done | 505 gear items, `ports` on every armour item, schema 4. `full_diff`: armour 2,475/2,475 and gear 505/505 both ways, 100% of fields. First catalogue build with gear 9.0 s (was 10.2 s without, same harness). |
+| 2 -- holsters, every class | done | Rifle both sides, size-5 launcher refused on the left with the reason and taken on the right, pistol, knife, multitool, 4 grenades, 4 pens, 8 magazines, 4 more on an ammo-carrier pack; a fifth of each refused as full. Heavy to light core: "one rifle holster, two grenade points, four magazine points; P4-AR Rifle, 2 x MK-4 Frag Grenade came off". 20 items, 373k scene triangles: 59 fps. |
+| 3 -- in hand, raised pose | done | Rifle raised and crouched, pistol and knife raised, both bodies, magazine travelling with the weapon. Left hand: median 2.6 cm from the weapon's surface over 53 meshes, p90 5.0 -- no IK. |
+| 4 -- share URL, sets, hardening | done | v2 string round-trips armour, gear and the held port; a v1 string still decodes. Equip-set re-validates gear. Package budgets hold. |
+| 5 -- local viewer | **not done** | Waiting on the open question below: whether the Blender viewer should draw gear at all. The Python side of Phase 1 is done, so the manifest already carries everything it would need. |
+
+Where it differed from the plan:
+
+- **Precedence was not settled by a screenshot.** None was to hand. The rule
+  is still outermost-wins, and the evidence for it is the data's own: a
+  backpack ships `wep_stocked_attach_2/3_override` nodes either side of the
+  pack, which only makes sense if the pack takes those holsters over.
+- **The left-hand measure changed.** The plan said to measure `LeftHand`
+  against the weapon's `L_IkGripTarget`; that helper turns out to sit at the
+  *pistol grip*, mirrored from the right one, so it says nothing about the
+  support hand. Distance from the left knuckle to the weapon's nearest vertex
+  does, and is what was measured.
+- **Colourways needed `geometryTags`,** which the plan did not know about: a
+  weapon record picks its tagged `SubGeometry` child by it.
+- **Two mesh shapes were new**: a `.cdf` whose model is a `.cga`, and multi-node
+  `.cga`s whose groups live in their node's space. Both handled.
+- **Raising the arms exposed an armour bug**, not a gear one: orphaned wrist
+  piston weight on the Defiance arms, now resolved through the piece's own
+  bone hierarchy (CLAUDE.md).
 
 It targets the web kitbasher (`web/`), which is where the product lives now,
 with the Python pipeline kept at catalogue parity the same way the rest of the
@@ -441,11 +473,12 @@ viewer's `SlotPanel` growing the gear tabs.
 
 ## Open questions
 
-- **If the screenshot is ambiguous** on backpack-versus-torso, which rule?
-  This plan's default is the backpack.
-- **Magazines:** user-placed from the magazine tab (this plan), or auto-filled
-  to match the primary? The game does neither; players buy them.
-- **UI:** the armour/gear switch, or a second tab row? The switch is the plan
-  because the toolbar is already full on Windows.
-- **Does the local Blender viewer need weapons at all?** Phase 5 is written so
-  it can simply not happen.
+Built with the plan's defaults; each is a one-line change if the answer differs.
+
+- **Backpack-versus-torso precedence:** built as the backpack (outermost
+  wins). A screenshot of a pack-wearer's rifles in game would confirm it.
+- **Magazines:** built as user-placed from the magazine tab; a weapon's own
+  magazine rides in the weapon. Auto-filling to match the primary is not done.
+- **UI:** built as the armour/gear switch.
+- **Does the local Blender viewer need weapons at all?** Still open, and the
+  reason Phase 5 has not been done.

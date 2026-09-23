@@ -53,6 +53,9 @@ pub struct Submesh {
     pub material_id: u32,
     pub first_index: u32,
     pub index_count: u32,
+    /// The NMC node this group belongs to, in a rigid `.cga`/`.cgf`. Its
+    /// vertices are in that node's space; 0 is the root.
+    pub node: u16,
 }
 
 /// One mesh, flattened into the arrays a `BufferGeometry` binds directly.
@@ -75,6 +78,10 @@ pub struct LoadedMesh {
     /// attachment points the armour itself introduces. The remap onto the
     /// shared skeleton happens by name, above this.
     pub bones: Vec<String>,
+    /// Each of [`LoadedMesh::bones`]'s parent, as an index into the same
+    /// list. A bone the rig does not have can be traced up this chain to one
+    /// it does: a wrist piston's end belongs to the hand it hangs from.
+    pub bone_parents: Vec<Option<usize>>,
     pub submeshes: Vec<Submesh>,
     /// The `.mtl` this mesh references, as the archive spells it.
     pub material_file: Option<String>,
@@ -142,9 +149,12 @@ pub fn reduce_influences(joints: [u16; 8], raw: [u8; 8]) -> ([u16; 4], [f32; 4])
 /// back empty rather than failing.
 pub fn load(skin: &[u8], skinm: &[u8]) -> Result<LoadedMesh, String> {
     // Bones and material names live in the header half.
-    let bones: Vec<String> = starbreaker_3d::skeleton::parse_skeleton(skin)
-        .map(|b| b.into_iter().map(|bone| bone.name).collect())
-        .unwrap_or_default();
+    let skeleton = starbreaker_3d::skeleton::parse_skeleton(skin).unwrap_or_default();
+    let bone_parents: Vec<Option<usize>> = skeleton
+        .iter()
+        .map(|bone| bone.parent_index.map(usize::from).filter(|&p| p < skeleton.len()))
+        .collect();
+    let bones: Vec<String> = skeleton.into_iter().map(|bone| bone.name).collect();
 
     let names = material_names(skin);
 
@@ -177,6 +187,7 @@ pub fn load(skin: &[u8], skinm: &[u8]) -> Result<LoadedMesh, String> {
         joints: vec![0u16; vertices * 4],
         weights: vec![0.0f32; vertices * 4],
         bones,
+        bone_parents,
         submeshes: built
             .submeshes
             .iter()
@@ -184,6 +195,7 @@ pub fn load(skin: &[u8], skinm: &[u8]) -> Result<LoadedMesh, String> {
                 material_id: s.source_material_id.unwrap_or(s.material_id),
                 first_index: s.first_index,
                 index_count: s.num_indices,
+                node: s.node_parent_index,
             })
             .collect(),
         material_file: names.first().map(|n| n.name.clone()),
