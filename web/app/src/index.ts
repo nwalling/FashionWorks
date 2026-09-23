@@ -55,4 +55,5 @@ export {
   matchSet,
   paletteOf,
 } from './three/kitbasher';
-export type { KitbasherState, KitbasherScene, Pose } from './three/kitbasher';
+export { SET_MATCH_THRESHOLD } from './three/kitbasher';
+export type { KitbasherState, KitbasherScene, Pose, SetPlan, Body } from './three/kitbasher';

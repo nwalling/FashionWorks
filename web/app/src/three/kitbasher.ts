@@ -177,11 +177,28 @@ export function decodeLoadout(encoded: string, catalogue: Catalogue): CatalogueI
  * and the pieces of one edition do not necessarily share a palette among
  * themselves, so neither alone is enough.
  */
+export const SET_MATCH_THRESHOLD = 8;
+
+/** How many leading words two product names share. */
+function sharedLeadingWords(a: string, b: string): number {
+  const left = a.split(/\s+/).filter(Boolean);
+  const right = b.split(/\s+/).filter(Boolean);
+  let n = 0;
+  while (n < left.length && n < right.length && left[n] === right[n]) n += 1;
+  return n;
+}
+
+/** What equipping a set would do, and why it would not do the rest. */
+export interface SetPlan {
+  readonly picks: CatalogueItem[];
+  readonly unfilled: ReadonlyArray<{ slot: Slot; reason: string; absent: boolean }>;
+}
+
 export function matchSet(
   anchor: CatalogueItem,
   catalogue: Catalogue,
   wearing: ReadonlyMap<Slot, CatalogueItem>,
-): CatalogueItem[] {
+): SetPlan {
   const familyName = (item: CatalogueItem) =>
     sharedName((catalogue.families.get(familyRoot(item)) ?? [item]).map(displayName));
   const anchorShared = familyName(anchor);
@@ -196,7 +213,20 @@ export function matchSet(
     // The manufacturer and the leading word of the name stand in for the
     // product line, which the catalogue does not name directly.
     if (item.manufacturer?.code && item.manufacturer.code === anchor.manufacturer?.code) points += 3;
-    if (itemShared.split(' ')[0] === anchorShared.split(' ')[0]) points += 4;
+    // How much of the product name is shared, not merely its first word.
+    //
+    // First-word-only rejected pieces that plainly belong: the Advocacy
+    // Interceptor Helmet and the Advocacy Interceptor Racing Flight Suit share
+    // two words and a manufacturer, which came to 7 against a threshold of 8,
+    // so the helmet could never find its own flight suit. Crediting the second
+    // shared word carries it to 9.
+    //
+    // It cannot resurrect the bug this threshold exists for. "Defiance Core"
+    // and "ADP-mk4 Arms" share no leading word at all, so they score nothing
+    // here however much palette they have in common.
+    const shared = sharedLeadingWords(itemShared, anchorShared);
+    if (shared >= 1) points += 4;
+    if (shared >= 2) points += 2;
     if (colourwayName(displayName(item), itemShared) === edition) points += 3;
     if (paletteKey && item.tint?.layers?.[0]?.color === paletteKey) points += 2;
     if (item.weight_class === anchor.weight_class) points += 1;
@@ -204,15 +234,53 @@ export function matchSet(
   };
 
   const picks: CatalogueItem[] = [];
+  const unfilled: Array<{ slot: Slot; reason: string; absent: boolean }> = [];
   for (const slot of SLOTS) {
     if (wearing.has(slot)) continue;
-    const best = (catalogue.bySlot.get(slot) ?? [])
+    const ranked = (catalogue.bySlot.get(slot) ?? [])
       .map((item) => ({ item, points: score(item) }))
-      .filter((entry) => entry.points >= 8)
-      .sort((a, b) => b.points - a.points)[0];
-    if (best) picks.push(best.item);
+      .sort((a, b) => b.points - a.points);
+    const best = ranked[0];
+    if (best && best.points >= SET_MATCH_THRESHOLD) {
+      picks.push(best.item);
+      continue;
+    }
+    // "Is there one at all?" is a question about the SET, not about the score.
+    //
+    // Scoring `<= 1` looked like the test for it and is not: a backpack from
+    // the same manufacturer, weight and palette as the anchor scores 6 or 7
+    // while belonging to an entirely different product, so it was reported as
+    // "closest backpack was CSP-68H, 7 of 8" -- which reads as a near-miss the
+    // match got wrong. It is not. That set has no backpack, and saying so is
+    // the honest answer.
+    //
+    // So the test is the one the audit used: does anything in this slot carry
+    // the anchor's set tag, or lead with its product name? Over all 103
+    // canonical torso anchors, nothing that passed that test ever failed to be
+    // picked -- the 208 unfilled slots were all genuine absences.
+    const line = anchorShared.split(' ')[0];
+    // The best candidate that is actually in this set, which is not always the
+    // best candidate overall -- "Odyssey Helmet Tan" reported its closest
+    // undersuit as an *Ace* Interceptor flight suit, because that outscored
+    // the Odyssey one on palette. Naming the top scorer there describes a
+    // piece nobody was asking about; `ranked` is sorted, so the first in-set
+    // entry is the one worth naming.
+    const bestInSet = ranked.find(({ item }) => (
+      (anchor.set && item.set === anchor.set)
+      || (line && familyName(item).split(' ')[0] === line)
+    ));
+    if (!bestInSet) {
+      unfilled.push({ slot, reason: `no ${slot} in this set`, absent: true });
+    } else {
+      unfilled.push({
+        slot,
+        reason: `closest ${slot} was ${displayName(bestInSet.item)}, `
+          + `${bestInSet.points} of ${SET_MATCH_THRESHOLD}`,
+        absent: false,
+      });
+    }
   }
-  return picks;
+  return { picks, unfilled };
 }
 
 export class Kitbasher {
@@ -441,14 +509,25 @@ export class Kitbasher {
       this.publish({ status: 'equip something first, then match a set to it' });
       return 0;
     }
-    const picks = matchSet(anchor, this.catalogue, this.wearing);
-    for (const item of picks) await this.equip(item);
+    const plan = matchSet(anchor, this.catalogue, this.wearing);
+    for (const item of plan.picks) await this.equip(item);
+
+    // Say what happened to the slots that stayed empty. Reporting only the
+    // count read as a silent failure: "filled 3" tells nobody whether the set
+    // has no backpack or whether the match gave up.
+    const filled = plan.picks.length
+      ? `filled ${plan.picks.length} slot${plan.picks.length === 1 ? '' : 's'}`
+      : 'nothing to add';
+    const absent = plan.unfilled.filter((u) => u.absent).map((u) => u.slot);
+    const short = plan.unfilled.filter((u) => !u.absent).map((u) => u.reason);
+    const why = [
+      absent.length ? `this set has no ${absent.join(' or ')}` : '',
+      ...short,
+    ].filter(Boolean);
     this.publish({
-      status: picks.length
-        ? `set: filled ${picks.length} slot${picks.length === 1 ? '' : 's'}`
-        : 'no matching pieces for the empty slots',
+      status: plan.unfilled.length ? `set: ${filled} · ${why.join(' · ')}` : `set complete: ${filled}`,
     });
-    return picks.length;
+    return plan.picks.length;
   }
 
   async setPose(pose: Pose): Promise<void> {
