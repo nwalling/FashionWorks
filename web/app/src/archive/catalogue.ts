@@ -30,6 +30,14 @@ export interface CatalogueItem {
   anim_set?: string | null;
   /** Gear only: what it ships with, by port -- a rifle's magazine. */
   default_children?: Array<{ port: string; class_name: string }>;
+  /** `armour` or `clothing`; the slot decides it. CLOTHING.md. */
+  outfit?: Outfit;
+  /** The body zones this piece covers and at which layer: 0 the body, 1 shirt,
+   * trousers, boots and gloves, 2 jacket, 3 undersuit, 4 armour. */
+  chunks?: Array<{ zone: string; layer: number; visible: number[] }>;
+  /** The ports this piece hides while worn: a jacket the shirt, an undersuit
+   * every clothing port, a helmet the hat and hair. */
+  hidden?: string[];
 }
 
 /** An item port that hangs something off a bone: a holster. LOADOUT.md. */
@@ -49,6 +57,26 @@ export interface Port {
 export const SLOTS = ['helmet', 'torso', 'arms', 'legs', 'undersuit', 'backpack'] as const;
 export type Slot = (typeof SLOTS)[number];
 
+/** What the body wears when no undersuit does, in the game's order. The game
+ * makes the two outfits exclusive -- 215 of 222 undersuits hide every clothing
+ * port -- so a slot belongs to exactly one of them. */
+export const CLOTHING_SLOTS = [
+  'hat', 'shirt', 'jacket', 'accessory', 'gloves', 'trousers', 'footwear', 'pack',
+] as const;
+export type ClothingSlot = (typeof CLOTHING_SLOTS)[number];
+
+/** A slot a piece is worn in, either outfit. */
+export type WearSlot = Slot | ClothingSlot;
+export type Outfit = 'armour' | 'clothing';
+
+export function isClothingSlot(slot: string): slot is ClothingSlot {
+  return (CLOTHING_SLOTS as readonly string[]).includes(slot);
+}
+
+export function outfitOf(slot: string): Outfit {
+  return isClothingSlot(slot) ? 'clothing' : 'armour';
+}
+
 /** What a character carries rather than wears. */
 export const GEAR_SLOTS = [
   'primary', 'sidearm', 'knife', 'gadget', 'grenade', 'magazine', 'consumable',
@@ -63,14 +91,16 @@ export function isGearSlot(slot: string): slot is GearSlot {
  *
  * Shop displays, the loot containers armour drops into and outright
  * placeholders all carry an armour attach type without being wearable.
+ * `squadron42` marks Squadron 42's crew uniforms, which are not in the
+ * persistent universe.
  * `unnamed` is deliberately **not** here: that is a real piece whose
  * localisation key did not resolve, and it stays visible under its class name.
  */
-export const HIDDEN_FLAGS = ['npc', 'placeholder', 'not_wearable', 'test'];
+export const HIDDEN_FLAGS = ['npc', 'placeholder', 'not_wearable', 'test', 'squadron42'];
 
 export interface Catalogue {
   readonly items: CatalogueItem[];
-  readonly bySlot: Map<Slot, CatalogueItem[]>;
+  readonly bySlot: Map<WearSlot, CatalogueItem[]>;
   /** Every member of a colourway family, keyed by the family's root id. */
   readonly families: Map<string, CatalogueItem[]>;
   /** Every member of a product line in one slot, keyed by {@link lineKey}.
@@ -227,10 +257,12 @@ export function readCatalogue(json: string): Catalogue {
     }))
     .filter((g) => g.geometry.length > 0 && !g.flags.some((f) => HIDDEN_FLAGS.includes(f)));
 
-  const bySlot = new Map<Slot, CatalogueItem[]>(SLOTS.map((s) => [s, []]));
+  const bySlot = new Map<WearSlot, CatalogueItem[]>(
+    [...SLOTS, ...CLOTHING_SLOTS].map((s) => [s, []]),
+  );
   const families = new Map<string, CatalogueItem[]>();
   for (const item of items) {
-    bySlot.get(item.slot as Slot)?.push(item);
+    bySlot.get(item.slot as WearSlot)?.push(item);
     const root = familyRoot(item);
     const family = families.get(root) ?? [];
     family.push(item);

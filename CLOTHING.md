@@ -11,6 +11,7 @@ a proposal with an exit test.
 | phase | state | what it measured |
 | --- | --- | --- |
 | 0 -- zones | done | The body's 30 (male) and 31 (female) zone submeshes named from geometry and coverage, and shared by every shirt and jacket that covers them. The rule -- a zone is hidden where a higher layer lists it, unless the chunk's `VisibleLayers` keeps that layer -- holds on shirt, trousers, boots and jacket on both bodies: no skin through cloth, and skin kept at the cuffs. See "Phase 0, as run". |
+| 1 -- catalogue | done | 1,970 clothing items in eight slots, both catalogues, 100% field agreement over 4,416 items in both directions. 261 clothing colourway families, all but six (unnamed, as for armour) sharing a name prefix. No armour item's set, family or name moved. See "Phase 1, as run". |
 
 ## What the data says
 
@@ -165,6 +166,53 @@ records list `hips_zone` 271 times in 273. Before it was named, the female
 shirt's hem showed as a white strip under the jacket. The rest are for Phase
 2, by where each submesh sits (a hem at the waist is `hips`, a cuff at the
 wrist `arm05_torso0`).
+
+## Phase 1, as run
+
+**The eight types map to eight slots**, named for what they are rather than the
+port: `Char_Clothing_Hat` hat, `Torso_0` shirt, `Torso_1` jacket, `Torso_2`
+accessory, `Hands` gloves, `Legs` trousers, `Feet` footwear, `Backpack` pack.
+A slot belongs to one outfit, so the slot decides `outfit`; the armour slot
+names are unchanged. Counts reproduce the survey exactly: jackets 558,
+trousers 382, shirts 346, footwear 322, hats 211, gloves 140, accessories 10,
+pack 1.
+
+**The clothing type is read before the class-name hints.** 40 records were in
+the armour catalogue only because their names matched an armour word, and now
+land where their type puts them: the Ready-Up Helmet's 28 colourways are hats
+(the game wears them on the head's `Hat` port), the ThermoWeave Breathing
+Apparatus is the one clothing pack, the medical bay's ten "Body" meshes are
+shirts, gloves and trousers (still hidden by the listing's anatomy rule), and a
+`<= PLACEHOLDER =>` is an accessory. Armour went from 2,486 items to 2,446.
+
+**Items carry `chunks` and `hidden`**, schema 5 on both sides.
+`chunks` is `SCItemClothingParams.Chunks` as `{zone, layer, visible}` -- it
+used to ride along raw in `stats.Chunks`, where nothing read it, and is out of
+`stats` now. `VisibilityConditions` is left out: 48 chunks carry an empty one,
+and the rest tie an undersuit's or armour's zone to the armour ports, which the
+armour outfit does not draw by zone. `hidden` is `HiddenParts`, port names with
+the repeats dropped (`sc_nvy_bdu_jumpsuit_02_01_17` lists `Clothing_Torso_0`
+twice).
+
+**Squadron 42 is flagged by folder**, `clothing/s42_clothing/`: 50 items,
+hidden by the web listing. Only clothing -- S42 armour under
+`armor/s42_armor/` was already in the armour catalogue, and moving it is not
+this plan's call.
+
+**Clothing names needed their own slot words.** They have armour's shape with a
+garment for the slot -- "Toughlife Boots Dark Red", "Keldur Hat and Hickory
+Goggles" -- and `product_key` stops only at armour's words, so every clothing
+colourway keyed on its whole name and was a family of one: 58 families across
+1,970 items. A garment list (jacket, pants, boots, shirt, t-shirt, hat, mask,
+apron and 44 more) read **only for clothing slots** gives 261 families holding
+1,649 items, and cannot move an armour key: measured against the schema-4
+manifest, 0 of 2,446 armour items changed set, family or name. The six
+clothing families that share no name prefix are unnamed items keyed on class
+names, as armour's three are.
+
+**The pipeline stays armour-only.** `scx convert`, `scx variants`, `scx sets`
+and `scx audit` read `Manifest.armour()`; the local viewer drops clothing when
+it parses the manifest, keeping `Item.slot` the six armour slots.
 
 ## Phases
 

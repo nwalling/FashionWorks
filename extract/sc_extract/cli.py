@@ -510,7 +510,7 @@ def sets_cmd(ctx: click.Context, incomplete: bool, pending: bool) -> None:
     manifest = Manifest.read(settings.manifest_path())
     core = {"helmet", "torso", "arms", "legs"}
     grouped: dict[str, list] = defaultdict(list)
-    for item in manifest.items:
+    for item in manifest.armour():
         if item.geometry and item.variant_of is None and item.set:
             grouped[item.set].append(item)
 

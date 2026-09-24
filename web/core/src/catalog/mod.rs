@@ -29,7 +29,9 @@ pub use fields::{component, first, record_body};
 pub use flags::{flags_for, PLACEHOLDER_NAME};
 pub use localization::Localization;
 pub use build::{assign_sets, build_item, link_variants};
-pub use sets::{canonical_key, geometry_key, product_key, set_key, tag_value, tags_for};
+pub use sets::{
+    canonical_key, geometry_key, product_key, product_key_for, set_key, tag_value, tags_for,
+};
 pub use tint::{tint_for, PaletteIndex};
 pub use geometry::{materials_for, material_palette, select_wearables, walk_geometry, GeoNode};
 
@@ -47,7 +49,11 @@ pub const ARMOR_TYPES: [&str; 6] = [
     "Char_Armor_Undersuit",
 ];
 
-/// The manifest's slot name for an `AttachDef.Type`.
+/// The manifest's slot name for an `AttachDef.Type`, armour or clothing.
+///
+/// Clothing is what the body's own ports take (CLOTHING.md). Verified against
+/// build 4.10.193.11644: 558 jackets, 382 trousers, 346 shirts, 322 footwear,
+/// 211 hats, 140 gloves, 10 torso accessories and one backpack.
 pub fn slot_for(attach_type: &str) -> Option<&'static str> {
     Some(match attach_type {
         "Char_Armor_Helmet" => "helmet",
@@ -56,25 +62,43 @@ pub fn slot_for(attach_type: &str) -> Option<&'static str> {
         "Char_Armor_Legs" => "legs",
         "Char_Armor_Backpack" => "backpack",
         "Char_Armor_Undersuit" => "undersuit",
+        "Char_Clothing_Hat" => "hat",
+        "Char_Clothing_Torso_0" => "shirt",
+        "Char_Clothing_Torso_1" => "jacket",
+        "Char_Clothing_Torso_2" => "accessory",
+        "Char_Clothing_Hands" => "gloves",
+        "Char_Clothing_Legs" => "trousers",
+        "Char_Clothing_Feet" => "footwear",
+        "Char_Clothing_Backpack" => "pack",
         _ => return None,
     })
+}
+
+/// The clothing outfit's slots. A slot belongs to one outfit: in the game the
+/// two are exclusive, since 215 of 222 undersuits hide every clothing port.
+pub const CLOTHING_SLOTS: [&str; 8] =
+    ["hat", "shirt", "jacket", "accessory", "gloves", "trousers", "footwear", "pack"];
+
+/// `armour` or `clothing`, by slot.
+pub fn outfit_of(slot: &str) -> &'static str {
+    if CLOTHING_SLOTS.contains(&slot) {
+        "clothing"
+    } else {
+        "armour"
+    }
 }
 
 /// Substrings matched against a class name when the attach type does not say,
 /// most specific first.
 ///
 /// The Python keeps this as a safety net *"so a renamed attach type cannot
-/// silently empty the catalog"*, and the port not having it was a real gap
-/// rather than a simplification: it costs **23 wearable items**. The Ready-Up
-/// Helmet's twenty colourways and the three ThermoWeave pieces are filed under
-/// `clothing/pu_clothing/clothing_hats/`, carry geometry and materials, and
-/// have an attach type outside the `Char_Armor_*` family. Nothing but the name
-/// identifies them.
+/// silently empty the catalog"*. It used to place 23 clothing records too --
+/// the Ready-Up Helmet's twenty colourways and three ThermoWeave pieces -- which
+/// carry a `Char_Clothing_*` type and are now placed by it, as hats and a pack.
 ///
-/// It also admits eleven `med_body_*` and `med_skeleton_*` records named
-/// "Body", which are the medical-bed mannequin and junk. They come in here in
-/// the pipeline too, and `CLAUDE.md` already lists them as wanting a flag; the
-/// port matching the reference matters more than the port being tidier than it.
+/// It still admits `AttachedPart` placeholders by name; the pipeline does the
+/// same, and the port matching the reference matters more than the port being
+/// tidier than it.
 pub const SLOT_NAME_HINTS: [(&str, &str); 13] = [
     ("undersuit", "undersuit"),
     ("backpack", "backpack"),
@@ -188,19 +212,32 @@ mod tests {
     }
 
     #[test]
-    fn a_clothing_hat_is_placed_by_its_name() {
-        // The Ready-Up Helmet's twenty colourways are filed under
-        // `clothing/pu_clothing/clothing_hats/` with an attach type outside the
-        // Char_Armor_* family. Without the name fallback the port lost all
-        // twenty, plus three ThermoWeave pieces.
+    fn a_clothing_type_wins_over_an_armour_name() {
+        // The Ready-Up Helmet's twenty colourways are `Char_Clothing_Hat`: a
+        // hat the game wears on the head's own port. They were armour helmets
+        // only because the name hints ran before anything read that type.
+        assert_eq!(slot_of(Some("Char_Clothing_Hat"), "gys_helmet_01_01_01"), Some("hat"));
         assert_eq!(
-            slot_of(Some("Char_Clothing_Hat"), "gys_helmet_01_01_01"),
-            Some("helmet")
+            slot_of(Some("Char_Clothing_Backpack"), "grin_refinery_backpack_01_01_01"),
+            Some("pack")
         );
-        assert_eq!(
-            slot_of(Some("Char_Clothing_Hat"), "grin_refinery_backpack_01_01_01"),
-            Some("backpack")
-        );
+        assert_eq!(outfit_of("hat"), "clothing");
+        assert_eq!(outfit_of("helmet"), "armour");
+    }
+
+    #[test]
+    fn every_clothing_type_has_a_clothing_slot() {
+        for (attach_type, slot) in [
+            ("Char_Clothing_Torso_0", "shirt"),
+            ("Char_Clothing_Torso_1", "jacket"),
+            ("Char_Clothing_Torso_2", "accessory"),
+            ("Char_Clothing_Hands", "gloves"),
+            ("Char_Clothing_Legs", "trousers"),
+            ("Char_Clothing_Feet", "footwear"),
+        ] {
+            assert_eq!(slot_for(attach_type), Some(slot));
+            assert_eq!(outfit_of(slot), "clothing");
+        }
     }
 
     #[test]

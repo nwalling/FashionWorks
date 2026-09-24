@@ -61,11 +61,11 @@ fn main() {
     // Every field the port produces. `swatch` and `assets` are deliberately
     // absent: they are filled in later by the convert and variants stages, not
     // by the catalogue.
-    const FIELDS: [&str; 21] = [
+    const FIELDS: [&str; 24] = [
         "class_name", "name", "name_key", "description", "description_key", "slot",
         "sub_slot", "weight_class", "manufacturer", "set", "variant_of", "variants",
         "tint", "tags", "geometry", "materials", "bind_mode", "socket", "flags", "stats",
-        "ports",
+        "ports", "outfit", "chunks", "hidden",
     ];
     let mut agree: HashMap<&str, (usize, usize, Vec<String>)> = HashMap::new();
     let mut unmatched = 0;

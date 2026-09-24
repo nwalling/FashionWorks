@@ -44,11 +44,23 @@ export {
   displayName,
   swatchColour,
   SLOTS,
+  CLOTHING_SLOTS,
   GEAR_SLOTS,
   isGearSlot,
+  isClothingSlot,
+  outfitOf,
   HIDDEN_FLAGS,
 } from './archive/catalogue';
-export type { Catalogue, CatalogueItem, Slot, GearSlot, Port } from './archive/catalogue';
+export type {
+  Catalogue,
+  CatalogueItem,
+  Slot,
+  ClothingSlot,
+  WearSlot,
+  Outfit,
+  GearSlot,
+  Port,
+} from './archive/catalogue';
 export {
   resolvePorts,
   refusal,

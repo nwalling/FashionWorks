@@ -221,6 +221,105 @@ def test_unknown_char_armor_type_still_maps() -> None:
     assert catalog.slot_for(record) == "legs"
 
 
+def _clothing(attach_type: str, class_name: str, path: str | None = None, **params):
+    from pathlib import Path
+
+    data = {
+        "_RecordName_": f"EntityClassDefinition.{class_name}",
+        "Components": [
+            {"_Type_": "SAttachableComponentParams", "AttachDef": {"Type": attach_type}},
+            {"_Type_": "SCItemClothingParams", **params},
+        ],
+    }
+    return Record(
+        id=class_name, class_name=class_name, path=Path(path) if path else None, data=data
+    )
+
+
+def test_clothing_types_map_to_clothing_slots() -> None:
+    cases = {
+        "Char_Clothing_Hat": "hat",
+        "Char_Clothing_Torso_0": "shirt",
+        "Char_Clothing_Torso_1": "jacket",
+        "Char_Clothing_Torso_2": "accessory",
+        "Char_Clothing_Hands": "gloves",
+        "Char_Clothing_Legs": "trousers",
+        "Char_Clothing_Feet": "footwear",
+        "Char_Clothing_Backpack": "pack",
+    }
+    for attach_type, slot in cases.items():
+        assert catalog.slot_for(_clothing(attach_type, "x_01_01_01")) == slot
+
+
+def test_a_clothing_type_wins_over_an_armour_name() -> None:
+    # The Ready-Up Helmet is a hat in the game's data; its name used to make it
+    # an armour helmet.
+    record = _clothing("Char_Clothing_Hat", "gys_helmet_01_01_01")
+    assert catalog.slot_for(record) == "hat"
+
+
+def test_chunks_and_hidden_parts_are_read(loc: Localization) -> None:
+    index = Index()
+    index.add(
+        _clothing(
+            "Char_Clothing_Torso_1",
+            "drn_jacket_01_01_01",
+            HiddenParts=[
+                {"_Type_": "SCItemClothingHiddenPartsParams", "PortName": "Clothing_Torso_0"},
+                {"_Type_": "SCItemClothingHiddenPartsParams", "PortName": "Clothing_Legs"},
+                {"_Type_": "SCItemClothingHiddenPartsParams", "PortName": "Clothing_Torso_0"},
+            ],
+            Chunks=[
+                {"MeshChunk": "torso01_zone", "Layer": 2, "VisibleLayers": []},
+                {"MeshChunk": "l_arm05_zone", "Layer": 2, "VisibleLayers": [0]},
+                {"MeshChunk": "", "Layer": 2},
+            ],
+        )
+    )
+    manifest, _ = catalog.build(index, loc)
+    (item,) = manifest.items
+    assert item.slot == "jacket"
+    assert item.outfit == "clothing"
+    assert item.hidden == ["Clothing_Torso_0", "Clothing_Legs"]
+    assert item.chunks == [
+        {"zone": "torso01_zone", "layer": 2, "visible": []},
+        {"zone": "l_arm05_zone", "layer": 2, "visible": [0]},
+    ]
+    assert "Chunks" not in item.stats
+
+
+def test_squadron42_uniforms_are_flagged(loc: Localization) -> None:
+    index = Index()
+    root = "libs/foundry/records/entities/scitem/characters/human/clothing"
+    index.add(
+        _clothing(
+            "Char_Clothing_Legs",
+            "sc_nvy_bdu_pants_01_01_01",
+            f"{root}/s42_clothing/s42_clothing_legs/sc_nvy_bdu_pants_01_01_01.json",
+        )
+    )
+    index.add(
+        _clothing(
+            "Char_Clothing_Legs",
+            "dmc_pants_05_01_01",
+            f"{root}/pu_clothing/clothing_legs/dmc_pants_05_01_01.json",
+        )
+    )
+    manifest, _ = catalog.build(index, loc)
+    flags = {i.class_name: i.flags for i in manifest.items}
+    assert "squadron42" in flags["sc_nvy_bdu_pants_01_01_01"]
+    assert "squadron42" not in flags["dmc_pants_05_01_01"]
+
+
+def test_a_garment_ends_a_clothing_product_and_only_a_clothing_one() -> None:
+    assert catalog.product_key("Toughlife Boots Dark Red", "footwear") == "toughlife"
+    assert catalog.product_key("Keldur Hat and Hickory Goggles", "hat") == "keldur"
+    assert catalog.product_key("Bello T-Shirt Maroon", "shirt") == "bello"
+    # Armour never reads the garment list, so no armour key can move.
+    assert catalog.product_key("Toughlife Boots Dark Red", "legs") == "toughlife boots dark red"
+    assert catalog.product_key("Toughlife Boots Dark Red") == "toughlife boots dark red"
+
+
 def test_npc_items_excluded_by_default(loc: Localization) -> None:
     from sc_extract.dcb import Record
 

@@ -24,6 +24,18 @@ const SLOT_WORDS: [&str; 13] = [
     "undersuit", "suit", "flight",
 ];
 
+/// Clothing's slot words: the garment. "Toughlife Boots Dark Red" is the
+/// Toughlife line. Read only for clothing slots, so no armour key moves -- the
+/// same list, in the same order, as the Python's `_CLOTHING_NAME_WORD`.
+const CLOTHING_WORDS: [&str; 52] = [
+    "jacket", "coat", "duster", "vest", "waistcoat", "harness", "apron", "collar", "jumpsuit",
+    "coverall", "coveralls", "overalls", "armor", "dress", "gown", "robe", "sweater", "hoodie",
+    "top", "tank", "shirt", "t-shirt", "pants", "trousers", "jeans", "shorts", "waders",
+    "skirt", "leggings", "boots", "boot", "shoes", "pumps", "slippers", "sandals", "sneakers",
+    "gloves", "glove", "hat", "tophat", "cap", "beanie", "mask", "balaclava", "bandana",
+    "goggles", "cover", "gear", "hood", "scarf", "wrap", "apparatus",
+];
+
 /// Tags are one space-separated string, not a list of references.
 ///
 /// `"Marine_Light Set_02 Color_02 SM_Marine"` is the shape. `Set_<n>` and
@@ -42,10 +54,19 @@ pub fn tag_value(tags: &[String], prefix: &str) -> Option<String> {
 
 /// The product part of a display name: everything before the slot word.
 pub fn product_key(name: &str) -> String {
+    product_key_for(name, "")
+}
+
+/// [`product_key`] for an item in `slot`, which for clothing also stops at the
+/// garment: without it every clothing colourway keyed on its whole name and was
+/// a family of one.
+pub fn product_key_for(name: &str, slot: &str) -> String {
+    let clothing = super::outfit_of(slot) == "clothing";
     let mut kept: Vec<&str> = Vec::new();
     for word in name.split_whitespace() {
         let bare = word.trim_matches(|c| c == '"' || c == '(' || c == ')');
-        if SLOT_WORDS.iter().any(|w| w.eq_ignore_ascii_case(bare)) {
+        let is = |w: &&str| w.eq_ignore_ascii_case(bare);
+        if SLOT_WORDS.iter().any(is) || (clothing && CLOTHING_WORDS.iter().any(is)) {
             break;
         }
         kept.push(word);
@@ -94,8 +115,10 @@ pub fn tags_for(record: &serde_json::Value) -> Vec<String> {
 ///
 /// Items whose localisation key did not resolve have no usable name, so those
 /// fall back to the tag-and-path scheme the way the Python does.
+#[allow(clippy::too_many_arguments)]
 pub fn set_key(
     name: &str,
+    slot: &str,
     flags: &[String],
     tags: &[String],
     manufacturer_code: &str,
@@ -104,7 +127,7 @@ pub fn set_key(
     class_name: &str,
 ) -> String {
     if !flags.iter().any(|f| f == "unnamed") {
-        let product = product_key(name);
+        let product = product_key_for(name, slot);
         if !product.is_empty() {
             return product;
         }
@@ -191,6 +214,16 @@ mod tests {
         assert_eq!(canonical_key("cds_heavy_arms_01"), "cds_heavy_arms");
         // Nothing to strip.
         assert_eq!(canonical_key("corbel_helmet"), "corbel_helmet");
+    }
+
+    #[test]
+    fn a_garment_ends_a_clothing_product_and_only_a_clothing_one() {
+        assert_eq!(product_key_for("Toughlife Boots Dark Red", "footwear"), "toughlife");
+        assert_eq!(product_key_for("Keldur Hat and Hickory Goggles", "hat"), "keldur");
+        assert_eq!(product_key_for("Bello T-Shirt Maroon", "shirt"), "bello");
+        // Armour never reads the garment list.
+        assert_eq!(product_key_for("Toughlife Boots Dark Red", "legs"), "toughlife boots dark red");
+        assert_eq!(product_key("Toughlife Boots Dark Red"), "toughlife boots dark red");
     }
 
     #[test]

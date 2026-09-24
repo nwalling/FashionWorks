@@ -12,10 +12,27 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
-Slot = Literal["helmet", "torso", "arms", "legs", "backpack", "undersuit"]
+Slot = Literal[
+    "helmet", "torso", "arms", "legs", "backpack", "undersuit",
+    "hat", "shirt", "jacket", "accessory", "gloves", "trousers", "footwear", "pack",
+]
 SLOTS: tuple[str, ...] = ("helmet", "torso", "arms", "legs", "backpack", "undersuit")
+
+# Clothing: what the body wears when no undersuit does. CLOTHING.md. The two
+# outfits are exclusive in the game -- 215 of 222 undersuits hide every clothing
+# port -- so a slot belongs to exactly one of them, and the slot says which.
+CLOTHING_SLOTS: tuple[str, ...] = (
+    "hat", "shirt", "jacket", "accessory", "gloves", "trousers", "footwear", "pack",
+)
+ALL_SLOTS: tuple[str, ...] = SLOTS + CLOTHING_SLOTS
+
+Outfit = Literal["armour", "clothing"]
+
+
+def outfit_of(slot: str) -> str:
+    return "clothing" if slot in CLOTHING_SLOTS else "armour"
 
 BindMode = Literal["skinned", "socket"]
 
@@ -105,6 +122,16 @@ class Item:
     # The holsters this piece declares: ``SItemPortContainerComponentParams``
     # ports that hang an item off a bone. See ``gear.ports_for``.
     ports: list[dict[str, Any]] = field(default_factory=list)
+    # Which outfit the slot belongs to. See ``outfit_of``.
+    outfit: str = "armour"
+    # ``SCItemClothingParams.Chunks``: the body zones this piece covers, the
+    # layer it covers them at, and the layers it leaves drawn beneath (``[0]``
+    # on the last zone a sleeve reaches). ``{zone, layer, visible}``.
+    chunks: list[dict[str, Any]] = field(default_factory=list)
+    # ``SCItemClothingParams.HiddenParts``: the ports this piece hides while
+    # worn -- an undersuit the clothing ports, a jacket the shirt, a helmet the
+    # hat and hair.
+    hidden: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -157,13 +184,21 @@ class Manifest:
 
     # -- counts ---------------------------------------------------------
     def counts_by_slot(self) -> dict[str, int]:
-        counts = dict.fromkeys(SLOTS, 0)
+        counts = dict.fromkeys(ALL_SLOTS, 0)
         for item in self.items:
             counts[item.slot] = counts.get(item.slot, 0) + 1
         return counts
 
     def by_id(self) -> dict[str, Item]:
         return {item.id: item for item in self.items}
+
+    def armour(self) -> list[Item]:
+        """The armour outfit's items: what the Blender pipeline converts.
+
+        Clothing is catalogued for the web kitbasher, which draws it live. The
+        local viewer is armour-only by decision, as it is gear-free.
+        """
+        return [item for item in self.items if item.outfit == "armour"]
 
     # -- io -------------------------------------------------------------
     def to_dict(self) -> dict[str, Any]:

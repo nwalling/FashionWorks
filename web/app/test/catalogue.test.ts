@@ -7,6 +7,7 @@ import {
   lineOf,
   lineRepresentative,
   lineTitle,
+  outfitOf,
   productLine,
   readCatalogue,
   sharedName,
@@ -76,6 +77,26 @@ describe('reading the catalogue', () => {
     expect(read.bySlot.get('helmet')!.map((i) => i.name)).toEqual(['Alpha', 'Beta']);
     expect(read.bySlot.get('arms')!.map((i) => i.name)).toEqual(['Gamma']);
     expect(read.bySlot.get('legs')).toEqual([]);
+  });
+
+  it('buckets clothing in its own slots, apart from armour', () => {
+    const read = catalogue([
+      item({ id: 'j', name: 'Adiva Jacket', slot: 'jacket', outfit: 'clothing' }),
+      item({ id: 'h', name: 'Ready-Up Helmet', slot: 'hat', outfit: 'clothing' }),
+    ]);
+    expect(read.bySlot.get('jacket')!.map((i) => i.id)).toEqual(['j']);
+    expect(read.bySlot.get('hat')!.map((i) => i.id)).toEqual(['h']);
+    expect(read.bySlot.get('helmet')).toEqual([]);
+    expect(outfitOf('jacket')).toBe('clothing');
+    expect(outfitOf('torso')).toBe('armour');
+  });
+
+  it('hides Squadron 42 crew uniforms', () => {
+    const read = catalogue([
+      item({ id: 'pu', name: 'Clempt Pants', slot: 'trousers' }),
+      item({ id: 's42', name: 'Navy BDU Pants', slot: 'trousers', flags: ['squadron42'] }),
+    ]);
+    expect(read.items.map((i) => i.id)).toEqual(['pu']);
   });
 });
 

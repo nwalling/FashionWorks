@@ -151,12 +151,8 @@ pub(crate) fn manufacturer_for(
     (code.to_ascii_uppercase(), name)
 }
 
-const STAT_KEYS: [&str; 4] = [
-    "TemperatureResistance",
-    "RadiationResistance",
-    "Flight",
-    "Chunks",
-];
+/// `Chunks` used to ride along here raw; it is its own field now.
+const STAT_KEYS: [&str; 3] = ["TemperatureResistance", "RadiationResistance", "Flight"];
 
 fn stats_for(record: &Value) -> Value {
     let params = super::component(record, "SCItemClothingParams")
@@ -172,7 +168,56 @@ fn stats_for(record: &Value) -> Value {
     Value::Object(out)
 }
 
-/// One assembled item, or `None` when the record is not armour.
+/// `SCItemClothingParams.Chunks` as `{zone, layer, visible}`, ported from
+/// `catalog.chunks_for`.
+///
+/// A zone on a lower layer is not drawn where a higher layer lists it, unless
+/// the chunk's `visible` keeps that layer (CLOTHING.md, "Phase 0, as run").
+/// `VisibilityConditions` is left out, as the Python leaves it out.
+fn chunks_for(record: &Value) -> Value {
+    let chunks = super::component(record, "SCItemClothingParams")
+        .and_then(|p| p.get("Chunks"))
+        .and_then(Value::as_array);
+    let mut out = Vec::new();
+    for chunk in chunks.into_iter().flatten() {
+        let zone = chunk.get("MeshChunk").and_then(Value::as_str).filter(|z| !z.is_empty());
+        let layer = chunk.get("Layer").and_then(Value::as_i64);
+        let (Some(zone), Some(layer)) = (zone, layer) else {
+            continue;
+        };
+        let visible: Vec<i64> = chunk
+            .get("VisibleLayers")
+            .and_then(Value::as_array)
+            .map(|v| v.iter().filter_map(Value::as_i64).collect())
+            .unwrap_or_default();
+        out.push(json!({ "zone": zone, "layer": layer, "visible": visible }));
+    }
+    Value::Array(out)
+}
+
+/// `SCItemClothingParams.HiddenParts`: port names, first occurrence kept.
+fn hidden_for(record: &Value) -> Vec<String> {
+    let parts = super::component(record, "SCItemClothingParams")
+        .and_then(|p| p.get("HiddenParts"))
+        .and_then(Value::as_array);
+    let mut out: Vec<String> = Vec::new();
+    for part in parts.into_iter().flatten() {
+        if let Some(port) = part.get("PortName").and_then(Value::as_str).filter(|p| !p.is_empty()) {
+            if !out.iter().any(|seen| seen == port) {
+                out.push(port.to_string());
+            }
+        }
+    }
+    out
+}
+
+/// Squadron 42's crew uniforms live beside the player's clothing and are not
+/// in the persistent universe; flagged so a listing can hide them.
+fn is_squadron42(source_path: &str) -> bool {
+    source_path.replace('\\', "/").to_ascii_lowercase().contains("/clothing/s42_clothing/")
+}
+
+/// One assembled item, or `None` when the record is neither armour nor clothing.
 #[allow(clippy::too_many_arguments)]
 pub fn build_item(
     record: &Value,
@@ -208,6 +253,9 @@ pub fn build_item(
         // The mesh is named indirectly; extraction resolves it.
         flags.push("cdf".to_string());
     }
+    if is_squadron42(source_path) {
+        flags.push("squadron42".to_string());
+    }
 
     let bind_mode = bind_mode_for(&geometry);
     let (code, maker_name) = manufacturer_for(record, makers, loc);
@@ -232,6 +280,9 @@ pub fn build_item(
         "socket": socket_for(slot, bind_mode),
         "flags": flags,
         "ports": super::gear::ports_for(record),
+        "outfit": super::outfit_of(slot),
+        "chunks": chunks_for(record),
+        "hidden": hidden_for(record),
     }))
 }
 
@@ -274,7 +325,7 @@ pub fn link_variants(items: &mut [Value]) {
             .as_array()
             .is_some_and(|f| f.iter().any(|v| v.as_str() == Some("unnamed")));
         let product = match item["name"].as_str().filter(|_| !unnamed) {
-            Some(display) => sets::product_key(display),
+            Some(display) => sets::product_key_for(display, &slot),
             None => String::new(),
         };
         let product = if product.is_empty() { sets::canonical_key(class_name) } else { product };
@@ -341,6 +392,7 @@ pub fn assign_sets(items: &mut [Value]) {
             .unwrap_or_default();
         let key = sets::set_key(
             item["name"].as_str().unwrap_or(""),
+            item["slot"].as_str().unwrap_or(""),
             &flags,
             &tags,
             item["manufacturer"]["code"].as_str().unwrap_or(""),
@@ -396,6 +448,37 @@ mod tests {
             weight_class_for(&record, "gys_helmet_03_01_01", "libs/heavyweight_crate/x.xml").as_deref(),
             None
         );
+    }
+
+    #[test]
+    fn chunks_and_hidden_parts_are_read() {
+        let record = json!({ "_RecordValue_": { "Components": [
+            { "_Type_": "SCItemClothingParams",
+              "HiddenParts": [
+                { "PortName": "Clothing_Torso_0" }, { "PortName": "Clothing_Legs" },
+                { "PortName": "Clothing_Torso_0" } ],
+              "Chunks": [
+                { "MeshChunk": "torso01_zone", "Layer": 2, "VisibleLayers": [] },
+                { "MeshChunk": "l_arm05_zone", "Layer": 2, "VisibleLayers": [0] },
+                { "MeshChunk": "", "Layer": 2 } ],
+              "Flight": { "gForceResistance": 0.0 } }
+        ]}});
+        assert_eq!(hidden_for(&record), vec!["Clothing_Torso_0", "Clothing_Legs"]);
+        assert_eq!(
+            chunks_for(&record),
+            json!([
+                { "zone": "torso01_zone", "layer": 2, "visible": [] },
+                { "zone": "l_arm05_zone", "layer": 2, "visible": [0] },
+            ])
+        );
+        assert!(stats_for(&record).get("Chunks").is_none());
+    }
+
+    #[test]
+    fn squadron42_uniforms_are_recognised_by_their_folder() {
+        let root = "libs/foundry/records/entities/scitem/characters/human/clothing";
+        assert!(is_squadron42(&format!("{root}/s42_clothing/s42_clothing_legs/x.xml")));
+        assert!(!is_squadron42(&format!("{root}/pu_clothing/clothing_legs/x.xml")));
     }
 
     #[test]

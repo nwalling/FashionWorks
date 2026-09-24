@@ -563,7 +563,7 @@ def variant_surfaces(settings: Settings, manifest: Manifest, *, unworn: bool = T
     """
     by_id = manifest.by_id()
     pending: list[Item] = []
-    for item in manifest.items:
+    for item in manifest.armour():
         canonical = by_id.get(item.variant_of) if item.variant_of else None
         differs = canonical is not None and (
             (bool(item.materials) and item.materials != canonical.materials)
@@ -717,7 +717,9 @@ def convert(
 ) -> ConvertResult:
     """Convert manifest items to normalized GLBs, in parallel batches."""
     manifest = Manifest.read(settings.manifest_path())
-    items = manifest.items
+    # Armour only: the web kitbasher draws clothing live, and the local viewer
+    # is armour-only by decision.
+    items = manifest.armour()
     if item_id:
         items = [i for i in items if i.id == item_id]
     else:

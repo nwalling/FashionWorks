@@ -4,7 +4,7 @@ import { z } from 'zod';
  * Mirror of `extract/sc_extract/manifest.py`. Bump SCHEMA_VERSION on both
  * sides together; the loader refuses a manifest it was not written for.
  */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export const SLOTS = ['helmet', 'torso', 'arms', 'legs', 'backpack', 'undersuit'] as const;
 export type Slot = (typeof SLOTS)[number];
@@ -84,6 +84,13 @@ export const itemSchema = z.object({
   tags: z.array(z.string()).default([]),
   // The holsters this piece declares (v4). See LOADOUT.md.
   ports: z.array(portSchema).default([]),
+  // v5: clothing joined the catalogue (CLOTHING.md). This viewer is armour-only,
+  // so `manifestSchema` drops clothing before an item reaches this schema.
+  outfit: z.literal('armour').default('armour'),
+  chunks: z
+    .array(z.object({ zone: z.string(), layer: z.number(), visible: z.array(z.number()).default([]) }))
+    .default([]),
+  hidden: z.array(z.string()).default([]),
 });
 
 /** A weapon, knife, pen, grenade, magazine or gadget (v4). This viewer does
@@ -113,7 +120,13 @@ export const manifestSchema = z.object({
     .record(z.object({ chr: z.string().nullable().default(null), glb: z.string().nullable().default(null) }))
     .default({}),
   sockets: z.array(z.string()).default([]),
-  items: z.array(itemSchema).default([]),
+  // Clothing (v5) is catalogued for the web kitbasher and has no GLB here;
+  // leaving it out keeps `Item.slot` the six armour slots.
+  items: z
+    .array(z.record(z.unknown()))
+    .default([])
+    .transform((items) => items.filter((item) => (item.outfit ?? 'armour') === 'armour'))
+    .pipe(z.array(itemSchema)),
   gear: z.array(gearSchema).default([]),
 });
 

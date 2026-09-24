@@ -16,7 +16,17 @@ from typing import Any
 from . import fields as F
 from .dcb import Index, Record
 from .localization import Localization
-from .manifest import SLOTS, Assets, Geometry, Item, Manifest, Manufacturer, Skeleton
+from .manifest import (
+    CLOTHING_SLOTS,
+    SLOTS,
+    Assets,
+    Geometry,
+    Item,
+    Manifest,
+    Manufacturer,
+    Skeleton,
+    outfit_of,
+)
 
 log = logging.getLogger(__name__)
 
@@ -86,15 +96,22 @@ def _attach(record: Record, paths: list[str], default: Any = None) -> Any:
 
 
 def slot_for(record: Record) -> str | None:
-    """Map a record to one of the six slots, or None if it is not armor.
+    """Map a record to an armour or clothing slot, or None if it is neither.
 
     ``AttachDef.Type`` is authoritative and uses the ``Char_Armor_*`` family
-    (verified against build 1.0.191.55227). Class-name hints are a fallback so a
-    renamed attach type cannot silently empty the catalog.
+    (verified against build 1.0.191.55227) and the ``Char_Clothing_*`` family
+    (4.10.193.11644). Class-name hints are a fallback so a renamed attach type
+    cannot silently empty the catalog.
+
+    Clothing is matched before the hints, which used to place it: the Ready-Up
+    Helmet's colourways are ``Char_Clothing_Hat`` -- a hat the game wears on the
+    head's own port -- and were armour helmets only because of their name.
     """
     attach_type = _attach(record, F.ATTACH_TYPE)
     if isinstance(attach_type, str):
-        direct = F.ARMOR_ATTACH_TYPES.get(attach_type)
+        direct = F.ARMOR_ATTACH_TYPES.get(attach_type) or F.CLOTHING_ATTACH_TYPES.get(
+            attach_type
+        )
         if direct:
             return direct
         if attach_type.lower().startswith("char_armor_"):
@@ -510,6 +527,57 @@ def stats_for(record: Record) -> dict[str, Any]:
     return {k: v for k, v in params.items() if k in F.CLOTHING_STAT_KEYS}
 
 
+def chunks_for(record: Record) -> list[dict[str, Any]]:
+    """``SCItemClothingParams.Chunks`` as ``{zone, layer, visible}``.
+
+    A zone on a lower layer is not drawn where a higher layer lists it, unless
+    the chunk's ``visible`` keeps that layer (CLOTHING.md, "Phase 0, as run").
+    ``VisibilityConditions`` is left out: 48 chunks carry an empty one, and the
+    rest tie an undersuit's or armour's zone to the armour ports, which the
+    armour outfit does not draw by zone.
+    """
+    params = F.component(record.data, F.CLOTHING)
+    if not isinstance(params, dict):
+        return []
+    chunks: list[dict[str, Any]] = []
+    for chunk in params.get(F.CHUNKS) or []:
+        if not isinstance(chunk, dict):
+            continue
+        zone = chunk.get("MeshChunk")
+        layer = chunk.get("Layer")
+        if not isinstance(zone, str) or not zone or not isinstance(layer, int):
+            continue
+        visible = [v for v in chunk.get("VisibleLayers") or [] if isinstance(v, int)]
+        chunks.append({"zone": zone, "layer": layer, "visible": visible})
+    return chunks
+
+
+def hidden_for(record: Record) -> list[str]:
+    """``SCItemClothingParams.HiddenParts``: port names, first occurrence kept.
+
+    Records repeat a port -- ``sc_nvy_bdu_jumpsuit_02_01_17`` lists
+    ``Clothing_Torso_0`` twice -- and the repeat says nothing more.
+    """
+    params = F.component(record.data, F.CLOTHING)
+    if not isinstance(params, dict):
+        return []
+    hidden: list[str] = []
+    for part in params.get(F.HIDDEN_PARTS) or []:
+        port = part.get("PortName") if isinstance(part, dict) else None
+        if isinstance(port, str) and port and port not in hidden:
+            hidden.append(port)
+    return hidden
+
+
+# Squadron 42's crew uniforms live beside the player's clothing and are not in
+# the persistent universe. Flagged, like ``test``, so a listing can hide them.
+S42_CLOTHING = "/clothing/s42_clothing/"
+
+
+def is_squadron42(record: Record) -> bool:
+    return record.path is not None and S42_CLOTHING in record.path.as_posix().lower()
+
+
 def tags_for(record: Record, index: Index) -> list[str]:
     """Tags for an item.
 
@@ -604,12 +672,32 @@ _NAME_SLOT_WORD = re.compile(
 )
 
 
-def product_key(name: str) -> str:
+# Clothing names have the same shape with a garment for the slot: "Toughlife
+# Boots Dark Red" is the Toughlife line, "Keldur Hat and Hickory Goggles" the
+# Keldur. Read only for clothing, so no armour key can move. Without these every
+# clothing colourway keyed on its whole name and was a family of one: 58
+# families across 1,970 items, where these give 247 holding 1,607.
+_CLOTHING_NAME_WORD = re.compile(
+    r"^("
+    r"jacket|coat|duster|vest|waistcoat|harness|apron|collar|jumpsuit|"
+    r"coverall|coveralls|overalls|armor|dress|gown|robe|sweater|hoodie|top|"
+    r"tank|shirt|t-shirt|pants|trousers|jeans|shorts|waders|skirt|leggings|"
+    r"boots|boot|shoes|pumps|slippers|sandals|sneakers|gloves|glove|hat|"
+    r"tophat|cap|beanie|mask|balaclava|bandana|goggles|cover|gear|hood|scarf|"
+    r"wrap|apparatus"
+    r")$",
+    re.IGNORECASE,
+)
+
+
+def product_key(name: str, slot: str | None = None) -> str:
     """The product part of a display name: everything before the slot word."""
+    clothing = slot in CLOTHING_SLOTS
     words = name.split()
     kept: list[str] = []
     for word in words:
-        if _NAME_SLOT_WORD.match(word.strip('"()')):
+        bare = word.strip('"()')
+        if _NAME_SLOT_WORD.match(bare) or (clothing and _CLOTHING_NAME_WORD.match(bare)):
             break
         kept.append(word)
     return " ".join(kept).strip().lower()
@@ -642,7 +730,7 @@ def set_key(item: Item) -> str:
     still fall back to the tag and path scheme below.
     """
     if not (set(item.flags or []) & {"unnamed"}):
-        product = product_key(item.name or "")
+        product = product_key(item.name or "", item.slot)
         if product:
             return product
 
@@ -711,7 +799,7 @@ def link_variants(items: list[Item]) -> None:
     for item in items:
         key = geometry_key(item)
         unnamed = "unnamed" in (item.flags or [])
-        product = "" if unnamed else product_key(item.name or "")
+        product = "" if unnamed else product_key(item.name or "", item.slot)
         groups[(
             item.slot,
             product or canonical_key(item.class_name),
@@ -757,6 +845,8 @@ def build_item(
     if any(g.source.lower().endswith(".cdf") for g in geometry):
         # The mesh is named indirectly; `scx extract` resolves it.
         flags.append("cdf")
+    if is_squadron42(record):
+        flags.append("squadron42")
 
     from .gear import ports_for  # gear builds on this module
 
@@ -783,6 +873,9 @@ def build_item(
         assets=Assets(glb=None, thumb=None),
         flags=flags,
         ports=ports_for(record),
+        outfit=outfit_of(slot),
+        chunks=chunks_for(record),
+        hidden=hidden_for(record),
     )
 
 

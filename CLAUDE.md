@@ -2078,6 +2078,25 @@ combined GLB is the one that loses that race -- a six-piece loadout exports at
 anchor is appended to the document first, because Firefox ignores `click()` on a
 detached anchor.
 
+### Clothing is catalogued, and the pipeline ignores it (schema 5)
+
+`CLOTHING.md` is the plan and the record. Both catalogues map the eight
+`Char_Clothing_*` attach types to the slots `hat`, `shirt`, `jacket`,
+`accessory`, `gloves`, `trousers`, `footwear` and `pack`, and every item
+carries `outfit` (`armour` or `clothing`, decided by the slot), `chunks`
+(`{zone, layer, visible}`) and `hidden` (port names). 4,416 items, 1,970 of
+them clothing, 100% agreement in both directions. The Blender pipeline, the
+audit and the local viewer read armour only -- `Manifest.armour()` -- because
+the web kitbasher draws clothing live.
+
+Two things that are easy to get wrong here:
+
+* **The type is read before the name hints.** The Ready-Up Helmet is a hat;
+  it was an armour helmet only because its name says "helmet".
+* **`product_key` takes the slot.** Clothing stops at the garment ("Toughlife
+  Boots Dark Red" is Toughlife), and that list is read only for clothing slots,
+  so it cannot move an armour key.
+
 ### Still unverified
 
 - Only one set has been converted end to end. `scx convert` has not been run

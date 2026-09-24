@@ -54,7 +54,7 @@ def test_counts_cover_every_slot() -> None:
     counts = sample().counts_by_slot()
     assert counts["helmet"] == 1
     assert counts["undersuit"] == 0
-    assert len(counts) == 6
+    assert len(counts) == 14, "six armour slots and eight clothing"
 
 
 def test_generated_at_is_filled() -> None:
@@ -86,18 +86,31 @@ def test_material_overrides_survive_a_round_trip(tmp_path: Path) -> None:
     assert back.material_overrides[0].base_color == "tint/a_albedo.png"
 
 
-def test_schema_version_is_four() -> None:
+def test_schema_version_is_five() -> None:
     """Bumped whenever the shape changes.
 
     v2 added material_overrides and swatch; v3 base_color_unworn and
     orm_unworn, so the viewer can show a piece factory-fresh; v4 the armour's
-    holster ``ports`` and the ``gear`` list (LOADOUT.md).
+    holster ``ports`` and the ``gear`` list (LOADOUT.md); v5 clothing -- its
+    slots, ``outfit``, ``chunks`` and ``hidden`` (CLOTHING.md), with the raw
+    ``Chunks`` moved out of ``stats``.
 
     viewer/src/manifest.ts must carry the same number or the viewer refuses
     the manifest. This test exists to make that a conscious edit rather than
     something noticed after the viewer starts rejecting builds.
     """
-    assert SCHEMA_VERSION == 4
+    assert SCHEMA_VERSION == 5
+
+
+def test_armour_leaves_clothing_out() -> None:
+    manifest = Manifest(
+        items=[
+            Item(id="a", class_name="a", name="A", slot="helmet"),
+            Item(id="b", class_name="b", name="B", slot="shirt", outfit="clothing"),
+        ]
+    )
+    assert [i.id for i in manifest.armour()] == ["a"]
+    assert manifest.counts_by_slot()["shirt"] == 1
 
 
 def test_write_restamps_the_schema_version(tmp_path: Path) -> None:

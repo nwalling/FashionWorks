@@ -18,7 +18,7 @@ import logging
 import re
 import struct
 from collections import Counter, defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from .config import Settings
@@ -492,6 +492,8 @@ CHECKS = (
 
 def run(settings: Settings, manifest: Manifest) -> AuditReport:
     report = AuditReport()
+    # The checks are about baked surfaces, which only armour has.
+    manifest = replace(manifest, items=manifest.armour())
     for check in CHECKS:
         try:
             check(settings, manifest, report)

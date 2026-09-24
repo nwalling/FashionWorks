@@ -160,6 +160,7 @@ fn main() {
                 .unwrap_or_default();
             let got = catalog::set_key(
                 w["name"].as_str().unwrap_or(""),
+                w["slot"].as_str().unwrap_or(""),
                 &flags,
                 &tags,
                 w["manufacturer"]["code"].as_str().unwrap_or(""),
