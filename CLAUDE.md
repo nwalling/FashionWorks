@@ -21,6 +21,9 @@ port survey and clip measurements it rests on.
 `CLOTHING.md` is the plan for clothing as a wearable layer instead of armour:
 the body's ports, the undersuit that carries armour and hides clothing, and the
 layered body zones that decide what shows.
+`CHARACTER.md` is the plan for loading a player's own character from the
+`.chf` the game's customizer saves: the face as a per-region blend of library
+heads, the skin tone, eyes and hair colour, and the head items it names.
 `RENDERING.md` is the plan for closing the gap to a studio render -- tone
 mapping, the game's own probes as IBL, per-pixel LayerBlend, a body -- with
 the archive measurements it rests on and the boundaries it keeps.
