@@ -64,6 +64,7 @@ import {
 } from '../gear/ports';
 import { meshTexture, plainMaterial, surfaceMaterial, texturesWanted } from './materials';
 import { DEFAULT_PRESET, LIGHT_PRESETS, StudioLighting } from './lighting';
+import { LIVE_DEFAULTS, liveSurfaces, takesS3tc } from './live';
 import { applyClip, bonePosition, boneRotation, buildRig, mountMatrix, type BuiltRig } from './rig';
 import { compositeSurfaces, dataTexture, type CompositeGeometry, type PaletteEntry } from './surface';
 
@@ -885,7 +886,7 @@ export class Kitbasher {
   }
 
   private async load(item: CatalogueItem): Promise<Loaded> {
-    const key = `${item.id}:${this.state.wear}:${this.state.body}`;
+    const key = `${item.id}:${this.state.wear}:${this.state.body}:${this.surfaceMode}`;
     const hit = this.cache.get(key);
     if (hit) {
       // Most recently used goes to the back of the eviction order.
@@ -910,38 +911,13 @@ export class Kitbasher {
     const material: MaterialPayload = mtl
       ? (await this.client.material(mtl)).material
       : { submaterials: [], library: {} };
-    const fetchTexture = async (path: string, maxSize: number) =>
-      (await this.client.texture(path, maxSize)).texture;
-    const composited = await compositeSurfaces(material, paletteOf(item), fetchTexture, {
-      wear: this.state.wear,
-      geometry: payloads.map((p) => ({ uvs: p.uvs, indices: p.indices, submeshes: p.submeshes })),
-      detail: true,
-    });
-
-    // The textures the materials bind directly: the armour's own normal maps,
-    // and the diffuse of anything that is not LayerBlend.
-    const byPath = new Map<string, Texture>();
-    for (const sub of material.submaterials) {
-      for (const want of texturesWanted(sub)) {
-        if (byPath.has(want.path)) continue;
-        const payload = (await this.client.texture(want.path, 1024)).texture;
-        if (!payload) continue;
-        byPath.set(
-          want.path,
-          meshTexture(dataTexture(payload.rgba, payload.width, payload.height, want.srgb), want.srgb),
-        );
-      }
-    }
-
     const count = Math.max(1, material.submaterials.length);
-    const materials: Material[] = material.submaterials.length
-      ? material.submaterials.map((sub) => (composited.surfaces.has(sub.name)
-        ? surfaceMaterial(sub, composited, { byPath })
-        : plainMaterial(sub, { byPath })))
-      : [plainMaterial({
-        name: '', shader: 'Illum', tintable: false, textures: {}, layers: [],
-        glow: 0, opacity: 1, alphaTest: 0, shininess: 0.45,
-      }, { byPath })];
+    const { materials, refine } = await this.materialsFor(
+      item,
+      material,
+      payloads.map((p) => ({ uvs: p.uvs, indices: p.indices, submeshes: p.submeshes })),
+      'armour',
+    );
 
     const objects: Object3D[] = [];
     for (const payload of payloads) {
@@ -970,9 +946,148 @@ export class Kitbasher {
       payloads.flatMap((p) => p.overrides ?? []),
       socket ? (payloads[0] as PropPayload | undefined)?.helperTransforms : undefined,
     );
+    if (refine) loaded.refines = [refine];
     this.cache.set(key, loaded);
     this.evict(loaded);
     return loaded;
+  }
+
+  /** Materials for a piece's submaterials: live LayerBlend on the mesh
+   * (RENDERING.md Phase 3), or the baked atlas on the low setting, with the
+   * `.mtl`'s own constants and textures for everything that is not
+   * LayerBlend either way. */
+  private async materialsFor(
+    item: CatalogueItem,
+    material: MaterialPayload,
+    geometry: CompositeGeometry[],
+    size: 'armour' | 'weapon' | 'small',
+  ): Promise<{ materials: Material[]; refine: (() => Promise<number>) | null }> {
+    const sizes = size === 'armour' ? LIVE_DEFAULTS
+      : size === 'weapon' ? { ...LIVE_DEFAULTS, controlSize: 1024, surfaceSize: 1024 }
+        : { ...LIVE_DEFAULTS, normalSize: 128, controlSize: 512, surfaceSize: 512 };
+    const live = this.surfaceMode === 'live'
+      ? await liveSurfaces(material, paletteOf(item), this.client, {
+        ...sizes, wear: this.state.wear, compressed: this.s3tc,
+      })
+      : null;
+    const fetchTexture = async (path: string, maxSize: number) =>
+      (await this.client.texture(path, maxSize)).texture;
+    const composited = live ? null : await compositeSurfaces(material, paletteOf(item), fetchTexture, {
+      wear: this.state.wear,
+      size: size === 'small' ? 512 : undefined,
+      geometry,
+      detail: true,
+    });
+
+    // The textures the materials bind directly: the armour's own normal maps
+    // on the bake path, and the diffuse of anything that is not LayerBlend.
+    const byPath = new Map<string, Texture>();
+    for (const sub of material.submaterials) {
+      if (live?.materials.has(sub.name)) continue;
+      for (const want of texturesWanted(sub)) {
+        if (byPath.has(want.path)) continue;
+        const payload = (await this.client.texture(want.path, 1024)).texture;
+        if (!payload) continue;
+        byPath.set(
+          want.path,
+          meshTexture(dataTexture(payload.rgba, payload.width, payload.height, want.srgb), want.srgb),
+        );
+      }
+    }
+
+    const refine = live ? live.refine : null;
+    if (!material.submaterials.length) {
+      return {
+        materials: [plainMaterial({
+          name: '', shader: 'Illum', tintable: false, textures: {}, layers: [],
+          glow: 0, opacity: 1, alphaTest: 0, shininess: 0.45,
+        }, { byPath })],
+        refine,
+      };
+    }
+    return {
+      materials: material.submaterials.map((sub) => live?.materials.get(sub.name)
+        ?? (composited?.surfaces.has(sub.name)
+          ? surfaceMaterial(sub, composited, { byPath })
+          : plainMaterial(sub, { byPath }))),
+      refine,
+    };
+  }
+
+  /** Bring a piece's surface maps up to full size once it is on screen: the
+   * first decode is quick so the piece appears, the finer one follows. */
+  private refineLater(loaded: Loaded): void {
+    const refines = loaded.refines;
+    if (!refines?.length || loaded.refined) return;
+    loaded.refined = true;
+    this.refineQueue.push(async () => {
+      for (const refine of refines) {
+        try {
+          loaded.bytes += await refine();
+        } catch {
+          // A texture that will not decode at full size keeps the first one.
+        }
+      }
+    });
+    this.scheduleRefine();
+  }
+
+  /** Refinements wait for the engine to be idle. The worker is one thread,
+   * and a 2048 decode running beside the next equip slowed that equip by
+   * about as much as it saved. */
+  private readonly refineQueue: Array<() => Promise<void>> = [];
+
+  private refineTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private refining = false;
+
+  /** Whether full-size surface maps are still on their way. For a check to
+   * wait on; nothing on screen needs it. */
+  get refinePending(): boolean {
+    return this.refining || this.refineTimer !== null || this.refineQueue.length > 0;
+  }
+
+  private scheduleRefine(): void {
+    if (this.refineTimer) clearTimeout(this.refineTimer);
+    this.refineTimer = setTimeout(() => {
+      this.refineTimer = null;
+      if (this.disposed) return;
+      if (this.state.busy) {
+        this.scheduleRefine();
+        return;
+      }
+      const next = this.refineQueue.shift();
+      if (!next) return;
+      this.refining = true;
+      void next().finally(() => {
+        this.refining = false;
+        if (this.refineQueue.length) this.scheduleRefine();
+      });
+    }, REFINE_IDLE_MS);
+  }
+
+  /** `live` runs LayerBlend on the mesh; `baked` is the atlas. */
+  private surfaceMode: 'live' | 'baked' = 'live';
+
+  /** Whether this GPU takes BC1 layer textures still compressed. */
+  private get s3tc(): boolean {
+    return this.view.renderer ? takesS3tc(this.view.renderer) : false;
+  }
+
+  /** Switch between live and baked surfaces, re-equipping what is on. */
+  async setSurfaceMode(mode: 'live' | 'baked'): Promise<void> {
+    if (mode === this.surfaceMode) return;
+    this.surfaceMode = mode;
+    const worn = [...this.wearing.values()];
+    const carried = [...this.carried].map(([port, c]) => ({ port, item: c.item }));
+    if (!worn.length && !carried.length) return;
+    this.publish({ busy: true, status: `switching to ${mode} surfaces…` });
+    for (const item of worn) await this.equip(item);
+    for (const { port, item } of carried) {
+      this.uncarry(port);
+      await this.carry(item, port);
+    }
+    this.publish({ busy: false, status: `${mode} surfaces` });
   }
 
   /** Drop least-recently-used pieces until the cache fits its budget. Never
@@ -1091,6 +1206,7 @@ export class Kitbasher {
       0,
     );
     this.frameLoadout();
+    this.refineLater(loaded);
     const status = gear.removed.length
       ? `${name}: ${describePorts(gear.ports)}; ${gear.removed.join(', ')} came off`
       : `${name} · ${triangles.toLocaleString()} triangles`;
@@ -1292,7 +1408,7 @@ export class Kitbasher {
    * One template per item, whatever port it goes in: four identical grenades
    * share their geometry and surfaces and differ only in where they hang. */
   private async loadGear(item: CatalogueItem): Promise<Loaded> {
-    const key = `gear:${item.id}:${this.state.wear}`;
+    const key = `gear:${item.id}:${this.state.wear}:${this.surfaceMode}`;
     const hit = this.cache.get(key);
     if (hit) {
       this.cache.delete(key);
@@ -1307,8 +1423,7 @@ export class Kitbasher {
     group.name = displayName(item);
     const all: Material[] = [];
     const empty: MaterialPayload = { submaterials: [], library: {} };
-    const fetchTexture = async (path: string, maxSize: number) =>
-      (await this.client.texture(path, maxSize)).texture;
+    const refines: Array<() => Promise<number>> = [];
 
     for (const part of payload.parts) {
       // The record's colourway material replaces the definition's own on the
@@ -1324,37 +1439,17 @@ export class Kitbasher {
           material = empty;
         }
       }
-      const composited = await compositeSurfaces(material, paletteOf(item), fetchTexture, {
-        wear: this.state.wear,
-        // A rifle is a torso's length and earns the full bake; a magazine, a
-        // pen or a grenade is a few centimetres, and eight of them on a belt
-        // at 1024 each would cost more than the armour they hang on.
-        size: item.slot === 'primary' || item.slot === 'sidearm' ? 1024 : 512,
-        geometry: [{ uvs: part.mesh.uvs, indices: part.mesh.indices, submeshes: part.mesh.submeshes }],
-        detail: true,
-      });
-      const byPath = new Map<string, Texture>();
-      for (const sub of material.submaterials) {
-        for (const want of texturesWanted(sub)) {
-          if (byPath.has(want.path)) continue;
-          const texture = (await this.client.texture(want.path, 1024)).texture;
-          if (texture) {
-            byPath.set(
-              want.path,
-              meshTexture(dataTexture(texture.rgba, texture.width, texture.height, want.srgb), want.srgb),
-            );
-          }
-        }
-      }
       const count = Math.max(1, material.submaterials.length);
-      const materials: Material[] = material.submaterials.length
-        ? material.submaterials.map((sub) => (composited.surfaces.has(sub.name)
-          ? surfaceMaterial(sub, composited, { byPath })
-          : plainMaterial(sub, { byPath })))
-        : [plainMaterial({
-          name: '', shader: 'Illum', tintable: false, textures: {}, layers: [],
-          glow: 0, opacity: 1, alphaTest: 0, shininess: 0.45,
-        }, { byPath })];
+      // A rifle is a torso's length and earns the full maps; a magazine, a
+      // pen or a grenade is a few centimetres, and eight of them on a belt at
+      // full size would cost more than the armour they hang on.
+      const { materials, refine } = await this.materialsFor(
+        item,
+        material,
+        [{ uvs: part.mesh.uvs, indices: part.mesh.indices, submeshes: part.mesh.submeshes }],
+        item.slot === 'primary' || item.slot === 'sidearm' ? 'weapon' : 'small',
+      );
+      if (refine) refines.push(refine);
       const mesh = new Mesh(drawnOnly(buildGeometry(part.mesh, count).geometry, materials), materials);
       mesh.name = part.name;
       mesh.frustumCulled = false;
@@ -1363,6 +1458,7 @@ export class Kitbasher {
       all.push(...materials);
     }
     const loaded = measure(key, [group], all, [], payload.helpers);
+    loaded.refines = refines;
     this.cache.set(key, loaded);
     this.evict(loaded);
     return loaded;
@@ -1483,6 +1579,9 @@ export class Kitbasher {
     this.mountCarried(carried);
     this.evict();
     this.frameLoadout();
+    // Clones share the template's materials, so one refine serves every copy.
+    this.refineLater(template);
+    if (carried.magazine) this.refineLater(carried.magazine.template);
     this.publish({
       busy: false,
       ports,
@@ -1663,6 +1762,9 @@ function drawnOnly<G extends { groups: Array<{ materialIndex?: number }> }>(geom
   return geometry;
 }
 
+/** How long the engine must sit idle before a piece's full-size maps load. */
+const REFINE_IDLE_MS = 600;
+
 /** Lowest world height of the foot and toe bones.
  *
  * Clips apply rotations only, which keeps bone lengths ours but leaves the hips
@@ -1708,8 +1810,12 @@ interface Loaded {
   readonly key: string;
   readonly objects: Object3D[];
   readonly overrides: AttachmentOverride[];
-  /** Estimated bytes held, GPU and CPU together. */
-  readonly bytes: number;
+  /** Estimated bytes held, GPU and CPU together. Grows once when the
+   * surface maps are refined to full size. */
+  bytes: number;
+  /** Bring surface maps to full size, once, after the piece is shown. */
+  refines?: Array<() => Promise<number>>;
+  refined?: boolean;
   /** A rigid piece's helper nodes, in its own space: a backpack's holsters,
    * a rifle's `magAttach`. */
   readonly helpers?: Record<string, Float32Array>;
@@ -1743,18 +1849,21 @@ function measure(
       const texture = m[slot] as Texture | null | undefined;
       if (texture && !texture.userData.shared) textures.add(texture);
     }
-    const grain = m.userData?.fwGrain as Record<string, { value: unknown }> | undefined;
-    for (const uniform of Object.values(grain ?? {})) {
-      const texture = uniform.value as Texture | null;
-      if (texture && typeof texture === 'object' && 'isTexture' in texture) textures.add(texture);
+    for (const bag of [m.userData?.fwGrain, m.userData?.fwLive]) {
+      for (const uniform of Object.values((bag ?? {}) as Record<string, { value: unknown }>)) {
+        const texture = uniform.value as Texture | null;
+        if (texture && typeof texture === 'object' && 'isTexture' in texture && !texture.userData.shared) textures.add(texture);
+      }
     }
   }
   let bytes = 0;
   for (const texture of textures) {
     const image = texture.image as { width?: number; height?: number; depth?: number; data?: ArrayLike<number> };
     const texels = (image.width ?? 0) * (image.height ?? 0) * (image.depth ?? 1);
-    // GPU with mips, plus the CPU copy three.js keeps for re-upload.
-    bytes += texels * 4 * 1.34 + (image.data?.length ?? 0);
+    // GPU with mips -- half a byte a texel for BC1 -- plus the CPU copy
+    // three.js keeps for re-upload, unless the texture drops it once uploaded.
+    const perTexel = (texture as Texture & { isCompressedArrayTexture?: boolean }).isCompressedArrayTexture ? 0.5 : 4;
+    bytes += texels * perTexel * 1.34 + (texture.userData.released ? 0 : (image.data?.length ?? 0));
   }
   const geometries = new Set<Mesh['geometry']>();
   for (const root of objects) {

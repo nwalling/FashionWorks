@@ -284,8 +284,13 @@ export class ArchiveClient {
     return this.request('material', { type: 'material', path });
   }
 
-  async texture(path: string, maxSize: number) {
-    return this.request('texture', { type: 'texture', path, maxSize });
+  async texture(path: string, maxSize: number, alpha = false) {
+    return this.request('texture', { type: 'texture', path, maxSize, alpha });
+  }
+
+  /** A BC1 texture's raw blocks, or null when it is not BC1. */
+  async blocks(path: string, maxSize: number) {
+    return (await this.request('blocks', { type: 'blocks', path, maxSize })).blocks;
   }
 
   async prop(path: string, socket: string) {

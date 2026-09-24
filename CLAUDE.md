@@ -347,7 +347,9 @@ used to sit here described the first, refuted attempt.
 drops them.** Converted `_ddna` PNGs come out with a constant-255 alpha, which
 looks like "this texture has no gloss". It has to be decoded separately with
 `starbreaker dds decode --alpha`; `layers.gloss_for` does that and caches to
-`data/interim/gloss`. Real gloss is `layer Shininess x GlossMult x that alpha`,
+`data/interim/gloss`. Real gloss is `that alpha x GlossMult x the palette
+entry's glossiness`, with `layer Shininess x GlossMult x glossiness` only where a
+layer ships no alpha stream (`tint.compose_layered`; the web shaders match),
 which replaced a hand-tuned 0.30-0.75 roughness band.
 
 **`.dds` and `.dds.N` are mips; `.dds.Na` are the alpha mips.** A `_ddn` name

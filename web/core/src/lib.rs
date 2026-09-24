@@ -857,6 +857,82 @@ impl Archive {
     /// and measuring them costs a full BC decode per try, and mip 0 of a
     /// control map is routinely 2048x2048 -- which made choosing a 512 cost
     /// more than using the 2048 would have. Dimensions come out of the header.
+    /// A texture with its gloss: RGBA8 at `mip`, the alpha channel taken from
+    /// the `.dds.Na` smoothness stream where the texture ships one.
+    ///
+    /// A `_ddna` decodes to its normal with a constant alpha; the per-pixel
+    /// gloss is a separate BC4 stream that the RGBA decode never reads. The
+    /// live LayerBlend shader wants both from one fetch. RENDERING.md Phase 3.
+    #[wasm_bindgen(js_name = loadTextureAlpha)]
+    pub fn load_texture_alpha(&self, path: &str, mip: usize) -> Result<js_sys::Array, JsValue> {
+        let dds = self.split_dds(path)?;
+        let (w, h) = dds.dimensions(mip);
+        let mut rgba = dds
+            .decode_rgba(mip)
+            .map_err(|e| JsValue::from_str(&format!("decoding {path} mip {mip}: {e}")))?;
+        if dds.has_alpha_mips() {
+            if let Ok(alpha) = dds.decode_alpha_mip(mip) {
+                if alpha.len() * 4 == rgba.len() {
+                    for (i, a) in alpha.iter().enumerate() {
+                        rgba[i * 4 + 3] = *a;
+                    }
+                }
+            }
+        }
+        let out = js_sys::Array::new();
+        out.push(&(w as f64).into());
+        out.push(&(h as f64).into());
+        out.push(&js_sys::Uint8Array::from(&rgba[..]).into());
+        Ok(out)
+    }
+
+    /// A BC1 texture as its raw blocks: `[width, height, ...mips]` from the
+    /// largest mip no wider than `max_size` down to 4x4, for a GPU that takes
+    /// S3TC directly -- a 512 layer is 171 KB like that against 1.4 MB decoded.
+    /// Anything that is not BC1 is an error; the caller decodes instead.
+    #[wasm_bindgen(js_name = textureBlocks)]
+    pub fn texture_blocks(&self, path: &str, max_size: u32) -> Result<js_sys::Array, JsValue> {
+        let dds = self.split_dds(path)?;
+        let format = starbreaker_dds::resolve_format(&dds.header.pixel_format, dds.dxt10_header.as_ref())
+            .map_err(|e| JsValue::from_str(&format!("{path}: {e}")))?;
+        if !matches!(format, starbreaker_dds::DxgiFormat::BC1Unorm | starbreaker_dds::DxgiFormat::BC1UnormSrgb) {
+            return Err(JsValue::from_str(&format!("{path} is {format:?}, not BC1")));
+        }
+        let mut first = 0;
+        while first + 1 < dds.mip_count() && dds.dimensions(first).0 > max_size {
+            first += 1;
+        }
+        let (w, h) = dds.dimensions(first);
+        let out = js_sys::Array::new();
+        out.push(&(w as f64).into());
+        out.push(&(h as f64).into());
+        for mip in first..dds.mip_count() {
+            let (mw, mh) = dds.dimensions(mip);
+            if mw < 4 || mh < 4 {
+                break;
+            }
+            let expected = (mw as usize).div_ceil(4) * (mh as usize).div_ceil(4) * 8;
+            let data = &dds.mip_data[mip];
+            if data.len() < expected {
+                break;
+            }
+            out.push(&js_sys::Uint8Array::from(&data[..expected]).into());
+        }
+        Ok(out)
+    }
+
+    /// An entry's DDS with its split mips joined.
+    fn split_dds(&self, path: &str) -> Result<starbreaker_dds::DdsFile, JsValue> {
+        let index = self
+            .find_asset(path)
+            .ok_or_else(|| JsValue::from_str(&format!("no texture at {path}")))?;
+        let entry = &self.entries[index];
+        let base = p4k::read_entry(self.reader.source(), entry).map_err(|e| JsValue::from_str(&e))?;
+        let siblings = ArchiveSiblings { archive: self, base: entry.name.clone() };
+        starbreaker_dds::DdsFile::from_split(&base.bytes, &siblings)
+            .map_err(|e| JsValue::from_str(&format!("reading split DDS {path}: {e}")))
+    }
+
     #[wasm_bindgen(js_name = textureSizes)]
     pub fn texture_sizes(&self, path: &str) -> Result<Vec<u32>, JsValue> {
         let index = self

@@ -110,6 +110,8 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
     viewer.current = handle;
     setQuality(handle.quality());
     const built = new Engine(client, initialCatalogue, handle);
+    // Low draws the baked atlas; everything above runs LayerBlend on the mesh.
+    void built.setSurfaceMode(handle.quality() === 'low' ? 'baked' : 'live');
     const remembered = rememberedLighting();
     if (remembered) void built.setLighting(remembered);
     engine.current = built;
@@ -334,6 +336,7 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
                 const next = event.target.value as Quality;
                 viewer.current?.setQuality(next);
                 setQuality(next);
+                void engine.current?.setSurfaceMode(next === 'low' ? 'baked' : 'live');
               }}
             >
               {QUALITIES.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}

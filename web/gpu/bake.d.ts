@@ -8,6 +8,13 @@
 
 export const LAYER_SIZE: number;
 
+/** The stand-in palette for an item that carries none: three near-greys. */
+export const DEFAULT_PALETTE: ReadonlyArray<{
+  readonly color: [number, number, number];
+  readonly spec: [number, number, number];
+  readonly glossiness: number;
+}>;
+
 export interface Program {
   program: WebGLProgram;
   uniforms: Record<string, WebGLUniformLocation | null>;

@@ -166,7 +166,7 @@ export function createTarget(gl, size) {
   return { framebuffer, albedo, orm };
 }
 
-const DEFAULT_PALETTE = [
+export const DEFAULT_PALETTE = [
   // The stand-in for the 268 canonical items that carry no palette at all.
   // Without it a LayerBlend material with nothing to tint renders blown-out
   // white; three near-greys keep the mask's panel variation visible.

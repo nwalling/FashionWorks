@@ -23,6 +23,7 @@ Built on the `rendering` branch, not merged or pushed.
 | 0 -- harness | done | `npm run harness -- <label> [--compare <old>]`; two runs agree on every scored figure, render time within 0.1 ms. Baseline below. Found and fixed an eviction bug on the way. |
 | 1 -- tone, probes, presets | done | Contrast 2.19 -> **2.88** (band 2.48-3.47); Corbel hue error 13.2 -> 3.9 degrees, Lynx 5.5 -> 3.3, its saturated share 7.7 -> 27.7 % (the blue specular now reads); Beacon 0.2 -> 2.5 (the one that moved away). Probe decode 24-43 ms. Render 6.4 -> 7.5 ms. Details under "Phase 1, as built". |
 | 2 -- AO, AA, quality | done | Post chain on medium/high: multisampled half-float target, GTAO, `OutputPass`. High: contrast 2.88 -> **2.95**, tactical median 26.7 -> 28.1 (in-game 29), 61 fps with the 23-item loadout, render 7.5 -> 11.2 ms, app 170 of 400 KB. Low is the old direct path, unchanged. Details under "Phase 2, as built". |
+| 3 -- LayerBlend on the mesh | done | UV-space against the bake on the Sunchaser core: mean difference **0.32-0.84** sRGB units, **99.6-100 %** of texels within 6. No moire at any zoom. Refined pieces 31-35 MB (bake: helmet 58.6, torso 44.2). Heavy loadout 958 -> **393 MB**, 60 fps, render 12.5 ms. Cold equip faster than the bake once warm (4.1 s against 4.6-4.7 s for four pieces). Contrast 3.31, still in band; tactical torso mean 33.9 against the in-game 34. |
 
 ### Baseline (built package, 1600x1000, today's renderer)
 
@@ -133,6 +134,52 @@ the shadow, the pool scaled until the floor measured what it did (26 against
 **The harness counts a whole frame.** three resets `renderer.info` per render
 call; a post chain makes several, so the first Phase 2 run reported one draw
 call and one triangle -- the final quad.
+
+### Phase 3, as built
+
+`three/live.ts`. Each LayerBlend submaterial is a `MeshStandardMaterial`
+whose fragment shader runs the bake's rules -- blend splat with screen-space
+anti-aliasing, absolute `PaletteTint`, a metal taking the palette's specular,
+the palette modulating the layer's tint, a metal's diffuse normalised around
+its mean, wear paired on the slot with dark as worn, `_hal` green as occlusion
+-- and hands colour, roughness, metalness, occlusion and a detail normal to
+three's lighting, so the probe, the key's shadow and GTAO all still apply.
+Low quality keeps the bake.
+
+**Proven against the bake, texel for texel.** The live shader rendered into UV
+space at 1024 with an unlit debug output, against the baked atlas of the same
+material: five Sunchaser core submaterials, mean difference 0.32-0.84 sRGB
+units, 99.6-100 % of texels within 6, identical mean colours. At that size
+the mipmapped layers average to exactly the means the bake used; up close they
+keep their texture.
+
+**Per-pixel gloss arrived with it.** The port's bake never read the `_ddna`
+smoothness stream -- every layer took its constant -- because `decode_rgba`
+leaves it out. `Archive.loadTextureAlpha` merges the `.dds.Na` stream into
+alpha. The Lynx arms' saturated share rose 27 -> 41 %.
+
+**The formula is the Python's**, alpha x GlossMult x palette glossiness, with
+Shininess only as the constant when there is no stream. `CLAUDE.md` said
+Shininess x GlossMult x alpha; it was corrected against `tint.py`.
+
+**Textures, and where the memory went.** Layer colour 512, uploaded as BC1
+blocks where the GPU takes S3TC (`Archive.textureBlocks`, 171 KB a layer) --
+this Mac does; RGTC for the BC4/BC5 maps it does not, so those decode. Layer
+normal + gloss 256. The control maps split three ways: blend + wear RGBA at
+1024; the armour `_ddn` as RG at 2048; `_hal` as one channel at 1024. Packing
+the normal and occlusion together as RGBA put a refined piece at about
+55 MB. CPU copies are dropped once uploaded.
+
+**The 2048 normal arrives after the piece.** Decoding it up front cost 250 ms a
+piece and left cold equips 9-15 % slower than the bake. It is decoded at 1024
+first and refined when the engine has been idle 600 ms -- refining in parallel
+with the next equip slowed that equip by about what it saved, the worker being
+one thread. The harness waits for refinement (`refinePending`), which it did
+not at first: the loadout measured 51 fps mid-upload.
+
+**Layer means from the blocks.** The metal rule needs each layer's linear
+mean. A 16x16 mip's BC1 blocks decode in JavaScript for nothing (`bc1Mean`);
+asking the worker for a small decoded copy cost a round trip per layer.
 
 ## Boundaries
 

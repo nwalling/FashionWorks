@@ -75,7 +75,9 @@ export type ToWorker = (
   /** Resolve a `.mtl` and its whole layer library. */
   | { type: 'material'; path: string }
   /** Decode one texture to RGBA at the given mip. */
-  | { type: 'texture'; path: string; maxSize: number }
+  | { type: 'texture'; path: string; maxSize: number; alpha?: boolean }
+  /** A BC1 texture's raw blocks and mips, for upload still compressed. */
+  | { type: 'blocks'; path: string; maxSize: number }
   /** Load a rigid prop and work out where it mounts. */
   | { type: 'prop'; path: string; socket: string }
   /** Retarget an animation clip onto the canonical armature. */
@@ -249,6 +251,7 @@ export type FromWorker = (
   | { type: 'discovered'; path: string | null }
   | { type: 'gear'; path: string; gear: GearPayload; ms: number }
   | { type: 'probe'; path: string; size: number; rgba: Float32Array; ms: number }
+  | { type: 'blocks'; path: string; blocks: { width: number; height: number; mips: Uint8Array[] } | null }
   | { type: 'lights'; lights: RigLight[] }
   | { type: 'failed'; message: string }
 ) & { id?: number };
@@ -348,6 +351,8 @@ let opened: {
     loadProp(path: string, socket: string): unknown;
     retargetPose(path: string, clip: string): unknown;
     loadTexture(path: string, mip: number): [number, number, Uint8Array];
+    loadTextureAlpha(path: string, mip: number): [number, number, Uint8Array];
+    textureBlocks(path: string, maxSize: number): [number, number, ...Uint8Array[]];
     textureSizes(path: string): Uint32Array;
     discoverMaterial(className: string, meshPath: string, meshMaterial?: string): string | undefined;
     loadGear(path: string, locator: string): unknown;
@@ -485,7 +490,9 @@ async function run(message: ToWorker): Promise<void> {
       while ((mip + 1) * 2 < sizes.length && sizes[mip * 2]! > message.maxSize) {
         mip += 1;
       }
-      const [w, h, rgba] = opened.archive.loadTexture(message.path, mip);
+      const [w, h, rgba] = message.alpha
+        ? opened.archive.loadTextureAlpha(message.path, mip)
+        : opened.archive.loadTexture(message.path, mip);
       reply({
         type: 'texture',
         texture: { path: message.path, width: w, height: h, rgba },
@@ -496,6 +503,21 @@ async function run(message: ToWorker): Promise<void> {
     } catch {
       // A texture that will not decode is not fatal: the surface falls back.
       reply({ type: 'texture', texture: null, ms: performance.now() - started, reads, fetched });
+    }
+    return;
+  }
+
+  if (message.type === 'blocks') {
+    if (!opened) {
+      reply({ type: 'failed', message: 'no archive is open' });
+      return;
+    }
+    try {
+      const [width, height, ...mips] = opened.archive.textureBlocks(message.path, message.maxSize);
+      reply({ type: 'blocks', path: message.path, blocks: { width, height, mips } });
+    } catch {
+      // Not BC1, or missing: the caller decodes instead.
+      reply({ type: 'blocks', path: message.path, blocks: null });
     }
     return;
   }

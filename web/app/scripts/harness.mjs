@@ -184,7 +184,8 @@ function installHelpers({ light, tweak, quality }) {
     requestAnimationFrame(step);
   });
   const settle = async () => {
-    while (engine().current.busy) await new Promise((r) => setTimeout(r, 100));
+    // Busy, or still bringing surface maps up to full size in the background.
+    while (engine().current.busy || engine().refinePending) await new Promise((r) => setTimeout(r, 100));
     await frames(4);
   };
 
