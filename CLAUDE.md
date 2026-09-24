@@ -1519,6 +1519,17 @@ Useful frames come from `nw_stand_idle_turn360_planted` and
 `nw_neutral_crouch_idle`. Clips suffixed `_add` are additive deltas layered at
 runtime and are no use alone.
 
+**The standing idle is a turn in place, and does not loop.**
+`nw_stand_idle_turn360_planted` is twelve seconds of the root turning 360
+degrees in four steps, the legs stepping every three seconds; its last frame
+is a fine still pose and nothing more. The rifle's `_raised` idle is the same
+shape with a 1.5 s step. The loop to play is the **character customizer's**:
+`pu_char_customizer/pu_char_custom_idle_{m,f}_01.caf`, ten seconds of weight
+shifting that closes to 0.11 degrees (male) and 0.57 (female). There is no
+armed standing idle that is not a turn in place. `cargo run --example
+loop_survey` scores a whole `.dba` or `.caf` this way; RENDERING.md Phase 5
+has the rest.
+
 **Getting it out.** StarBreaker parses `.chr` skeletons and `.dba`/`.caf`
 animation but exposes neither on its CLI, so `tools/anim-dump` is a small shim
 over its `starbreaker-3d` crate with two commands: `bind` dumps a skeleton's

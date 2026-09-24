@@ -82,6 +82,8 @@ export type ToWorker = (
   | { type: 'prop'; path: string; socket: string }
   /** Retarget an animation clip onto the canonical armature. */
   | { type: 'pose'; path: string; clip: string }
+  /** Every frame of a clip, for a looping player. RENDERING.md Phase 5. */
+  | { type: 'clip'; path: string; clip: string }
   /** Find a material for an item whose record names none. */
   | { type: 'discover'; className: string; meshPath: string; meshMaterial: string | null }
   /** Load a gear item -- weapon, knife, pen, grenade, magazine -- and its
@@ -190,6 +192,17 @@ export interface PosePayload {
   clipBones: number;
 }
 
+/** A clip sampled at its own rate, for playing in a loop. */
+export interface ClipPayload {
+  fps: number;
+  frames: number;
+  /** The rig bones the clip animates, the root left out. */
+  bones: string[];
+  /** `frames x bones x 4`, local rotations `[w, x, y, z]` in the archive's
+   * frame -- the same as `PosePayload.locals`. */
+  rotations: Float32Array;
+}
+
 export interface PropPayload extends MeshPayload {
   /** The prop's own space mapped onto its socket bone: row-major 3x4, in the
    * archive's Z-up frame. Null when no locator was found. */
@@ -251,6 +264,7 @@ export type FromWorker = (
   | { type: 'texture'; texture: TexturePayload | null; ms: number; reads: number; fetched: number }
   | { type: 'prop'; path: string; prop: PropPayload; ms: number }
   | { type: 'pose'; pose: PosePayload; ms: number }
+  | { type: 'clip'; clip: ClipPayload; ms: number }
   | { type: 'discovered'; path: string | null }
   | { type: 'gear'; path: string; gear: GearPayload; ms: number }
   | { type: 'probe'; path: string; size: number; rgba: Float32Array; ms: number }
@@ -353,6 +367,7 @@ let opened: {
     loadMaterial(path: string): unknown;
     loadProp(path: string, socket: string): unknown;
     retargetPose(path: string, clip: string): unknown;
+    sampleClip(path: string, clip: string): unknown;
     loadTexture(path: string, mip: number): [number, number, Uint8Array];
     loadTextureAlpha(path: string, mip: number): [number, number, Uint8Array];
     textureBlocks(path: string, maxSize: number): [number, number, ...Uint8Array[]];
@@ -452,6 +467,17 @@ async function run(message: ToWorker): Promise<void> {
     const started = performance.now();
     const pose = opened.archive.retargetPose(message.path, message.clip) as PosePayload;
     reply({ type: 'pose', pose, ms: performance.now() - started });
+    return;
+  }
+
+  if (message.type === 'clip') {
+    if (!opened) {
+      reply({ type: 'failed', message: 'no archive is open' });
+      return;
+    }
+    const started = performance.now();
+    const clip = opened.archive.sampleClip(message.path, message.clip) as ClipPayload;
+    reply({ type: 'clip', clip, ms: performance.now() - started });
     return;
   }
 

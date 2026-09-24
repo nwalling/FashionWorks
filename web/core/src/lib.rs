@@ -15,6 +15,7 @@ pub mod armature;
 pub mod audit;
 pub mod blend;
 pub mod catalog;
+pub mod clips;
 pub mod composite;
 pub mod discover;
 pub mod gear;
@@ -1250,6 +1251,67 @@ impl Archive {
             out.push(&JsValue::from_str(&clip.name));
         }
         Ok(out)
+    }
+
+    /// Every frame of one clip, for a looping player. RENDERING.md Phase 5.
+    ///
+    /// `{ fps, frames, bones, rotations }`: the rig bones the clip animates,
+    /// without the root -- which carries the clip's own
+    /// placement, and in a turn-in-place is the whole turn -- and their local
+    /// rotations as `frames x bones x [w, x, y, z]` in the archive's frame,
+    /// the same frame `retargetPose`'s `locals` use, so one conversion serves
+    /// both. A `.caf` holds one clip and `clip` may be empty; in a `.dba` it
+    /// matches as `retargetPose` matches.
+    #[wasm_bindgen(js_name = sampleClip)]
+    pub fn sample_clip(&self, path: &str, clip_name: &str) -> Result<JsValue, JsValue> {
+        use starbreaker_3d::animation::{bone_name_hash, parse_caf, parse_dba};
+
+        let rig = self
+            .rig
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("no rig; call buildRig first"))?;
+        let index = self
+            .find_asset(path)
+            .ok_or_else(|| JsValue::from_str(&format!("no animation at {path}")))?;
+        let bytes = p4k::read_entry(self.reader.source(), &self.entries[index])
+            .map_err(|e| JsValue::from_str(&e))?
+            .bytes;
+        let db = if path.to_ascii_lowercase().ends_with(".caf") {
+            parse_caf(&bytes).map_err(|e| JsValue::from_str(&format!("parsing .caf: {e}")))?
+        } else {
+            parse_dba(&bytes).map_err(|e| JsValue::from_str(&format!("parsing .dba: {e}")))?
+        };
+        let needle = clip_name.to_ascii_lowercase();
+        let clip = db
+            .clips
+            .iter()
+            .find(|c| needle.is_empty() || c.name.to_ascii_lowercase().contains(&needle))
+            .ok_or_else(|| JsValue::from_str(&format!("no clip matching {clip_name}")))?;
+
+        let wanted: std::collections::HashMap<u32, usize> = rig
+            .bones
+            .iter()
+            .enumerate()
+            .filter(|(_, bone)| bone.parent.is_some())
+            .map(|(i, bone)| (bone_name_hash(&bone.name), i))
+            .collect();
+        let sampled = clips::sample(clip, |c| wanted.contains_key(&c.bone_hash))
+            .ok_or_else(|| JsValue::from_str(&format!("{clip_name}: no keyframes")))?;
+
+        let bones = js_sys::Array::new();
+        for hash in &sampled.bones {
+            bones.push(&JsValue::from_str(&rig.bones[wanted[hash]].name));
+        }
+        let out = js_sys::Object::new();
+        js_sys::Reflect::set(&out, &"fps".into(), &sampled.fps.into())?;
+        js_sys::Reflect::set(&out, &"frames".into(), &(sampled.frames as u32).into())?;
+        js_sys::Reflect::set(&out, &"bones".into(), &bones.into())?;
+        js_sys::Reflect::set(
+            &out,
+            &"rotations".into(),
+            &js_sys::Float32Array::from(&sampled.rotations[..]).into(),
+        )?;
+        Ok(out.into())
     }
 
     /// Retarget one animation clip onto the canonical armature.

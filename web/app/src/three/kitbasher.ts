@@ -52,6 +52,7 @@ import {
 import type { GearSlot } from '../archive/catalogue';
 import type {
   AttachmentOverride,
+  ClipPayload,
   GearPayload,
   MaterialPayload,
   MeshPayload,
@@ -68,6 +69,7 @@ import {
 } from '../gear/ports';
 import { meshTexture, plainMaterial, surfaceMaterial, texturesWanted } from './materials';
 import { DEFAULT_PRESET, LIGHT_PRESETS, StudioLighting } from './lighting';
+import { ClipLoop, FADE_SECONDS, type LoopMode, smooth } from './idle';
 import { LIVE_DEFAULTS, liveSurfaces, releaseAfterUpload, takesS3tc } from './live';
 import { applyClip, bonePosition, boneRotation, buildRig, mountMatrix, type BuiltRig } from './rig';
 import { compositeSurfaces, dataTexture, type CompositeGeometry, type PaletteEntry } from './surface';
@@ -307,6 +309,18 @@ const UNARMED_POSES: Record<string, readonly ClipSpec[]> = {
   crouch: [NW_CROUCH],
 };
 
+/** What loops under each pose when the figure is animated. RENDERING.md
+ * Phase 5, and `three/idle.ts` for why these clips and not the still poses'.
+ *
+ * Unarmed and standing at ease, the character customizer's own idle, per body.
+ * Everything else -- a weapon in hand, or crouching -- keeps its still pose and
+ * takes the same idle's sway on the spine, neck and head alone. */
+const IDLE_LOOP: Record<Body, ClipSpec> = {
+  male: { db: 'pu_char_customizer/pu_char_custom_idle_m_01.caf', clip: '' },
+  female: { db: 'pu_char_customizer/pu_char_custom_idle_f_01.caf', clip: '' },
+};
+const SWAY_BONES: ReadonlySet<string> = new Set(['Spine', 'Spine1', 'Spine2', 'Spine3', 'Neck', 'Neck1', 'Head']);
+
 /** The animation directory for each body. */
 const BODY_ANIMATIONS: Record<Body, string> = { male: 'male_v7', female: 'female_v2' };
 
@@ -355,6 +369,8 @@ export interface KitbasherState {
   readonly holding: string | null;
   /** Whether the bare body and head show under what is worn. */
   readonly figure: boolean;
+  /** Whether the pose plays as a loop rather than holding still. */
+  readonly animated: boolean;
 }
 
 /** A tint palette from the catalogue.
@@ -613,6 +629,15 @@ export class Kitbasher {
 
   /** Where the hips sit at rest; a pose lowers them to keep the feet down. */
   private restHips: Vector3 | null = null;
+  /** Where the lowest foot sits at rest: the floor the loop seats feet on. */
+  private restGround: number | null = null;
+
+  /** The loop playing over the still pose, and the frame it asked for. */
+  private loop: ClipLoop | null = null;
+  private loopFrame = 0;
+  /** Bumped on every start and stop, so a loop that was superseded while its
+   * clip loaded never starts, and a stale frame callback does nothing. */
+  private loopTicket = 0;
 
   private readonly equipped = new Map<Slot, Loaded>();
 
@@ -668,6 +693,7 @@ export class Kitbasher {
       ports: new Map(),
       holding: null,
       figure: true,
+      animated: false,
     };
     if (view.renderer && view.lights) {
       this.lighting = new StudioLighting({ scene: view.scene, renderer: view.renderer, ...view.lights }, client);
@@ -923,6 +949,7 @@ export class Kitbasher {
     this.clear();
     // The cache is keyed by body, so nothing has to be thrown away; the old
     // body's meshes stay loaded and switching back is instant.
+    this.cancelLoop();
     this.rig?.root.removeFromParent();
     this.rig = null;
     this.dropFigure();
@@ -1539,12 +1566,16 @@ export class Kitbasher {
    * sets, and only an upper-body knife idle, so a clip missing there is taken
    * from the male set rather than skipped. */
   private async poseClip(spec: ClipSpec) {
+    return this.fromBody(spec, (path) => this.client.pose(path, spec.clip));
+  }
+
+  private async fromBody<T>(spec: ClipSpec, load: (path: string) => Promise<T>): Promise<T> {
     const own = `Animations/Characters/Human/${BODY_ANIMATIONS[this.state.body]}/${spec.db}`;
     try {
-      return await this.client.pose(own, spec.clip);
+      return await load(own);
     } catch (error) {
       if (this.state.body === 'male') throw error;
-      return this.client.pose(`Animations/Characters/Human/${BODY_ANIMATIONS.male}/${spec.db}`, spec.clip);
+      return load(`Animations/Characters/Human/${BODY_ANIMATIONS.male}/${spec.db}`);
     }
   }
 
@@ -1585,9 +1616,11 @@ export class Kitbasher {
       return;
     }
     if (this.disposed) return;
+    this.cancelLoop();
     reset();
     rig.root.updateMatrixWorld(true);
     const restGround = footHeight(rig);
+    this.restGround = restGround;
     for (const clip of posed) applyClip(rig, clip.pose.locals);
     rig.root.updateMatrixWorld(true);
     seatFeet(rig, restGround);
@@ -1599,6 +1632,100 @@ export class Kitbasher {
         ? `${label}: ${last.pose.animated} of ${last.pose.clipBones} clip bones`
         : 'rest pose',
     });
+    if (this.state.animated) await this.startLoop(label);
+  }
+
+  // ---------------------------------------------------------------- loop
+
+  /** Play the pose as a loop, or hold it still. RENDERING.md Phase 5. */
+  async setAnimated(on: boolean): Promise<void> {
+    if (on === this.state.animated) return;
+    this.publish({ animated: on });
+    if (on) await this.startLoop(this.state.pose);
+    else this.stopLoop(true);
+  }
+
+  private loopFor(label: string): { spec: ClipSpec; mode: LoopMode; only?: ReadonlySet<string> } | null {
+    if (label === 'rest') return null;
+    if (label === 'idle' && !this.holdingPort) return { spec: IDLE_LOOP[this.state.body], mode: 'absolute' };
+    return { spec: IDLE_LOOP[this.state.body], mode: 'additive', only: SWAY_BONES };
+  }
+
+  private async startLoop(label: string): Promise<void> {
+    this.cancelLoop();
+    const ticket = this.loopTicket;
+    const plan = this.loopFor(label);
+    if (!plan || !this.rig) return;
+    let payload: ClipPayload;
+    try {
+      payload = (await this.fromBody(plan.spec, (path) => this.client.clip(path, plan.spec.clip))).clip;
+    } catch (error) {
+      this.publish({ status: `loop: ${error instanceof Error ? error.message : String(error)}` });
+      return;
+    }
+    if (ticket !== this.loopTicket || this.disposed || !this.rig) return;
+    const rig = this.rig;
+    const loop = new ClipLoop(payload, rig.byName, plan.mode, plan.only);
+    const hips = rig.byName.get('Hips') ?? null;
+    const still = hips?.position.clone() ?? null;
+    this.stillHips = still;
+    this.loop = loop;
+    const started = performance.now();
+    const tick = (now: number) => {
+      if (ticket !== this.loopTicket) return;
+      const seconds = Math.max(0, now - started) / 1000;
+      loop.apply(seconds, smooth(seconds / FADE_SECONDS));
+      this.seatLoop(hips, still);
+      this.loopFrame = requestAnimationFrame(tick);
+    };
+    this.loopFrame = requestAnimationFrame(tick);
+  }
+
+  /** Stop the loop, fading back to the still pose or snapping to it. */
+  private stopLoop(fade: boolean): void {
+    const loop = this.loop;
+    const hips = this.rig?.byName.get('Hips') ?? null;
+    // The loop moved the hips to seat the feet; the still pose's are where the
+    // loop found them, which is the rest-seated position it restores to.
+    this.cancelLoop();
+    if (!loop || !this.rig) return;
+    const still = this.stillHips;
+    if (!fade) {
+      loop.restore();
+      this.seatLoop(hips, still);
+      return;
+    }
+    const ticket = this.loopTicket;
+    const from = loop.snapshot();
+    const started = performance.now();
+    const tick = (now: number) => {
+      if (ticket !== this.loopTicket) return;
+      const t = Math.max(0, now - started) / 1000 / FADE_SECONDS;
+      loop.fadeOut(from, smooth(t));
+      this.seatLoop(hips, still);
+      if (t < 1) this.loopFrame = requestAnimationFrame(tick);
+    };
+    this.loopFrame = requestAnimationFrame(tick);
+  }
+
+  /** Where the still pose put the hips, captured when a loop starts. */
+  private stillHips: Vector3 | null = null;
+
+  private cancelLoop(): void {
+    this.loopTicket += 1;
+    cancelAnimationFrame(this.loopFrame);
+    this.loop = null;
+  }
+
+  /** Seat the feet for this frame: from the still pose's hips, lowered or
+   * raised so the lowest foot is on the floor, as `setPose` does once. */
+  private seatLoop(hips: Bone | null, still: Vector3 | null): void {
+    const rig = this.rig;
+    if (!rig) return;
+    if (hips && still) hips.position.copy(still);
+    rig.root.updateMatrixWorld(true);
+    seatFeet(rig, this.restGround);
+    rig.skeleton.update();
   }
 
   // ---------------------------------------------------------------- gear
@@ -1934,6 +2061,7 @@ export class Kitbasher {
 
   dispose(): void {
     this.disposed = true;
+    this.cancelLoop();
     for (const carried of this.carried.values()) carried.instance.removeFromParent();
     this.carried.clear();
     this.clear();

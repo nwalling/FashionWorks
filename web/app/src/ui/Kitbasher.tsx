@@ -355,6 +355,15 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
               {pose}
             </button>
           ))}
+          <button
+            type="button"
+            aria-pressed={state?.animated ?? false}
+            disabled={!state || state.pose === 'rest'}
+            title="Play the pose as a loop: the character customizer's idle standing at ease, breathing otherwise"
+            onClick={() => void engine.current?.setAnimated(!(state?.animated ?? false))}
+          >
+            animate
+          </button>
         </span>
         {quality && (
           <span className="fw-kit-group">

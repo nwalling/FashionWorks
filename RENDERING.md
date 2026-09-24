@@ -26,6 +26,7 @@ Built on the `rendering` branch, not merged or pushed.
 | 2 -- AO, AA, quality | done | Post chain on medium/high: multisampled half-float target, GTAO, `OutputPass`. High: contrast 2.88 -> **2.95**, tactical median 26.7 -> 28.1 (in-game 29), 61 fps with the 23-item loadout, render 7.5 -> 11.2 ms, app 170 of 400 KB. Low is the old direct path, unchanged. Details under "Phase 2, as built". |
 | 3 -- LayerBlend on the mesh | done | UV-space against the bake on the Sunchaser core: mean difference **0.32-0.84** sRGB units, **99.6-100 %** of texels within 6. No moire at any zoom. Refined pieces 31-35 MB (bake: helmet 58.6, torso 44.2). Heavy loadout 958 -> **393 MB**, 60 fps, render 12.5 ms. Cold equip faster than the bake once warm (4.1 s against 4.6-4.7 s for four pieces). Contrast 3.31, still in band; tactical torso mean 33.9 against the in-game 34. |
 | 4 -- a body and a head | done | Both bodies with head, eyes and hair (`hair_31`, the customizer default's); no poke-through on the Sunchaser, Tactical + Artimex or Corbel sets; the body hides under a full undersuit, the hair under any helmet. Armour scores identical to Phase 3 (the harness scores armour with the figure off). The figure costs **47 MB**, +132 draw calls and +1.3 ms with the heavy loadout, 60 fps. A `figure` toggle beside the body buttons. |
+| 5 -- the idle loop | done | An `animate` toggle beside the poses, off by default. Unarmed standing plays the character customizer's own idle; a weapon in hand or a crouch keeps its still pose and takes that idle's sway on the spine, neck and head. 60 fps on both bodies, feet on the floor to **0 mm** every frame, the grip on rifle and pistol unchanged to **0 mm**, and no step at the seam larger than the clip's own frame-to-frame motion. |
 
 ### Baseline (built package, 1600x1000, today's renderer)
 
@@ -235,6 +236,61 @@ drawn only bare-headed.
 `_hal` control maps are two- and one-channel; counted properly, the heavy
 loadout's worn memory is **335 MB**, not 393. Nothing changed but the
 accounting.
+
+### Phase 5, as built
+
+**The still idle cannot loop.** `nw_stand_idle_turn360_planted` is a turn in
+place: the root turns 360 degrees over twelve seconds in four steps, and the
+legs step every three. Its ends meet (0.28 degrees), but with the root left
+out -- which every player here does, since the root carries the clip's own
+placement -- the figure shuffles its feet on the spot. The rifle's
+`_raised` idle is the same shape, a 1.5 s stepping cycle with the arms
+swinging 8 degrees a step.
+
+**The customizer's idle can.** `Animations/Characters/Human/{male_v7,female_v2}/pu_char_customizer/pu_char_custom_idle_{m,f}_01.caf`
+is the idle the game stands a new character in: ten seconds of weight
+shifting, 11-12 degrees at most (the hands), the hips within 1.2, ending 0.11
+degrees (male) and 0.57 (female) from where it began. Found by scoring every
+clip in `stand.dba` (189), the stocked and pistol sets, `idle_overlay.dba`,
+`idle_fidget.dba` and the AI libraries with `cargo run --example
+loop_survey`: the widest start-to-end gap over the bones we apply, how far
+anything moves, and how far the hips turn. Locomotion cycles loop perfectly
+and are not idles; fidgets move 50-180 degrees; nothing armed stands still.
+
+**Armed and crouched poses sway rather than loop a clip of their own.** The
+same customizer idle plays *additively* -- its motion relative to its first
+frame, over the still pose -- on `Spine` through `Head` only. Both weapon
+bones hang off `Spine3`, so hands and gun ride the chest together: the left
+hand's distance to `RightWeaponBone` varies by 0 mm across the loop. The hips
+are left out because turning them swings the legs and slides the feet. The
+game's breathing layer, `nw_neutral_stand_idle_base`, was tried first: its
+2.3 degrees are in the shoulders, which cannot take it without moving one hand
+off the gun, and on the spine it moves under half a degree -- invisible.
+
+**Seams.** Each bone's gap between the last and first frame is spread over
+the cycle, so the last frame lands on the first exactly. Before that, the
+female idle's 0.57-degree finger gap showed as a 0.96-degree one-frame step
+at every wrap against a 99th percentile of 0.62.
+
+**Per frame**: the sampled rotations are slerped (30 fps clips at 60), the
+hips put back where the still pose had them, and the feet seated as `setPose`
+seats them once. The core samples the whole clip in one call (`sampleClip`,
+`clips.rs`: nlerp between keys along the shorter arc, onto one frame grid);
+the customizer idle is 300 frames x 140 bones, 670 KB.
+
+| | fps | feet | grip | per-frame step, median / p99 / max |
+| --- | --- | --- | --- | --- |
+| male, unarmed | 60 | 0 mm | -- | 0.14 / 0.58 / 0.58 degrees |
+| male, rifle raised | 60 | 0 mm | 0 mm | 0.011 / 0.034 / 0.052 |
+| male, pistol raised | 60 | 0 mm | 0 mm | 0.011 / 0.037 / 0.062 |
+| male, crouch | 60 | 0 mm | 0 mm | 0.011 / 0.033 / 0.046 |
+| female, unarmed | 60 | 0 mm | -- | 0.16 / 0.62 / 0.68 |
+| female, rifle raised | 60 | 0 mm | 0 mm | 0.019 / 0.084 / 0.085 |
+| female, pistol raised | 60 | 0 mm | 0 mm | 0.019 / 0.084 / 0.086 |
+| female, crouch | 60 | 0 mm | 0 mm | 0.017 / 0.073 / 0.086 |
+
+Still stays the default, so screenshots, share links and the harness are
+unchanged; the toggle is not remembered between visits.
 
 ## Boundaries
 

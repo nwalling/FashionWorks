@@ -301,6 +301,11 @@ export class ArchiveClient {
     return this.request('pose', { type: 'pose', path, clip });
   }
 
+  /** Every frame of a clip; `clip` may be empty for a `.caf`. */
+  async clip(path: string, clip = '') {
+    return this.request('clip', { type: 'clip', path, clip });
+  }
+
   /** A gear item's parts, helpers and mount. `locator` is the helper on the
    * item that meets the port's bone; empty for a held item. */
   async gear(path: string, locator = '') {
