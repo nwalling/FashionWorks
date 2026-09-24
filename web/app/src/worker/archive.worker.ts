@@ -223,6 +223,10 @@ export interface MeshPayload {
   indices: Uint32Array;
   joints: Uint16Array;
   weights: Float32Array;
+  /** The fifth to eighth influences, where the mesh uses more than four.
+   * RENDERING.md Phase 7. */
+  joints1?: Uint16Array;
+  weights1?: Float32Array;
   bones: string[];
   submeshes: Array<{ materialId: number; start: number; count: number }>;
   materialFile: string | null;

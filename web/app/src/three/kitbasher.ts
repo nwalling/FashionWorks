@@ -70,6 +70,7 @@ import {
 import { meshTexture, plainMaterial, surfaceMaterial, texturesWanted } from './materials';
 import { DEFAULT_PRESET, LIGHT_PRESETS, StudioLighting } from './lighting';
 import { ClipLoop, FADE_SECONDS, type LoopMode, smooth } from './idle';
+import { hasEight, padEight, skinEight } from './skin8';
 import { LIVE_DEFAULTS, liveSurfaces, releaseAfterUpload, takesS3tc } from './live';
 import { applyClip, bonePosition, boneRotation, buildRig, mountMatrix, type BuiltRig } from './rig';
 import { compositeSurfaces, dataTexture, type CompositeGeometry, type PaletteEntry } from './surface';
@@ -1040,6 +1041,7 @@ export class Kitbasher {
         objects.push(object);
       }
     }
+    eightWhereNeeded(objects);
 
     const loaded = measure(
       key,
@@ -1132,6 +1134,7 @@ export class Kitbasher {
     }
     const object = new SkinnedMesh(drawnOnly(buildGeometry(payload, count).geometry, materials), materials);
     object.frustumCulled = false;
+    eightWhereNeeded([object]);
     object.name = meshPath.split('/').pop() ?? meshPath;
     shaded(object);
     const loaded = measure(key, [object], materials, []);
@@ -2085,6 +2088,18 @@ function tally(names: readonly string[]): string[] {
  * any pass that swaps in its own material draws every group: ambient
  * occlusion's normal pass did, and shaded invisible collision shells into the
  * armour. Gone from the geometry, no pass can draw them. */
+/** RENDERING.md Phase 7: skin a piece eight ways if any of its meshes carries
+ * the second set. Its meshes share materials, so a four-wide one alongside
+ * gets an empty second set rather than reading the attribute's default. */
+function eightWhereNeeded(objects: Object3D[]): void {
+  const skinned = objects.filter((o): o is SkinnedMesh => o instanceof SkinnedMesh);
+  if (!skinned.some((mesh) => hasEight(mesh.geometry))) return;
+  for (const mesh of skinned) {
+    padEight(mesh.geometry);
+    skinEight(mesh);
+  }
+}
+
 function drawnOnly<G extends { groups: Array<{ materialIndex?: number }> }>(geometry: G, materials: Material[]): G {
   geometry.groups = geometry.groups.filter((g) => materials[g.materialIndex ?? 0]?.visible !== false);
   return geometry;

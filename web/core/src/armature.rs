@@ -182,6 +182,19 @@ pub fn rebind(
     joints: &mut [u16],
     weights: &mut [f32],
 ) -> RebindReport {
+    rebind_wide(armature, mesh_bones, mesh_parents, joints, weights, 4)
+}
+
+/// [`rebind`] for arrays `width` influences wide -- 4, or 8 for a mesh loaded
+/// with its second set. RENDERING.md Phase 7.
+pub fn rebind_wide(
+    armature: &Armature,
+    mesh_bones: &[String],
+    mesh_parents: &[Option<usize>],
+    joints: &mut [u16],
+    weights: &mut [f32],
+    width: usize,
+) -> RebindReport {
     let map = armature.remap(mesh_bones);
 
     // Where each stray bone would go by the piece's own hierarchy: its nearest
@@ -213,18 +226,19 @@ pub fn rebind(
         stray: map.iter().filter(|m| m.is_none()).count(),
         ..RebindReport::default()
     };
-    let vertices = joints.len() / 4;
+    let width = width.max(1);
+    let vertices = joints.len() / width;
 
     // Which surviving bone carries the most weight overall, and how busy each
     // one is. Both feed the guess for a vertex with nothing left.
     let mut busiest: HashMap<u16, u64> = HashMap::new();
     for vertex in 0..vertices {
-        for slot in 0..4 {
-            let weight = weights[vertex * 4 + slot];
+        for slot in 0..width {
+            let weight = weights[vertex * width + slot];
             if weight <= 0.0 {
                 continue;
             }
-            if let Some(Some(target)) = map.get(joints[vertex * 4 + slot] as usize) {
+            if let Some(Some(target)) = map.get(joints[vertex * width + slot] as usize) {
                 *busiest.entry(*target).or_default() += (weight * 255.0) as u64;
             }
         }
@@ -248,12 +262,12 @@ pub fn rebind(
         .collect();
 
     for vertex in 0..vertices {
-        let influences: Influences = (0..4)
-            .filter(|slot| weights[vertex * 4 + slot] > 0.0)
+        let influences: Influences = (0..width)
+            .filter(|slot| weights[vertex * width + slot] > 0.0)
             .map(|slot| {
                 (
-                    joints[vertex * 4 + slot],
-                    (weights[vertex * 4 + slot] * 255.0).round() as u8,
+                    joints[vertex * width + slot],
+                    (weights[vertex * width + slot] * 255.0).round() as u8,
                 )
             })
             .collect();
@@ -306,13 +320,13 @@ pub fn rebind(
         };
 
         let total: f32 = resolved.iter().map(|(_, w)| f32::from(*w)).sum();
-        for slot in 0..4 {
-            joints[vertex * 4 + slot] = 0;
-            weights[vertex * 4 + slot] = 0.0;
+        for slot in 0..width {
+            joints[vertex * width + slot] = 0;
+            weights[vertex * width + slot] = 0.0;
         }
-        for (slot, (joint, weight)) in resolved.iter().take(4).enumerate() {
-            joints[vertex * 4 + slot] = *joint;
-            weights[vertex * 4 + slot] = f32::from(*weight) / total.max(1.0);
+        for (slot, (joint, weight)) in resolved.iter().take(width).enumerate() {
+            joints[vertex * width + slot] = *joint;
+            weights[vertex * width + slot] = f32::from(*weight) / total.max(1.0);
         }
     }
 

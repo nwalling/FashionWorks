@@ -33,6 +33,11 @@ use starbreaker_chunks::{known_types::ivo, ChunkFile};
 /// construction, since it is the tail of a sorted list.
 pub const MAX_INFLUENCES: usize = 4;
 
+/// The most a vertex can keep when the renderer takes a second set of four.
+/// RENDERING.md Phase 7: eight is what the archive stores, and a mesh keeps
+/// all of them only where some vertex actually uses more than four.
+pub const WIDE_INFLUENCES: usize = 8;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Submesh {
     /// Index into the material file's submaterial list.
@@ -70,7 +75,13 @@ pub struct LoadedMesh {
     /// Four joint indices per vertex, into [`LoadedMesh::bones`].
     pub joints: Vec<u16>,
     /// Four weights per vertex, summing to 1 where the vertex is skinned.
+    ///
+    /// Four or eight, per [`LoadedMesh::influences`]: `joints` and `weights`
+    /// hold that many per vertex, heaviest first.
     pub weights: Vec<f32>,
+    /// Influences per vertex in `joints` and `weights`: 4, or 8 for a mesh
+    /// loaded wide whose vertices use more than four.
+    pub influences: usize,
     /// The mesh's own bone names, in the order its joint indices address.
     ///
     /// **Not the canonical armature's order.** One armour piece exports 41
@@ -98,6 +109,31 @@ impl LoadedMesh {
         self.indices.len() / 3
     }
 
+    /// Drop back to four influences if no vertex uses a fifth.
+    ///
+    /// A mesh is loaded eight wide by what the archive stores; after rebinding
+    /// it may not need to be. Hair is the case: 63,083 vertices with strand
+    /// bones the rig does not have, whose weight folds onto the head, and not
+    /// one vertex left with more than four -- a second set of zeros, 1.5 MB.
+    pub fn narrow_if_unused(&mut self) {
+        if self.influences != WIDE_INFLUENCES {
+            return;
+        }
+        let vertices = self.vertex_count();
+        if (0..vertices).any(|v| self.weights[v * 8 + 4..v * 8 + 8].iter().any(|w| *w > 0.0)) {
+            return;
+        }
+        let mut joints = Vec::with_capacity(vertices * 4);
+        let mut weights = Vec::with_capacity(vertices * 4);
+        for v in 0..vertices {
+            joints.extend_from_slice(&self.joints[v * 8..v * 8 + 4]);
+            weights.extend_from_slice(&self.weights[v * 8..v * 8 + 4]);
+        }
+        self.joints = joints;
+        self.weights = weights;
+        self.influences = MAX_INFLUENCES;
+    }
+
     /// How many vertices carry no weight at all.
     ///
     /// Worth reporting rather than assuming zero: dropping unknown vertex
@@ -105,8 +141,9 @@ impl LoadedMesh {
     /// unweighted in the pipeline, and Blender's exporter then invented a
     /// `neutral_bone` and pinned that cloth to the origin.
     pub fn unweighted(&self) -> usize {
+        let width = self.influences.max(1);
         (0..self.vertex_count())
-            .filter(|v| self.weights[v * 4..v * 4 + 4].iter().all(|w| *w <= 0.0))
+            .filter(|v| self.weights[v * width..v * width + width].iter().all(|w| *w <= 0.0))
             .count()
     }
 }
@@ -118,6 +155,17 @@ impl LoadedMesh {
 /// to whatever bone happens to be first is exactly the failure mode that flung
 /// a wrist cuff across the body.
 pub fn reduce_influences(joints: [u16; 8], raw: [u8; 8]) -> ([u16; 4], [f32; 4]) {
+    let (wide_joints, wide_weights) = keep_influences(joints, raw, MAX_INFLUENCES);
+    let mut out_joints = [0u16; 4];
+    let mut out_weights = [0.0f32; 4];
+    out_joints.copy_from_slice(&wide_joints[..4]);
+    out_weights.copy_from_slice(&wide_weights[..4]);
+    (out_joints, out_weights)
+}
+
+/// Keep the `width` heaviest influences, renormalised; the slots past `width`
+/// come back zero. The same rules as [`reduce_influences`] at any width.
+pub fn keep_influences(joints: [u16; 8], raw: [u8; 8], width: usize) -> ([u16; 8], [f32; 8]) {
     let mut pairs: Vec<(u16, u8)> = joints
         .iter()
         .copied()
@@ -127,11 +175,11 @@ pub fn reduce_influences(joints: [u16; 8], raw: [u8; 8]) -> ([u16; 4], [f32; 4])
     // Heaviest first, and ties broken by joint index so the result does not
     // depend on the order the archive happened to store them in.
     pairs.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-    pairs.truncate(MAX_INFLUENCES);
+    pairs.truncate(width.min(WIDE_INFLUENCES));
 
     let total: f32 = pairs.iter().map(|(_, w)| f32::from(*w)).sum();
-    let mut out_joints = [0u16; 4];
-    let mut out_weights = [0.0f32; 4];
+    let mut out_joints = [0u16; 8];
+    let mut out_weights = [0.0f32; 8];
     if total <= 0.0 {
         return (out_joints, out_weights);
     }
@@ -148,6 +196,13 @@ pub fn reduce_influences(joints: [u16; 8], raw: [u8; 8]) -> ([u16; 4], [f32; 4])
 /// when the asset ships only one, and the parts that need the missing half come
 /// back empty rather than failing.
 pub fn load(skin: &[u8], skinm: &[u8]) -> Result<LoadedMesh, String> {
+    load_wide(skin, skinm, MAX_INFLUENCES)
+}
+
+/// [`load`], keeping up to `width` influences a vertex -- 4 or 8. A mesh is
+/// loaded eight wide only where some vertex uses more than four, so a piece
+/// that never needs the second set does not carry one.
+pub fn load_wide(skin: &[u8], skinm: &[u8], width: usize) -> Result<LoadedMesh, String> {
     // Bones and material names live in the header half.
     let skeleton = starbreaker_3d::skeleton::parse_skeleton(skin).unwrap_or_default();
     let bone_parents: Vec<Option<usize>> = skeleton
@@ -179,13 +234,23 @@ pub fn load(skin: &[u8], skinm: &[u8]) -> Result<LoadedMesh, String> {
     let built = starbreaker_3d::types::build_mesh(&skin_mesh, &names);
 
     let vertices = built.positions.len();
+    let width = match &skin_mesh.streams.bone_maps32 {
+        Some(maps)
+            if width > MAX_INFLUENCES
+                && maps.iter().any(|m| m.weights.iter().filter(|w| **w > 0).count() > MAX_INFLUENCES) =>
+        {
+            WIDE_INFLUENCES
+        }
+        _ => MAX_INFLUENCES,
+    };
     let mut out = LoadedMesh {
         positions: Vec::with_capacity(vertices * 3),
         normals: Vec::with_capacity(vertices * 3),
         uvs: Vec::with_capacity(vertices * 2),
         indices: built.indices.clone(),
-        joints: vec![0u16; vertices * 4],
-        weights: vec![0.0f32; vertices * 4],
+        joints: vec![0u16; vertices * width],
+        weights: vec![0.0f32; vertices * width],
+        influences: width,
         bones,
         bone_parents,
         submeshes: built
@@ -231,9 +296,9 @@ pub fn load(skin: &[u8], skinm: &[u8]) -> Result<LoadedMesh, String> {
     // only the renormalisation, since the archive stores weights as bytes.
     if let Some(maps) = &skin_mesh.streams.bone_maps32 {
         for (vertex, map) in maps.iter().enumerate().take(vertices) {
-            let (joints, weights) = reduce_influences(map.joint_indices, map.weights);
-            out.joints[vertex * 4..vertex * 4 + 4].copy_from_slice(&joints);
-            out.weights[vertex * 4..vertex * 4 + 4].copy_from_slice(&weights);
+            let (joints, weights) = keep_influences(map.joint_indices, map.weights, width);
+            out.joints[vertex * width..vertex * width + width].copy_from_slice(&joints[..width]);
+            out.weights[vertex * width..vertex * width + width].copy_from_slice(&weights[..width]);
         }
     } else if let Some(maps) = &skin_mesh.streams.bone_maps {
         for (vertex, map) in maps.iter().enumerate().take(vertices) {
@@ -313,6 +378,40 @@ mod tests {
         // Each of the four keeps a quarter, not an eighth: the tail is dropped
         // and what remains is renormalised.
         assert!((weights[0] - 0.25).abs() < 1e-6, "got {}", weights[0]);
+    }
+
+    #[test]
+    fn eight_wide_keeps_every_influence_and_sums_to_one() {
+        let (joints, weights) = keep_influences([10, 11, 12, 13, 14, 15, 16, 17], [10, 80, 5, 60, 40, 3, 2, 1], 8);
+        assert_eq!(joints, [11, 13, 14, 10, 12, 15, 16, 17], "heaviest first");
+        let total: f32 = weights.iter().sum();
+        assert!((total - 1.0).abs() < 1e-6, "got {total}");
+        // Nothing dropped, so each is its own share of 201.
+        assert!((weights[7] - 1.0 / 201.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_wide_mesh_with_no_fifth_influence_narrows_to_four() {
+        let mut mesh = LoadedMesh {
+            positions: vec![0.0; 6],
+            joints: vec![1, 2, 0, 0, 0, 0, 0, 0, 3, 4, 5, 6, 0, 0, 0, 0],
+            weights: vec![0.5, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.25, 0.25, 0.25, 0.25, 0.0, 0.0, 0.0, 0.0],
+            influences: WIDE_INFLUENCES,
+            ..LoadedMesh::default()
+        };
+        mesh.narrow_if_unused();
+        assert_eq!(mesh.influences, MAX_INFLUENCES);
+        assert_eq!(mesh.joints, vec![1, 2, 0, 0, 3, 4, 5, 6]);
+
+        let mut used = LoadedMesh {
+            positions: vec![0.0; 3],
+            joints: vec![1, 2, 3, 4, 5, 0, 0, 0],
+            weights: vec![0.3, 0.2, 0.2, 0.2, 0.1, 0.0, 0.0, 0.0],
+            influences: WIDE_INFLUENCES,
+            ..LoadedMesh::default()
+        };
+        used.narrow_if_unused();
+        assert_eq!(used.influences, WIDE_INFLUENCES, "a fifth influence keeps it wide");
     }
 
     #[test]

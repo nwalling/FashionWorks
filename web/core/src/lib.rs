@@ -431,15 +431,26 @@ impl Archive {
             .map(|e| e.bytes)
             .unwrap_or_default();
 
-        let mut loaded = mesh::load(&skin, &skinm).map_err(|e| JsValue::from_str(&e))?;
+        // Eight influences where the mesh uses them: RENDERING.md Phase 7. The
+        // renderer takes the second four as a second pair of attributes.
+        let mut loaded = mesh::load_wide(&skin, &skinm, mesh::WIDE_INFLUENCES).map_err(|e| JsValue::from_str(&e))?;
 
         // With a rig, the mesh's own joint indices are rewritten to address the
         // armature and stray weight is redistributed. Without one the piece's
         // own bone list is returned as-is, which is what the geometry check
         // wants and what a renderer cannot use.
         let report = self.rig.as_ref().map(|rig| {
-            let report = armature::rebind(rig, &loaded.bones, &loaded.bone_parents, &mut loaded.joints, &mut loaded.weights);
+            let width = loaded.influences;
+            let report = armature::rebind_wide(
+                rig,
+                &loaded.bones,
+                &loaded.bone_parents,
+                &mut loaded.joints,
+                &mut loaded.weights,
+                width,
+            );
             loaded.bones = rig.bones.iter().map(|b| b.name.clone()).collect();
+            loaded.narrow_if_unused();
             report
         });
         let out = mesh_to_js(&loaded, report.as_ref())?;
@@ -594,8 +605,26 @@ fn mesh_to_js(
     set("normals", &js_sys::Float32Array::from(&loaded.normals[..]).into())?;
     set("uvs", &js_sys::Float32Array::from(&loaded.uvs[..]).into())?;
     set("indices", &js_sys::Uint32Array::from(&loaded.indices[..]).into())?;
-    set("joints", &js_sys::Uint16Array::from(&loaded.joints[..]).into())?;
-    set("weights", &js_sys::Float32Array::from(&loaded.weights[..]).into())?;
+    if loaded.influences == mesh::WIDE_INFLUENCES {
+        // Split eight-wide into two four-wide pairs: `joints`/`weights` the
+        // heaviest four, `joints1`/`weights1` the rest, as the shader reads them.
+        let vertices = loaded.vertex_count();
+        let (mut j0, mut j1) = (Vec::with_capacity(vertices * 4), Vec::with_capacity(vertices * 4));
+        let (mut w0, mut w1) = (Vec::with_capacity(vertices * 4), Vec::with_capacity(vertices * 4));
+        for v in 0..vertices {
+            j0.extend_from_slice(&loaded.joints[v * 8..v * 8 + 4]);
+            j1.extend_from_slice(&loaded.joints[v * 8 + 4..v * 8 + 8]);
+            w0.extend_from_slice(&loaded.weights[v * 8..v * 8 + 4]);
+            w1.extend_from_slice(&loaded.weights[v * 8 + 4..v * 8 + 8]);
+        }
+        set("joints", &js_sys::Uint16Array::from(&j0[..]).into())?;
+        set("weights", &js_sys::Float32Array::from(&w0[..]).into())?;
+        set("joints1", &js_sys::Uint16Array::from(&j1[..]).into())?;
+        set("weights1", &js_sys::Float32Array::from(&w1[..]).into())?;
+    } else {
+        set("joints", &js_sys::Uint16Array::from(&loaded.joints[..]).into())?;
+        set("weights", &js_sys::Float32Array::from(&loaded.weights[..]).into())?;
+    }
 
     let bones = js_sys::Array::new();
     for name in &loaded.bones {

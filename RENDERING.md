@@ -28,6 +28,7 @@ Built on the `rendering` branch, not merged or pushed.
 | 4 -- a body and a head | done | Both bodies with head, eyes and hair (`hair_31`, the customizer default's); no poke-through on the Sunchaser, Tactical + Artimex or Corbel sets; the body hides under a full undersuit, the hair under any helmet. Armour scores identical to Phase 3 (the harness scores armour with the figure off). The figure costs **47 MB**, +132 draw calls and +1.3 ms with the heavy loadout, 60 fps. A `figure` toggle beside the body buttons. |
 | 5 -- the idle loop | done | An `animate` toggle beside the poses, off by default. Unarmed standing plays the character customizer's own idle; a weapon in hand or a crouch keeps its still pose and takes that idle's sway on the spine, neck and head. 60 fps on both bodies, feet on the floor to **0 mm** every frame, the grip on rifle and pistol unchanged to **0 mm**, and no step at the seam larger than the clip's own frame-to-frame motion. |
 | 6 -- decals from vertex colour | closed again | Decal geometry exists inside the mesh -- 27 overlay patches on the Sunchaser core, 22 on the arms, 0.2-2.5 mm off the plates -- and carries a 2-D coordinate in its vertex colour. No decoding into the atlas beats a random-placement null by a wide margin on both pieces (best 1.8x and 1.9x, different decodings). Nothing shipped; `CLAUDE.md`'s decal entry has the addendum. |
+| 7 -- eight-influence skinning | done | A mesh whose vertices use more than four influences keeps eight, as a second attribute pair and a define-gated shader patch, shadows included. In a crouch the extra four move 3.1 % of the Sunchaser core's vertices by 2.8 mm on average and up to 12.4 mm, and 4.8 % of the utility suit's by up to 16.6 mm; the render changes on 0.62 % of the frame, along seams and straps. Harness scores unchanged within noise; +2.1 MB worn, 61 fps. |
 
 ### Baseline (built package, 1600x1000, today's renderer)
 
@@ -338,6 +339,46 @@ Reading it out of the compiled shaders is outside this plan's boundaries.
 
 Nothing shipped. The plan's rule was to proceed only on a decoding that beats
 chance widely and reproduces a decal in a CIG render; neither happened.
+
+### Phase 7, as built
+
+**The core keeps eight where a mesh uses them.** `mesh::load_wide` reads the
+eight-influence bone map eight wide when any vertex has more than four,
+`armature::rebind_wide` remaps and redistributes at that width, and
+`loadMesh` hands the fifth to eighth to JavaScript as `joints1`/`weights1`.
+After rebinding, a mesh whose second set came out empty is narrowed back to
+four: the hair loads with eight in the archive and none left once its strand
+bones fold onto the head, which would have been 1.5 MB of zeros. Props and
+gear stay four wide; the examples that diff against the pipeline still load
+at four, since Blender's export limits to four too.
+
+**The renderer adds the second four behind a define.** `three/skin8.ts`
+patches three's four skinning chunks once, every addition under `FW_SKIN8`,
+so a material without the define compiles exactly as before. A piece with a
+wide mesh gets the define on its materials, an empty second set on any
+four-wide mesh sharing them -- without it the shader reads the attribute
+default, (0, 0, 0, 1), and pulls every vertex towards bone 0 -- and a depth
+material with the same define, so its shadow bends as it does. Alpha-tested
+meshes keep three's own depth material, which cuts the shadow along the
+cards. GTAO's normal pass still skins four ways; the difference is under its
+blur.
+
+**What it changes**, measured by skinning on the CPU both ways in a crouch,
+the fifth to eighth weights against the top four renormalised:
+
+| mesh | vertices using more than four | moved, mean / max |
+| --- | --- | --- |
+| Sunchaser core | 702 of 22,842 (3.1 %) | 2.8 / 12.4 mm |
+| Sunchaser arms | 49 of 21,362 (0.2 %) | 0.15 / 0.6 mm |
+| utility heavy suit (Pembroke) | 3,083 of 64,550 (4.8 %) | 2.8 / 16.6 mm |
+| male body | 36 of 12,356 (0.3 %) | 0.3 / 1.1 mm |
+| male head | 86 of 5,584 (1.5 %) | 0.6 / 1.7 mm |
+
+The shares are exactly the survey's under "Eight-influence skinning is a small
+effect". Rendered eight-way against four-way on the utility suit, 0.62 % of
+the frame changes by more than 12 levels, all of it along the collar, strap
+edges and shoulder seams. The harness's scored views are the idle pose, where
+it moves nothing measurable.
 
 ## Boundaries
 

@@ -66,6 +66,10 @@ export function buildGeometry(mesh: MeshPayload, materialCount: number): BuiltGe
   }
   geometry.setAttribute('skinIndex', new BufferAttribute(mesh.joints, 4));
   geometry.setAttribute('skinWeight', new BufferAttribute(mesh.weights, 4));
+  if (mesh.joints1 && mesh.weights1) {
+    geometry.setAttribute('skinIndex1', new BufferAttribute(mesh.joints1, 4));
+    geometry.setAttribute('skinWeight1', new BufferAttribute(mesh.weights1, 4));
+  }
   geometry.setIndex(new BufferAttribute(mesh.indices, 1));
 
   let orphanGroups = 0;
