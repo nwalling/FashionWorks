@@ -34,6 +34,8 @@ export interface ViewerHandle {
   readonly renderer: WebGLRenderer;
   readonly camera: PerspectiveCamera;
   readonly controls: OrbitControls;
+  /** The lights a lighting preset drives. */
+  readonly lights: { readonly key: DirectionalLight; readonly rim: DirectionalLight; readonly fill: AmbientLight };
   /** A photograph behind the character, or none.
    *
    * Cropped to cover rather than stretched. **Lighting still comes from the
@@ -187,7 +189,7 @@ export function Viewer({ tokens, onScene, className }: ViewerProps): JSX.Element
       }
     };
 
-    latestOnScene.current?.({ scene, renderer, camera, controls, setBackdrop });
+    latestOnScene.current?.({ scene, renderer, camera, controls, lights: { key, rim, fill }, setBackdrop });
 
     return () => {
       cancelAnimationFrame(frame);
@@ -213,7 +215,9 @@ export function Viewer({ tokens, onScene, className }: ViewerProps): JSX.Element
     // A light theme needs less ambient fill, or everything washes out; a dark
     // one needs more, or the armour reads as a silhouette. Decided from the
     // page colour rather than from the theme's name, which can change.
-    current.fill.intensity = isLight(tokens) ? 0.85 : 1.3;
+    // Scaled from whatever the lighting preset set as its base.
+    current.fill.userData.themeScale = isLight(tokens) ? 0.65 : 1;
+    current.fill.intensity = ((current.fill.userData.base as number | undefined) ?? 1.3) * current.fill.userData.themeScale;
     current.ground.setLook(groundLook(tokens, isLight(tokens), current.backdrop));
   }, [tokens]);
 

@@ -311,6 +311,16 @@ export class ArchiveClient {
     return answer.path;
   }
 
+  /** An HDR lighting probe, decoded to linear float: six faces of `size`². */
+  async probe(path: string, maxSize = 256) {
+    return this.request('probe', { type: 'probe', path, maxSize });
+  }
+
+  /** The lights of one group in an object container. */
+  async lightRig(socpak: string, group: string) {
+    return (await this.request('lights', { type: 'lights', socpak, group })).lights;
+  }
+
   close(): void {
     this.worker?.terminate();
     this.worker = null;

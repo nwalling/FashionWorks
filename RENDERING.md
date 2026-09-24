@@ -21,6 +21,7 @@ Built on the `rendering` branch, not merged or pushed.
 | phase | state | what it measured |
 | --- | --- | --- |
 | 0 -- harness | done | `npm run harness -- <label> [--compare <old>]`; two runs agree on every scored figure, render time within 0.1 ms. Baseline below. Found and fixed an eviction bug on the way. |
+| 1 -- tone, probes, presets | done | Contrast 2.19 -> **2.88** (band 2.48-3.47); Corbel hue error 13.2 -> 3.9 degrees, Lynx 5.5 -> 3.3, its saturated share 7.7 -> 27.7 % (the blue specular now reads); Beacon 0.2 -> 2.5 (the one that moved away). Probe decode 24-43 ms. Render 6.4 -> 7.5 ms. Details under "Phase 1, as built". |
 
 ### Baseline (built package, 1600x1000, today's renderer)
 
@@ -51,6 +52,51 @@ protects what it just made; uncached live memory is 0.
 **A carried magazine costs 40 MB**, a 512 bake plus normal maps fetched at
 1024, which is most of why eleven live pieces reach 958 MB. Phase 3 is where
 that comes down.
+
+### Phase 1, as built
+
+**Probes decode in the core** (`web/core/src/lighting.rs`, `Archive.cubeHdr`):
+BC6H faces to linear float through StarBreaker's public
+`decode_bc6h_to_float_rgb`, one face at a time because a cube mip holds all
+six. 24-43 ms per probe at 256.
+
+**They are standard Y-up cubes**, read by three.js with no rotation. Measured
+on the Idris hangar: the face labelled -Y is the one dim, even face (the
+floor, 0.011-0.013 on every edge), and every side face is brighter along its
+top edge (0.036-0.114 against 0.004-0.034). The inventory probe's brightest
+face is the one toward the camera, which fits front-lit inventory lighting.
+Its smaller mips are empty; only the full-size face is used.
+
+**The inventory probe is purple.** Mean RGB about (0.020, 0.006, 0.022): the
+inventory screen's mood, which painted every piece magenta when used as-is.
+The reference preset keeps its light and drops its hue (`neutral`).
+
+**Each probe is normalised by its own mean** (0.01 for inventory, 0.4 for the
+sunny Daymar probe) and **aims the key at its brightest 1%**, so the floor
+shadow falls the way the environment says the light comes from.
+
+**The customizer rig reads from the archive** (`Archive.lightRig`): ten spots
+in `LightRig_Female_Lightgroup`, authored intensity 0.002-0.25, 90-degree
+cones, the `spot_075` gobo. Two traps on the way. A rig switched on by
+sequence is authored off in `defaultState` and lit in another state, so the
+reader takes the first lit state as StarBreaker does. And each group entity
+carries `EntityComponentLightGroup` twice -- once under `PropertiesDataCore`
+with only its fade presets, once as a direct child with the lights -- so taking
+the first found no lights at all. The ten axes meet within 4-28 cm of one
+point 1.62 m up, 0.5-0.9 m from each light: a head-and-shoulders rig,
+anchored at the head, its 1 m attenuation radius dropped.
+
+**Calibrated on the harness**: environment x0.7 and exposure 0.7 put the
+Sunchaser mid-band. `classic` reproduces the pre-Phase-1 baseline to within
+0.2 on every figure, so the preset plumbing itself changes nothing. p95
+luminance rose (83 -> 99 against the in-game 68): specular response, which
+`CLAUDE.md` already says no lighting value fixes.
+
+**The harness's hue targets now come from the items' own data**: Corbel's
+palette entry A `#f6c000` (46.8), Beacon's BaseLayer3 tint (30.2), Lynx's
+palette specular `#0314fd` (235.6). The first cut used guesses and a
+peak-of-bins hue that flipped between neighbouring bins on a small exposure
+change; it is now the median.
 
 ## Boundaries
 

@@ -19,6 +19,7 @@ pub mod composite;
 pub mod discover;
 pub mod gear;
 pub mod gold;
+pub mod lighting;
 pub mod material;
 pub mod mesh;
 mod p4k;
@@ -273,6 +274,37 @@ impl Archive {
         let dds = starbreaker_dds::DdsFile::from_split(&base.bytes, &siblings)
             .map_err(|e| JsValue::from_str(&format!("reading split DDS: {e}")))?;
         Ok(dds.mip_count())
+    }
+}
+
+#[wasm_bindgen]
+impl Archive {
+    /// A lighting probe as linear float RGBA: `[size, Float32Array]`, six
+    /// faces of `size`² in DDS order. RENDERING.md Phase 1.
+    #[wasm_bindgen(js_name = cubeHdr)]
+    pub fn cube_hdr(&self, path: &str, max_size: u32) -> Result<js_sys::Array, JsValue> {
+        let index = self
+            .find_asset(path)
+            .ok_or_else(|| JsValue::from_str(&format!("no probe at {path}")))?;
+        let entry = &self.entries[index];
+        let base = p4k::read_entry(self.reader.source(), entry).map_err(|e| JsValue::from_str(&e))?;
+        let siblings = ArchiveSiblings { archive: self, base: entry.name.clone() };
+        let dds = starbreaker_dds::DdsFile::from_split(&base.bytes, &siblings)
+            .map_err(|e| JsValue::from_str(&format!("reading {path}: {e}")))?;
+        let cube = lighting::hdr_cube(&dds, max_size).map_err(|e| JsValue::from_str(&format!("{path}: {e}")))?;
+        let out = js_sys::Array::new();
+        out.push(&(cube.size as f64).into());
+        out.push(&js_sys::Float32Array::from(&cube.rgba[..]).into());
+        Ok(out)
+    }
+
+    /// The lights of one group in an object container, as JSON. Positions and
+    /// directions stay in the archive's Z-up frame; the renderer converts.
+    #[wasm_bindgen(js_name = lightRig)]
+    pub fn light_rig(&self, socpak: &str, group: &str) -> Result<String, JsValue> {
+        let bytes = self.read_asset(socpak)?;
+        let lights = lighting::light_rig(&bytes, group).map_err(|e| JsValue::from_str(&e))?;
+        Ok(serde_json::Value::Array(lights.iter().map(lighting::RigLight::to_json).collect()).to_string())
     }
 }
 

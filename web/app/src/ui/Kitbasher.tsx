@@ -61,6 +61,26 @@ function titleOfLine(catalogue: Catalogue, item: CatalogueItem): string {
 
 type Mode = 'armour' | 'gear';
 
+/** The lighting preset a visitor last chose. Per-visitor convenience only:
+ * storage can be blocked or empty, and the default is always fine. */
+const LIGHT_KEY = 'fashionworks:lighting';
+
+function rememberedLighting(): string | null {
+  try {
+    return localStorage.getItem(LIGHT_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function rememberLighting(id: string): void {
+  try {
+    localStorage.setItem(LIGHT_KEY, id);
+  } catch {
+    // Blocked storage: the choice lasts for this visit only.
+  }
+}
+
 /** What each pose button does, which with a weapon includes where it goes. */
 const POSE_TITLES: Record<string, (holding: boolean) => string> = {
   rest: (holding) => `The skeleton's rest pose${holding ? '; the weapon goes back in its holster' : ''}`,
@@ -88,6 +108,8 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
   const onScene = useCallback((handle: ViewerHandle) => {
     viewer.current = handle;
     const built = new Engine(client, initialCatalogue, handle);
+    const remembered = rememberedLighting();
+    if (remembered) void built.setLighting(remembered);
     engine.current = built;
     onEngine?.(built);
     const unsubscribe = built.subscribe(setState);
@@ -218,6 +240,7 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
 
   const busy = state?.busy ?? true;
   const poses = engine.current?.poseOptions() ?? ['rest', 'idle', 'crouch'];
+  const lighting = engine.current?.lightingOptions() ?? [];
   const holdable = [...carrying].filter(([, item]) => HOLDABLE.has(item.slot));
   const tabs = mode === 'armour' ? SLOTS : GEAR_SLOTS;
   const countOf = (name: string) => (isGearSlot(name)
@@ -297,6 +320,23 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
             </button>
           ))}
         </span>
+        {lighting.length > 0 && (
+          <span className="fw-kit-group">
+            <span className="fw-kit-label">light</span>
+            <select
+              className="fw-kit-select"
+              aria-label="Lighting"
+              value={state?.lighting ?? ''}
+              onChange={(event) => {
+                const id = event.target.value;
+                rememberLighting(id);
+                void engine.current?.setLighting(id);
+              }}
+            >
+              {lighting.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
+            </select>
+          </span>
+        )}
         {holdable.length > 0 && (
           <span className="fw-kit-group" role="radiogroup" aria-label="In hand">
             <span className="fw-kit-label">hold</span>

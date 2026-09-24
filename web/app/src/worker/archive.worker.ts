@@ -17,6 +17,23 @@ import type { IndexStep } from '../onboarding';
 // Static, not dynamic: see the note beside `wasm.default` below.
 import * as wasm from '../../../core/pkg/fashionworks_core.js';
 
+/** One light of an authored rig, in the archive's Z-up frame. */
+export interface RigLight {
+  readonly name: string;
+  /** `Projector` (a spot) or `Omni`. */
+  readonly kind: string;
+  readonly position: [number, number, number];
+  readonly direction: [number, number, number];
+  /** Linear 0-1. */
+  readonly color: [number, number, number];
+  /** The authored intensity, unscaled. */
+  readonly intensity: number;
+  readonly radius: number;
+  /** Full cone angle, degrees. */
+  readonly fov: number;
+  readonly texture: string | null;
+}
+
 export type ToWorker = (
   | {
       type: 'open';
@@ -68,6 +85,10 @@ export type ToWorker = (
   /** Load a gear item -- weapon, knife, pen, grenade, magazine -- and its
    * mount for the named locator on the item (empty for none). */
   | { type: 'gear'; path: string; locator: string }
+  /** An HDR lighting probe as float RGBA faces. RENDERING.md Phase 1. */
+  | { type: 'probe'; path: string; maxSize: number }
+  /** The lights of one group in an object container. */
+  | { type: 'lights'; socpak: string; group: string }
 ) & {
   /** Set on every request that expects an answer, and echoed on the answer.
    *
@@ -227,6 +248,8 @@ export type FromWorker = (
   | { type: 'pose'; pose: PosePayload; ms: number }
   | { type: 'discovered'; path: string | null }
   | { type: 'gear'; path: string; gear: GearPayload; ms: number }
+  | { type: 'probe'; path: string; size: number; rgba: Float32Array; ms: number }
+  | { type: 'lights'; lights: RigLight[] }
   | { type: 'failed'; message: string }
 ) & { id?: number };
 
@@ -328,6 +351,8 @@ let opened: {
     textureSizes(path: string): Uint32Array;
     discoverMaterial(className: string, meshPath: string, meshMaterial?: string): string | undefined;
     loadGear(path: string, locator: string): unknown;
+    cubeHdr(path: string, maxSize: number): [number, Float32Array];
+    lightRig(socpak: string, group: string): string;
   };
   /** Built catalogues, by body type.
    *
@@ -483,6 +508,27 @@ async function run(message: ToWorker): Promise<void> {
     const started = performance.now();
     const gear = opened.archive.loadGear(message.path, message.locator) as GearPayload;
     reply({ type: 'gear', path: message.path, gear, ms: performance.now() - started });
+    return;
+  }
+
+  if (message.type === 'probe') {
+    if (!opened) {
+      reply({ type: 'failed', message: 'no archive is open' });
+      return;
+    }
+    const started = performance.now();
+    const [size, rgba] = opened.archive.cubeHdr(message.path, message.maxSize);
+    reply({ type: 'probe', path: message.path, size, rgba, ms: performance.now() - started });
+    return;
+  }
+
+  if (message.type === 'lights') {
+    if (!opened) {
+      reply({ type: 'failed', message: 'no archive is open' });
+      return;
+    }
+    const lights = JSON.parse(opened.archive.lightRig(message.socpak, message.group)) as RigLight[];
+    reply({ type: 'lights', lights });
     return;
   }
 

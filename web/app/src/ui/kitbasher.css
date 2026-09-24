@@ -56,6 +56,24 @@
   line-height: 1.2;
 }
 
+/* A select reads as one of the toolbar's buttons. */
+.fw-kit .fw-kit-select {
+  background: var(--sc-field);
+  color: var(--sc-text);
+  border: 1px solid var(--sc-border);
+  border-radius: 8px;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.fw-kit .fw-kit-select:focus-visible {
+  outline: 2px solid var(--sc-accent, var(--sc-text));
+  outline-offset: 2px;
+}
+
 .fw-kit button:hover:not(:disabled) {
   border-color: var(--sc-border-bright, var(--sc-border));
 }

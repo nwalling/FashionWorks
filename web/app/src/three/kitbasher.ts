@@ -13,8 +13,10 @@
  */
 
 import {
+  type AmbientLight,
   Bone,
   Box3,
+  type DirectionalLight,
   Group,
   Matrix4,
   type Material,
@@ -26,6 +28,7 @@ import {
   SkinnedMesh,
   type Texture,
   Vector3,
+  type WebGLRenderer,
 } from 'three';
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
@@ -60,6 +63,7 @@ import {
   type OwnedPort,
 } from '../gear/ports';
 import { meshTexture, plainMaterial, surfaceMaterial, texturesWanted } from './materials';
+import { DEFAULT_PRESET, LIGHT_PRESETS, StudioLighting } from './lighting';
 import { applyClip, bonePosition, boneRotation, buildRig, mountMatrix, type BuiltRig } from './rig';
 import { compositeSurfaces, dataTexture, type CompositeGeometry, type PaletteEntry } from './surface';
 
@@ -248,6 +252,13 @@ export interface KitbasherScene {
   readonly scene: Scene;
   readonly camera: PerspectiveCamera;
   readonly controls: OrbitControls;
+  /** Present when the view is the full viewer; lighting presets need both. */
+  readonly renderer?: WebGLRenderer;
+  readonly lights?: {
+    readonly key: DirectionalLight;
+    readonly rim: DirectionalLight;
+    readonly fill: AmbientLight;
+  };
 }
 
 /** What the UI renders from. Replaced wholesale on every change, so React can
@@ -255,6 +266,8 @@ export interface KitbasherScene {
 export interface KitbasherState {
   readonly wearing: ReadonlyMap<Slot, CatalogueItem>;
   readonly pose: string;
+  /** The lighting preset in use. */
+  readonly lighting: string;
   readonly wear: boolean;
   /** One line about what just happened, for a status strip. */
   readonly status: string;
@@ -570,6 +583,7 @@ export class Kitbasher {
     this.state = {
       wearing: new Map(),
       pose: 'rest',
+      lighting: DEFAULT_PRESET,
       wear: true,
       status: '',
       busy: false,
@@ -581,6 +595,34 @@ export class Kitbasher {
       ports: new Map(),
       holding: null,
     };
+    if (view.renderer && view.lights) {
+      this.lighting = new StudioLighting({ scene: view.scene, renderer: view.renderer, ...view.lights }, client);
+    }
+  }
+
+  private readonly lighting: StudioLighting | null = null;
+
+  private lit = false;
+
+  private askedLighting = false;
+
+  /** The lighting presets, in the order they are offered. */
+  lightingOptions(): Array<{ id: string; label: string }> {
+    return this.lighting ? LIGHT_PRESETS.map(({ id, label }) => ({ id, label })) : [];
+  }
+
+  /** Light the scene with a preset: a probe from the archive, a key aimed
+   * from it, a tone curve. RENDERING.md Phase 1. */
+  async setLighting(id: string): Promise<void> {
+    if (!this.lighting) return;
+    this.askedLighting = true;
+    try {
+      if (!(await this.lighting.apply(id)) || this.disposed) return;
+      const label = LIGHT_PRESETS.find((p) => p.id === id)?.label ?? id;
+      this.publish({ lighting: this.lighting.preset ?? id, status: `lit: ${label}` });
+    } catch (error) {
+      this.publish({ status: `lighting: ${error instanceof Error ? error.message : String(error)}` });
+    }
   }
 
   /** The catalogue for the body currently on screen. */
@@ -769,6 +811,14 @@ export class Kitbasher {
         }];
       }));
     this.view.scene.add(this.rig.root);
+    // The first time an archive is open, light it. A body switch re-enters
+    // here and keeps whatever preset is on.
+    if (!this.lit) {
+      this.lit = true;
+      // A remembered preset may already be on its way; the default must not
+      // race it.
+      if (!this.askedLighting) void this.setLighting(this.state.lighting);
+    }
     this.publish({
       busy: false,
       rigBones: built.summary.bones,

@@ -43,6 +43,15 @@ const OUT = process.env.FW_HARNESS_OUT ?? fileURLToPath(new URL('../harness-out/
 const args = process.argv.slice(2);
 const label = args.find((a) => !a.startsWith('--')) ?? 'run';
 const compareWith = args.includes('--compare') ? args[args.indexOf('--compare') + 1] : null;
+// The lighting preset every scene is scored under. `inventory` is the
+// reference; `classic` reproduces the renderer before Phase 1.
+const LIGHT = process.env.FW_HARNESS_LIGHT ?? 'inventory';
+// Calibration: override a preset's numbers after it is applied, as JSON --
+// {"exposure":0.8,"environment":0.3,"key":2,"rim":0.4,"ambient":0.3}.
+const TWEAK = process.env.FW_HARNESS_TWEAK ? JSON.parse(process.env.FW_HARNESS_TWEAK) : null;
+// Score only some scenes: --scenes sunchaser,tactical
+const ONLY = args.includes('--scenes') ? new Set(args[args.indexOf('--scenes') + 1].split(',')) : null;
+const wanted = (name) => !ONLY || ONLY.has(name);
 
 /** What the numbers are held against. Sources are CLAUDE.md's sections. */
 export const REFERENCE = {
@@ -53,8 +62,10 @@ export const REFERENCE = {
   contrastBand: [2.48, 3.47],
   // "Lighting is matched to an in-game capture": torso over Defiance Tactical.
   tacticalTorso: { mean: 34, median: 29, p95: 68 },
-  // The colour in each name, as a hue in degrees.
-  hues: { 'Corbel Halcyon': 48, 'Beacon Undersuit Orange': 25, 'Lynx Arms Blue': 235 },
+  // The colour in each name, as a hue, read from the item's own data:
+  // Corbel's palette entry A #f6c000; Beacon's BaseLayer3 tint, linear
+  // (1, 0.35, 0.05); Lynx's palette specular #0314fd.
+  hues: { 'Corbel Halcyon': 46.8, 'Beacon Undersuit Orange': 30.2, 'Lynx Arms Blue': 235.6 },
 };
 
 const VIEWPORT = { width: 1600, height: 1000 };
@@ -96,9 +107,9 @@ async function main() {
     await new Promise((r) => setTimeout(r, 500));
     window.__kit.exposed.engine.view.renderer.domElement.scrollIntoView({ block: 'start' });
   });
-  await page.evaluate(installHelpers);
+  await page.evaluate(installHelpers, { light: LIGHT, tweak: TWEAK });
 
-  const report = { label, url: URL_, at: new Date().toISOString(), viewport: VIEWPORT, scenes: {} };
+  const report = { label, url: URL_, light: LIGHT, at: new Date().toISOString(), viewport: VIEWPORT, scenes: {} };
   const shot = async (name) => {
     const box = await page.evaluate(() => {
       const r = window.__kit.exposed.engine.view.renderer.domElement.getBoundingClientRect();
@@ -108,34 +119,34 @@ async function main() {
   };
 
   // ---- Sunchaser, front: gold per piece and pooled contrast.
-  report.scenes.sunchaser = await page.evaluate(async ({ camera }) => {
+  if (wanted('sunchaser')) report.scenes.sunchaser = await page.evaluate(async ({ camera }) => {
     const h = window.__harness;
     await h.dress(['Defiance Helmet Sunchaser', 'Defiance Core Sunchaser', 'Defiance Arms Sunchaser', 'Defiance Legs Sunchaser']);
     h.look(camera);
     return h.measurePieces(['helmet', 'torso', 'arms', 'legs']);
   }, { camera: FRONT });
-  await shot('sunchaser-front');
+  if (wanted('sunchaser')) await shot('sunchaser-front');
 
   // ---- Sunchaser, back: the upper back is 33.0% gold on CIG's store render.
-  report.scenes.sunchaserBack = await page.evaluate(async ({ camera }) => {
+  if (wanted('sunchaser')) report.scenes.sunchaserBack = await page.evaluate(async ({ camera }) => {
     const h = window.__harness;
     h.look(camera);
     return h.measurePieces(['torso']);
   }, { camera: BACK });
-  await shot('sunchaser-back');
+  if (wanted('sunchaser')) await shot('sunchaser-back');
 
   // ---- Defiance Tactical with an Artimex helmet: torso luminance.
-  report.scenes.tactical = await page.evaluate(async ({ camera }) => {
+  if (wanted('tactical')) report.scenes.tactical = await page.evaluate(async ({ camera }) => {
     const h = window.__harness;
     await h.dress(['Artimex Helmet', 'Defiance Core Tactical', 'Defiance Arms Tactical', 'Defiance Legs Tactical']);
     h.look(camera);
     return h.measurePieces(['torso']);
   }, { camera: TORSO });
-  await shot('tactical-torso');
+  if (wanted('tactical')) await shot('tactical-torso');
 
   // ---- Hue of named colourways.
   report.scenes.hues = {};
-  for (const [name, pieces, slot] of [
+  for (const [name, pieces, slot] of !wanted('hues') ? [] : [
     ['Corbel Halcyon', ['Corbel Helmet Halcyon', 'Corbel Core Halcyon', 'Corbel Arms Halcyon', 'Corbel Legs Halcyon'], 'torso'],
     ['Beacon Undersuit Orange', ['Beacon Undersuit Orange'], 'undersuit'],
     ['Lynx Arms Blue', ['Lynx Arms Blue'], 'arms'],
@@ -150,11 +161,11 @@ async function main() {
   }
 
   // ---- The heavy loadout: 23 carried items on a full set.
-  report.scenes.loadout = await page.evaluate(async ({ camera }) => {
+  if (wanted('loadout')) report.scenes.loadout = await page.evaluate(async ({ camera }) => {
     const h = window.__harness;
     return h.heavyLoadout(camera);
   }, { camera: FRONT });
-  await shot('loadout');
+  if (wanted('loadout')) await shot('loadout');
 
   await browser.close();
   writeFileSync(`${OUT}${label}.json`, `${JSON.stringify(report, null, 1)}\n`);
@@ -162,7 +173,7 @@ async function main() {
 }
 
 /** Runs in the page. Installs `window.__harness`. */
-function installHelpers() {
+function installHelpers({ light, tweak }) {
   const kit = window.__kit;
   const engine = () => kit.exposed.engine;
   const frames = (n = 2) => new Promise((resolve) => {
@@ -271,6 +282,18 @@ function installHelpers() {
     },
     async dress(names) {
       const e = engine();
+      if (e.setLighting && !window.__harnessLit) {
+        window.__harnessLit = true;
+        await e.setLighting(light);
+        if (tweak) {
+          const { renderer, scene, lights } = e.view;
+          if (tweak.exposure !== undefined) renderer.toneMappingExposure = tweak.exposure;
+          if (tweak.environment !== undefined) scene.environmentIntensity *= tweak.environment;
+          if (tweak.key !== undefined) lights.key.intensity = tweak.key;
+          if (tweak.rim !== undefined) lights.rim.intensity = tweak.rim;
+          if (tweak.ambient !== undefined) lights.fill.intensity = tweak.ambient;
+        }
+      }
       e.clearGear();
       e.clear();
       await settle();
@@ -321,7 +344,7 @@ function installHelpers() {
           const gold = [];
           const other = [];
           const lum = [];
-          const hues = new Float64Array(36);
+          const hues = [];
           let pixels = 0;
           let saturated = 0;
           for (let p = 0, i = 0; p < mask.length; p += 1, i += 4) {
@@ -336,11 +359,9 @@ function installHelpers() {
             const [h, s, v] = hsv(r, g, bl);
             if (s >= 0.35 && v >= 0.2) {
               saturated += 1;
-              hues[Math.floor(h / 10) % 36] += 1;
+              hues.push(h);
             }
           }
-          let peak = 0;
-          for (let k = 1; k < 36; k += 1) if (hues[k] > hues[peak]) peak = k;
           const mean = lum.reduce((s, x) => s + x, 0) / Math.max(1, lum.length);
           out[slot] = {
             pixels,
@@ -350,7 +371,9 @@ function installHelpers() {
             median: +median(lum).toFixed(1),
             p95: +pct(lum, 0.95).toFixed(1),
             saturated: pixels ? +(saturated * 100 / pixels).toFixed(1) : 0,
-            hue: saturated ? peak * 10 + 5 : null,
+            // The median, not the peak of 10-degree bins: an orange sitting on
+            // a bin edge flipped between 25 and 35 with a small exposure change.
+            hue: saturated ? +median(hues).toFixed(1) : null,
           };
         }
         out.pooled = {
@@ -426,7 +449,7 @@ function installHelpers() {
 function printReport(report, previous) {
   const rows = [];
   const add = (metric, value, target, old) => rows.push({ metric, value, target, old });
-  const s = report.scenes;
+  const s = { sunchaser: { pooled: {} }, sunchaserBack: {}, tactical: {}, hues: {}, loadout: {}, ...report.scenes };
   const p = previous?.scenes;
   const R = REFERENCE;
   for (const slot of ['helmet', 'torso', 'arms', 'legs']) {
@@ -444,7 +467,7 @@ function printReport(report, previous) {
     add(`loadout ${k}`, s.loadout[k], '', p?.loadout?.[k]);
   }
   const width = Math.max(...rows.map((r) => r.metric.length));
-  console.log(`\n${report.label}  (${report.url})`);
+  console.log(`\n${report.label}  (${report.url}, light: ${report.light ?? 'classic'})`);
   console.log(`${'metric'.padEnd(width)}  ${'value'.padStart(9)}  ${'target'.padStart(11)}${previous ? `  ${previous.label.padStart(9)}` : ''}`);
   for (const r of rows) {
     console.log(`${r.metric.padEnd(width)}  ${String(r.value ?? '-').padStart(9)}  ${String(r.target ?? '').padStart(11)}${previous ? `  ${String(r.old ?? '-').padStart(9)}` : ''}`);
