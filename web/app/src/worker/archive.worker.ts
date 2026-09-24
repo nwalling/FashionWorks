@@ -162,6 +162,9 @@ export interface MaterialPayload {
     alphaTest: number;
     /** 0-1. */
     shininess: number;
+    /** Numeric `PublicParams`, for shaders other than LayerBlend: a number, or
+     * a vector for a comma-separated value. Absent on older cores. */
+    params?: Record<string, number | Float32Array>;
   }>;
   /** Every distinct detail layer the piece references, by lowercased path. */
   library: Record<string, LayerMaterial>;

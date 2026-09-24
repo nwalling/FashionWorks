@@ -289,8 +289,12 @@ function installHelpers({ light, tweak, quality }) {
       controls.target.set(...target);
       controls.update();
     },
-    async dress(names) {
+    /** Wear exactly these pieces. The figure under them is off unless asked
+     * for: the armour scores are about armour, and a face behind a visor or
+     * skin in a gap between plates moves them without the armour changing. */
+    async dress(names, { figure = false } = {}) {
       const e = engine();
+      e.setFigure?.(figure);
       if (e.setLighting && !window.__harnessLit) {
         window.__harnessLit = true;
         e.view.setQuality?.(quality);
@@ -398,7 +402,8 @@ function installHelpers({ light, tweak, quality }) {
     /** A full set, an ammo-carrier pack and 23 carried items; then timing. */
     async heavyLoadout(camera) {
       const e = engine();
-      await window.__harness.dress(['Defiance Helmet Sunchaser', 'Defiance Core Sunchaser', 'Defiance Arms Sunchaser', 'Defiance Legs Sunchaser']);
+      // The cost scene draws everything a visitor would, figure included.
+      await window.__harness.dress(['Defiance Helmet Sunchaser', 'Defiance Core Sunchaser', 'Defiance Arms Sunchaser', 'Defiance Legs Sunchaser'], { figure: true });
       const C = e.catalogue;
       const pack = C.items.find((i) => i.slot === 'backpack' && (i.ports || []).some((p) => /magattach/i.test(p.name)));
       if (pack) await e.equip(pack);
@@ -456,6 +461,8 @@ function installHelpers({ light, tweak, quality }) {
         geometries: renderer.info.memory.geometries,
         wornMB: +(worn / 1048576).toFixed(1),
         wornPieces: live.size,
+        // The body, head, eyes and hair under the armour. RENDERING.md Phase 4.
+        figureMB: +((e.figure?.parts ?? []).reduce((sum, p) => sum + p.loaded.bytes, 0) / 1048576).toFixed(1),
         uncachedMB: +([...live].filter((l) => ![...e.cache.values()].includes(l))
           .reduce((sum, l) => sum + l.bytes, 0) / 1048576).toFixed(1),
         cacheMB: +(stats.bytes / 1048576).toFixed(1),
@@ -481,7 +488,7 @@ function printReport(report, previous) {
     add(`${name} hue`, s.hues[name]?.hue, target, p?.hues?.[name]?.hue);
     add(`${name} saturated %`, s.hues[name]?.saturated, '', p?.hues?.[name]?.saturated);
   }
-  for (const k of ['fps', 'renderMs', 'calls', 'triangles', 'textures', 'wornMB', 'cacheMB']) {
+  for (const k of ['fps', 'renderMs', 'calls', 'triangles', 'textures', 'wornMB', 'figureMB', 'cacheMB']) {
     add(`loadout ${k}`, s.loadout[k], '', p?.loadout?.[k]);
   }
   const width = Math.max(...rows.map((r) => r.metric.length));

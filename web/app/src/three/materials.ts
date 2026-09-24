@@ -28,9 +28,11 @@ import {
   DoubleSide,
   type Material,
   MeshBasicMaterial,
+  LinearMipmapLinearFilter,
   MeshStandardMaterial,
   NoColorSpace,
   RGBAFormat,
+  RGFormat,
   RepeatWrapping,
   SRGBColorSpace,
   ShaderChunk,
@@ -204,8 +206,11 @@ function linear(rgb: ArrayLike<number> | undefined, fallback: number): Color {
   return new Color().setRGB(rgb[0]!, rgb[1]!, rgb[2]!);
 }
 
-/** The material for anything the compositor does not handle. */
-export function plainMaterial(sub: Submaterial, textures: SurfaceTextures): Material {
+/** The material for anything the compositor does not handle.
+ *
+ * `siblings` are the other submaterials of the same `.mtl`, for a shader that
+ * takes something from them: a hair cap names no colour and wears its cards'. */
+export function plainMaterial(sub: Submaterial, textures: SurfaceTextures, siblings: readonly Submaterial[] = []): Material {
   const shader = sub.shader.toLowerCase();
   if (shader.includes('nodraw')) {
     // Collision proxies. Invisible in the game too.
@@ -271,7 +276,9 @@ export function plainMaterial(sub: Submaterial, textures: SurfaceTextures): Mate
     });
   }
 
-  const skin = ['humanskin', 'hair', 'eye', 'organic'].some((s) => shader.includes(s));
+  if (shader.includes('hair')) return hairMaterial(sub, diffuseMap, siblings);
+
+  const skin = ['humanskin', 'eye', 'organic'].some((s) => shader.includes(s));
   const material = new MeshStandardMaterial({
     name: sub.name,
     color: skin && !diffuseMap ? new Color(0xb08870) : linear(metal ? sub.specular : sub.diffuse, 0x8a929a),
@@ -281,6 +288,13 @@ export function plainMaterial(sub: Submaterial, textures: SurfaceTextures): Mate
     metalness: metal ? 1 : 0,
   });
   if (diffuseMap) material.color.set(0xffffff).multiply(linear(sub.diffuse, 0xffffff));
+  if (isSkin(sub) && normalMap) {
+    const rough = skinRoughness(normalMap, sub.shininess ?? 1);
+    if (rough) {
+      material.roughnessMap = rough;
+      material.roughness = 1;
+    }
+  }
   const emissive = sub.emissive ? Math.max(sub.emissive[0]!, sub.emissive[1]!, sub.emissive[2]!) : 0;
   if (sub.glow > 0 || emissive > 0) {
     material.emissive = emissive > 0 ? linear(sub.emissive, 0) : linear(sub.diffuse, 0);
@@ -296,12 +310,181 @@ export function plainMaterial(sub: Submaterial, textures: SurfaceTextures): Mate
   return material;
 }
 
+/** A `HairPBR` submaterial: strand cards, or the scalp under them.
+ *
+ * The shader carries no colour at all -- `Diffuse` is white on the cards and
+ * black on the scalp, and `TexSlot1` is an opacity mask, two strand sets in red
+ * and green over a flat blue. Drawn as a colour map it came out as blue and
+ * rainbow cards. The colour is physical: `BaseMelanin` and
+ * `BaseMelaninRedness` for the pigment, `DyeColor` over it by `DyeAmount`.
+ *
+ * Cards are alpha-tested on the red strands, with alpha to coverage so the
+ * MSAA target softens the edges, and the mask lifted by `OpacityMipScale`'s
+ * spirit so strands do not thin to nothing in the smaller mips. The scalp
+ * cap is the same colour blended over the skin through its density mask. */
+function hairMaterial(sub: Submaterial, mask: Texture | undefined, siblings: readonly Submaterial[]): Material {
+  const params = sub.params ?? {};
+  // `%HAIR_CAP` is in the shader's flags, which the payload does not carry;
+  // the cards' mask is the one named `_opac`.
+  const cap = !/_opac\b/i.test(sub.textures.base_color ?? '');
+  const smoothness = scalar(params.Smoothness, 0.5);
+  // The cap declares only smoothness and specular; its colour is the hair's.
+  const pigment = params.BaseMelanin !== undefined
+    ? params
+    : siblings.find((s) => s.params?.BaseMelanin !== undefined)?.params ?? params;
+  const material = new MeshStandardMaterial({
+    name: sub.name,
+    color: hairColour(pigment),
+    roughness: cap ? 1 : Math.min(1, Math.max(0.3, 1 - smoothness)),
+    metalness: 0,
+    side: DoubleSide,
+  });
+  if (!mask) return material;
+  material.alphaMap = twoChannel(mask);
+  if (cap) {
+    material.transparent = true;
+    material.depthWrite = false;
+    material.polygonOffset = true;
+    material.polygonOffsetFactor = -1;
+    material.polygonOffsetUnits = -1;
+  } else {
+    material.alphaTest = HAIR_ALPHA_TEST;
+    material.alphaToCoverage = true;
+  }
+  // three.js reads an alpha map's green; the cards' first strand set is red,
+  // and the scalp's density is grey, where red is as good as any.
+  material.onBeforeCompile = (shader) => {
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <alphamap_fragment>',
+      `#ifdef USE_ALPHAMAP
+        diffuseColor.a *= clamp(texture2D(alphaMap, vAlphaMapUv).r * ${cap ? '1.0' : HAIR_ALPHA_LIFT.toFixed(2)}, 0.0, 1.0);
+      #endif`,
+    );
+  };
+  material.customProgramCacheKey = () => (cap ? 'fw-hair-cap' : 'fw-hair');
+  return material;
+}
+
+/** A mask's red and green only, at half an RGBA's memory.
+ *
+ * The strand mask is red and green over a flat blue, and the scalp's density
+ * is grey; neither uses blue or alpha. Two channels rather than one because
+ * three.js's shadow pass reads an alpha map's green, and with a single channel
+ * the hair would cast no shadow at all. */
+function twoChannel(texture: Texture): Texture {
+  const image = texture.image as { data?: Uint8Array; width?: number; height?: number } | undefined;
+  const data = image?.data;
+  if (!data || !image?.width || !image.height) return texture;
+  const texels = image.width * image.height;
+  const out = new Uint8Array(texels * 2);
+  for (let i = 0; i < texels; i += 1) {
+    out[i * 2] = data[i * 4]!;
+    out[i * 2 + 1] = data[i * 4 + 1]!;
+  }
+  const mask = new DataTexture(out, image.width, image.height, RGFormat, UnsignedByteType);
+  mask.colorSpace = NoColorSpace;
+  mask.wrapS = RepeatWrapping;
+  mask.wrapT = RepeatWrapping;
+  mask.anisotropy = texture.anisotropy;
+  mask.generateMipmaps = true;
+  mask.minFilter = LinearMipmapLinearFilter;
+  mask.needsUpdate = true;
+  return mask;
+}
+
+const HAIR_ALPHA_TEST = 0.35;
+/** How far the strand mask is lifted before the test. CryEngine scales it by
+ * mip (`OpacityMipScale`, 3.4 on the hair measured); a flat lift is the cheap
+ * version, and keeps a 1024 decode from reading as thinning hair. */
+const HAIR_ALPHA_LIFT = 1.6;
+
+function scalar(value: number | Float32Array | undefined, fallback: number): number {
+  if (typeof value === 'number') return value;
+  return value?.[0] ?? fallback;
+}
+
+function vector(value: number | Float32Array | undefined): [number, number, number] | null {
+  if (!value || typeof value === 'number' || value.length < 3) return null;
+  return [value[0]!, value[1]!, value[2]!];
+}
+
+/** Hair colour, linear, from melanin and dye.
+ *
+ * CryEngine does not document its mapping, so this is the published one it
+ * most resembles -- Chiang et al.'s melanin parametrisation as Blender's
+ * Principled Hair implements it: melanin 0-1 becomes a concentration by
+ * `-ln(1 - m)`, split into eumelanin and pheomelanin by redness, absorbed per
+ * channel, and converted to the colour a strand reads as at a moderate
+ * azimuthal roughness. The dye then mixes over it. Inferred, not confirmed:
+ * the parameter names match exactly, the curve is a reasonable guess. */
+export function hairColour(params: Record<string, number | Float32Array>): Color {
+  const melanin = Math.min(0.999, Math.max(0, scalar(params.BaseMelanin, 0.5)));
+  const redness = Math.min(1, Math.max(0, scalar(params.BaseMelaninRedness, 0)));
+  const quantity = -Math.log(Math.max(1 - melanin, 1e-4));
+  const eu = quantity * (1 - redness);
+  const pheo = quantity * redness;
+  const sigma = [
+    eu * 0.506 + pheo * 0.343,
+    eu * 0.841 + pheo * 0.733,
+    eu * 1.653 + pheo * 1.924,
+  ];
+  // Blender's roughness-dependent factor at an azimuthal roughness of 0.3.
+  const beta = 0.3;
+  const k = 5.969 - 0.215 * beta + 2.532 * beta ** 2 - 10.73 * beta ** 3 + 5.574 * beta ** 4 + 0.245 * beta ** 5;
+  const tint = vector(params.BaseTintColor) ?? [1, 1, 1];
+  let rgb = sigma.map((s, i) => Math.exp(-Math.sqrt(s) * k) * tint[i]!);
+  const dye = vector(params.DyeColor);
+  const amount = Math.min(1, Math.max(0, scalar(params.DyeAmount, 0)));
+  if (dye && amount > 0) rgb = rgb.map((c, i) => c + (dye[i]! - c) * amount);
+  return new Color().setRGB(rgb[0]!, rgb[1]!, rgb[2]!);
+}
+
 /** Which of a submaterial's textures the renderer needs, and in what space. */
-export function texturesWanted(sub: Submaterial): Array<{ path: string; srgb: boolean }> {
-  const out: Array<{ path: string; srgb: boolean }> = [];
-  if (sub.textures.normal) out.push({ path: sub.textures.normal, srgb: false });
-  if (!sub.tintable && sub.textures.base_color) out.push({ path: sub.textures.base_color, srgb: true });
+export function texturesWanted(sub: Submaterial): Array<{ path: string; srgb: boolean; alpha?: boolean }> {
+  const out: Array<{ path: string; srgb: boolean; alpha?: boolean }> = [];
+  // Skin's gloss lives in its normal map's smoothness stream, as armour
+  // layers' does; the plain decode leaves that stream out.
+  if (sub.textures.normal) out.push({ path: sub.textures.normal, srgb: false, alpha: isSkin(sub) });
+  // Hair's slot 1 is a mask, not a colour, and an sRGB decode would thin it.
+  const hair = sub.shader.toLowerCase().includes('hair');
+  if (!sub.tintable && sub.textures.base_color) out.push({ path: sub.textures.base_color, srgb: !hair });
   return out;
+}
+
+function isSkin(sub: Submaterial): boolean {
+  return sub.shader.toLowerCase().includes('humanskin');
+}
+
+/** Skin roughness from the normal map's smoothness stream.
+ *
+ * `HumanSkin_V2` carries Shininess 1 on the body and the head, and taken as a
+ * constant that is a mirror: the figure came out wet and plastic. In CryEngine
+ * the constant scales the per-pixel smoothness in the `_ddna` alpha, exactly
+ * as it does for an armour layer, so roughness is `1 - alpha x shininess`. */
+function skinRoughness(normal: Texture, shininess: number): DataTexture | null {
+  const image = normal.image as { data?: Uint8Array; width?: number; height?: number } | undefined;
+  const data = image?.data;
+  if (!data || !image?.width || !image.height) return null;
+  const out = new Uint8Array(image.width * image.height * 4);
+  let varied = false;
+  for (let i = 0; i < image.width * image.height; i += 1) {
+    const alpha = data[i * 4 + 3]!;
+    if (alpha !== 255) varied = true;
+    const r = 255 - Math.round(alpha * Math.min(1, shininess));
+    out[i * 4] = 255;
+    out[i * 4 + 1] = r;
+    out[i * 4 + 2] = 0;
+    out[i * 4 + 3] = 255;
+  }
+  if (!varied) return null;
+  const texture = new DataTexture(out, image.width, image.height, RGBAFormat, UnsignedByteType);
+  texture.colorSpace = NoColorSpace;
+  texture.wrapS = RepeatWrapping;
+  texture.wrapT = RepeatWrapping;
+  texture.generateMipmaps = true;
+  texture.minFilter = LinearMipmapLinearFilter;
+  texture.needsUpdate = true;
+  return texture;
 }
 
 /** Prepare a decoded texture for binding on a mesh. */

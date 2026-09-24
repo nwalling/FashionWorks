@@ -154,6 +154,14 @@ pub struct SubMaterial {
     pub alpha_test: f32,
     /// 0-1, from the archive's 0-255.
     pub shininess: f32,
+    /// The numeric `PublicParams`, for shaders the compositor does not own.
+    ///
+    /// Hair is the case that needs them: `HairPBR` has no colour texture and
+    /// no meaningful `Diffuse`, and takes its colour from `BaseMelanin`,
+    /// `DyeColor` and their kin. LayerBlend's own block is left out -- it
+    /// carries about twenty template values per submaterial and nothing reads
+    /// them.
+    pub params: Vec<(String, Vec<f32>)>,
 }
 
 impl SubMaterial {
@@ -236,9 +244,22 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<SubMaterial>, String> {
                 opacity: sub.opacity,
                 alpha_test: sub.alpha_test,
                 shininess: (sub.shininess / 255.0).clamp(0.0, 1.0),
+                params: if layered { Vec::new() } else { numeric_params(&sub.public_params) },
             }
         })
         .collect())
+}
+
+/// `PublicParams` whose values are numbers or comma-separated vectors.
+fn numeric_params(params: &[mtl::PublicParam]) -> Vec<(String, Vec<f32>)> {
+    params
+        .iter()
+        .filter_map(|p| {
+            let values: Option<Vec<f32>> =
+                p.value.split(',').map(|v| v.trim().parse::<f32>().ok()).collect();
+            Some((p.name.clone(), values.filter(|v| !v.is_empty())?))
+        })
+        .collect()
 }
 
 /// Parse one detail-library `.mtl`.

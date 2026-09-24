@@ -81,6 +81,25 @@ function rememberLighting(id: string): void {
   }
 }
 
+const FIGURE_KEY = 'fashionworks:figure';
+
+/** Whether the visitor last turned the figure off. On unless they did. */
+function rememberedFigure(): boolean {
+  try {
+    return localStorage.getItem(FIGURE_KEY) !== 'off';
+  } catch {
+    return true;
+  }
+}
+
+function rememberFigure(on: boolean): void {
+  try {
+    localStorage.setItem(FIGURE_KEY, on ? 'on' : 'off');
+  } catch {
+    // As for lighting.
+  }
+}
+
 /** What each pose button does, which with a weapon includes where it goes. */
 const POSE_TITLES: Record<string, (holding: boolean) => string> = {
   rest: (holding) => `The skeleton's rest pose${holding ? '; the weapon goes back in its holster' : ''}`,
@@ -114,6 +133,7 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
     void built.setSurfaceMode(handle.quality() === 'low' ? 'baked' : 'live');
     const remembered = rememberedLighting();
     if (remembered) void built.setLighting(remembered);
+    if (!rememberedFigure()) built.setFigure(false);
     engine.current = built;
     onEngine?.(built);
     const unsubscribe = built.subscribe(setState);
@@ -308,6 +328,18 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
               {body}
             </button>
           ))}
+          <button
+            type="button"
+            aria-pressed={state?.figure ?? true}
+            title="Draw the body and head under the armour, or the armour alone"
+            onClick={() => {
+              const next = !(state?.figure ?? true);
+              rememberFigure(next);
+              engine.current?.setFigure(next);
+            }}
+          >
+            figure
+          </button>
         </span>
         <span className="fw-kit-group">
           <span className="fw-kit-label">pose</span>

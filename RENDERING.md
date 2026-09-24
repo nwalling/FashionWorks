@@ -1,9 +1,10 @@
 # RENDERING.md — Closing the gap to a studio render
 
 A plan, scoped against build 1.0.191.55227 on 2026-09-24, for the web
-kitbasher (`web/`). **Nothing here is built yet.** Everything under "What the
-data says" was measured against the real archive or this machine's browser
-today; everything under "Phases" is a proposal with an exit test.
+kitbasher (`web/`). Everything under "What the data says" was measured against
+the real archive or this machine's browser; everything under "Phases" is a
+proposal with an exit test. What has been built is under "Status", with what
+each phase measured.
 
 It follows a teardown of SC Dressing Room (`scdressingroom.gamers-fix.com`),
 the one public tool that renders the same assets visibly better than we do.
@@ -24,6 +25,7 @@ Built on the `rendering` branch, not merged or pushed.
 | 1 -- tone, probes, presets | done | Contrast 2.19 -> **2.88** (band 2.48-3.47); Corbel hue error 13.2 -> 3.9 degrees, Lynx 5.5 -> 3.3, its saturated share 7.7 -> 27.7 % (the blue specular now reads); Beacon 0.2 -> 2.5 (the one that moved away). Probe decode 24-43 ms. Render 6.4 -> 7.5 ms. Details under "Phase 1, as built". |
 | 2 -- AO, AA, quality | done | Post chain on medium/high: multisampled half-float target, GTAO, `OutputPass`. High: contrast 2.88 -> **2.95**, tactical median 26.7 -> 28.1 (in-game 29), 61 fps with the 23-item loadout, render 7.5 -> 11.2 ms, app 170 of 400 KB. Low is the old direct path, unchanged. Details under "Phase 2, as built". |
 | 3 -- LayerBlend on the mesh | done | UV-space against the bake on the Sunchaser core: mean difference **0.32-0.84** sRGB units, **99.6-100 %** of texels within 6. No moire at any zoom. Refined pieces 31-35 MB (bake: helmet 58.6, torso 44.2). Heavy loadout 958 -> **393 MB**, 60 fps, render 12.5 ms. Cold equip faster than the bake once warm (4.1 s against 4.6-4.7 s for four pieces). Contrast 3.31, still in band; tactical torso mean 33.9 against the in-game 34. |
+| 4 -- a body and a head | done | Both bodies with head, eyes and hair (`hair_31`, the customizer default's); no poke-through on the Sunchaser, Tactical + Artimex or Corbel sets; the body hides under a full undersuit, the hair under any helmet. Armour scores identical to Phase 3 (the harness scores armour with the figure off). The figure costs **47 MB**, +132 draw calls and +1.3 ms with the heavy loadout, 60 fps. A `figure` toggle beside the body buttons. |
 
 ### Baseline (built package, 1600x1000, today's renderer)
 
@@ -180,6 +182,59 @@ not at first: the loadout measured 51 fps mid-upload.
 **Layer means from the blocks.** The metal rule needs each layer's linear
 mean. A 16x16 mip's BC1 blocks decode in JavaScript for nothing (`bc1Mean`);
 asking the worker for a small decoded copy cost a round trip per layer.
+
+### Phase 4, as built
+
+`FIGURE` in `three/kitbasher.ts`: per body, the whole-body `.skin` the
+customizer's `body_01_noMagicPocket` binds, `PU_Protos_Head`'s head and eyes,
+and `hair_31`, all skinned to the rig by name. The facial bones are not in the
+rig and inherit `Head`. Teeth and the eye overlays are left out: the mouth is
+closed, and the overlays -- wet, occlusion, caruncle -- are blended by the
+engine and blacked out both eyes when drawn opaque.
+
+**Coverage is the existing rule, not depth.** The body hides under an
+undersuit that reaches from the feet (min y <= 0.15) to the chest (max y >=
+1.3); the hair under any helmet. Nothing finer was needed: across the three
+reference sets no skin shows through a plate.
+
+**Skin gloss is per pixel.** `HumanSkin_V2` carries Shininess 1 on body and
+head, which as a constant is a mirror; it scales the `_ddna` smoothness
+stream, as an armour layer's does. Roughness is `1 - alpha x shininess`.
+
+**The head and body textures disagree at the neck.** Sampled at the 45 vertices
+the two meshes share, the male head reads sRGB (189,120,100) against the body's
+(167,105,85), the female (194,152,122) against (189,135,106) -- a collar line
+on a bare figure, which the game never shows because something is always worn.
+The body is multiplied to meet the head (`skinMatch`), not the other way
+round: the body hides under any full undersuit and the face never does. The
+female uses `f_body_cau.mtl`, the counterpart of the male's `m_body_cau.mtl`;
+`f_body_01` was further off.
+
+**Hair has no colour texture.** `HairPBR`'s slot 1 is an opacity mask -- two
+strand sets in red and green over a flat blue -- and drawn as a colour map it
+came out as blue and rainbow cards. The colour is physical: `BaseMelanin`,
+`BaseMelaninRedness`, `DyeColor` over it by `DyeAmount`. The core now passes a
+non-LayerBlend submaterial's numeric `PublicParams` through, and
+`materials.hairColour` maps them with Chiang et al.'s melanin parametrisation
+as Blender implements it -- **inferred**: the names match, CryEngine's own
+curve is not documented. `hair_31` comes out a dark brown, sRGB (77,58,43). The scalp cap declares only smoothness and borrows the cards' colour.
+Cards are alpha-tested on red with alpha to coverage, the mask lifted 1.6x
+for the smaller mips (`OpacityMipScale` is 3.4 in the material; this is the
+flat version).
+
+**Memory, from 148 MB to 47.** The first figure decoded every texture at
+1024 and kept the CPU copies: body 91.8 MB, eyes 18.9 for 1,648 triangles.
+Each part now has its own texture size -- head and hair 1024, body 512 (it is
+mostly under armour), eyes 256 -- the CPU copies go once uploaded, and the
+hair's masks are two-channel. Per part: body 15.4, head 16.9, eyes 0.8, hair
+14.1 MB. The plan's rule for hair was to drop it if it cost more than the head;
+it does not in memory, and at 88,870 triangles (eight times the head) it is
+drawn only bare-headed.
+
+**The memory measure was counting RG8 and R8 as RGBA.** Phase 3's normal and
+`_hal` control maps are two- and one-channel; counted properly, the heavy
+loadout's worn memory is **335 MB**, not 393. Nothing changed but the
+accounting.
 
 ## Boundaries
 

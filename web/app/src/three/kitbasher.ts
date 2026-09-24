@@ -16,14 +16,18 @@ import {
   type AmbientLight,
   Bone,
   Box3,
+  Color,
   type DirectionalLight,
   Group,
   Matrix4,
   type Material,
   Mesh,
+  MeshStandardMaterial,
   Object3D,
   PerspectiveCamera,
   Quaternion,
+  RedFormat,
+  RGFormat,
   Scene,
   SkinnedMesh,
   type Texture,
@@ -64,7 +68,7 @@ import {
 } from '../gear/ports';
 import { meshTexture, plainMaterial, surfaceMaterial, texturesWanted } from './materials';
 import { DEFAULT_PRESET, LIGHT_PRESETS, StudioLighting } from './lighting';
-import { LIVE_DEFAULTS, liveSurfaces, takesS3tc } from './live';
+import { LIVE_DEFAULTS, liveSurfaces, releaseAfterUpload, takesS3tc } from './live';
 import { applyClip, bonePosition, boneRotation, buildRig, mountMatrix, type BuiltRig } from './rig';
 import { compositeSurfaces, dataTexture, type CompositeGeometry, type PaletteEntry } from './surface';
 
@@ -103,6 +107,68 @@ export const SKELETONS: Record<Body, { chr: string; donors: string[] }> = {
 /** The male rig, for callers that predate the body switch. */
 export const BASE_SKELETON = SKELETONS.male.chr;
 export const DONORS = SKELETONS.male.donors;
+
+/** The figure under the armour: the base body and the default head.
+ *
+ * RENDERING.md Phase 4. The body is what `body_01_noMagicPocket` -- the body
+ * the character customizer's default loadout names -- actually binds: one
+ * whole-body `.skin` per sex (12,356 vertices for the male, 30 bone-parented
+ * regions) with `m_body_cau.mtl` / `f_body_cau.mtl`. **Not `m_body.cdf`**,
+ * whose `m_body_torso.skin` and friends are not in the archive at all. The
+ * head and eyes are `PU_Protos_Head`'s, unmorphed: the DNA string that shapes
+ * a face is left out. Their facial bones are not in the rig and inherit the
+ * head's. The eye details -- wet, occlusion and caruncle overlays the engine
+ * blends -- are left out too: drawn opaque they blacked out both eyes.
+ *
+ * The hair is the customizer default's too, `hair_31`: `HairPBR` strand cards
+ * over a scalp cap, coloured from the material's melanin and dye
+ * (`materials.hairColour`). It hides under any helmet, which it would
+ * otherwise poke through. The teeth are left out; the mouth is closed.
+ */
+const HEADS = 'Objects/Characters/Human/heads';
+type FigurePart = 'body' | 'head' | 'hair';
+interface FigureSpec {
+  readonly mesh: string;
+  readonly material: string;
+  readonly part: FigurePart;
+  /** A linear multiplier on the part's skin, to meet the head at the neck. */
+  readonly skinMatch?: readonly [number, number, number];
+  /** The largest mip its textures decode at. The face is what people look
+   * at; the body is mostly under armour and the eyes are a few pixels. */
+  readonly textureSize: number;
+}
+/** The body's skin against the head's, measured at the neck.
+ *
+ * The head and body are separate meshes on separate textures, and in the
+ * archive they do not agree where they meet: sampled at the 45 vertices the
+ * two meshes share, the male head reads sRGB (189,120,100) against the body's
+ * (167,105,85), the female (194,152,122) against (189,135,106). The game hides
+ * that under whatever the character wears; a bare figure showed a collar line.
+ * The body moves rather than the head, since the body is hidden under any full
+ * undersuit and the face never is. */
+const MALE_SKIN_MATCH = [1.32, 1.33, 1.4] as const;
+const FEMALE_SKIN_MATCH = [1.06, 1.3, 1.35] as const;
+export const FIGURE: Record<Body, readonly FigureSpec[]> = {
+  male: [
+    { part: 'body', mesh: 'Objects/Characters/Human/male_v7/body/m_body.skin', material: 'Objects/Characters/Human/male_v7/body/m_body_cau.mtl', skinMatch: MALE_SKIN_MATCH, textureSize: 512 },
+    { part: 'head', mesh: `${HEADS}/male/pu/protos_human_male_face_t1_pu/protos_human_male_face_t1_pu_head.skin`, material: `${HEADS}/male/pu/protos_human_male_face_t1_pu/protos_human_male_face_t1_pu_head_material.mtl`, textureSize: 1024 },
+    { part: 'head', mesh: `${HEADS}/male/pu/protos_human_male_face_t1_pu/protos_human_male_face_t1_pu_eyes.skin`, material: `${HEADS}/male/pu/protos_human_male_face_t1_pu/protos_human_male_face_t1_pu_eyes_material.mtl`, textureSize: 256 },
+    { part: 'hair', mesh: `${HEADS}/shared/hair_v2/sc/male/m_hair_31.skin`, material: `${HEADS}/shared/hair_v2/sc/male/m_hair_31.mtl`, textureSize: 1024 },
+  ],
+  female: [
+    { part: 'body', mesh: 'Objects/Characters/Human/female_v2/body/f_body.skin', material: 'Objects/Characters/Human/female_v2/body/f_body_cau.mtl', skinMatch: FEMALE_SKIN_MATCH, textureSize: 512 },
+    { part: 'head', mesh: `${HEADS}/female/pu/protos_human_female_face_t1_pu/protos_human_female_face_t1_pu_head.skin`, material: `${HEADS}/female/pu/protos_human_female_face_t1_pu/protos_human_female_face_t1_pu_head_material.mtl`, textureSize: 1024 },
+    { part: 'head', mesh: `${HEADS}/female/pu/protos_human_female_face_t1_pu/protos_human_female_face_t1_pu_eyes.skin`, material: `${HEADS}/female/pu/protos_human_female_face_t1_pu/protos_human_female_face_t1_pu_eyes_material.mtl`, textureSize: 256 },
+    { part: 'hair', mesh: `${HEADS}/shared/hair_v2/sc/female/f_hair_31.skin`, material: `${HEADS}/shared/hair_v2/sc/female/f_hair_31.mtl`, textureSize: 1024 },
+  ],
+};
+
+/** An undersuit hides the bare body only if it reaches both the feet and the
+ * chest: several undersuit records are a torso wrap or a necksock, and hiding
+ * the body under one of those leaves a legless torso. Measured on real items,
+ * full suits start at y=0.00 and a torso wrap at y=0.65. */
+const COVERS_FEET_BELOW = 0.15;
+const COVERS_CHEST_ABOVE = 1.3;
 
 /** How much room to leave around a framed loadout. Enough that a pauldron or a
  * backpack does not touch the edge, not so much that the figure swims. */
@@ -287,6 +353,8 @@ export interface KitbasherState {
   readonly ports: ReadonlyMap<string, OwnedPort>;
   /** The port whose item is in the hand, or null. */
   readonly holding: string | null;
+  /** Whether the bare body and head show under what is worn. */
+  readonly figure: boolean;
 }
 
 /** A tint palette from the catalogue.
@@ -297,6 +365,10 @@ export interface KitbasherState {
  * `#b1b0ad`, and using the colour for both is how ten Lynx colourways once
  * rendered as the same grey arm.
  */
+/** A stand-in item for the figure's parts: no palette, since skin is not
+ * LayerBlend and takes the `.mtl`'s own colours. */
+const FIGURE_ITEM = { tint: null } as unknown as CatalogueItem;
+
 export function paletteOf(item: CatalogueItem): PaletteEntry[] {
   const hex = (value: string): [number, number, number] =>
     [1, 3, 5].map((i) => parseInt(value.slice(i, i + 2), 16) / 255) as [number, number, number];
@@ -595,6 +667,7 @@ export class Kitbasher {
       carrying: new Map(),
       ports: new Map(),
       holding: null,
+      figure: true,
     };
     if (view.renderer && view.lights) {
       this.lighting = new StudioLighting({ scene: view.scene, renderer: view.renderer, ...view.lights }, client);
@@ -812,6 +885,7 @@ export class Kitbasher {
         }];
       }));
     this.view.scene.add(this.rig.root);
+    void this.buildFigure();
     // The first time an archive is open, light it. A body switch re-enters
     // here and keeps whatever preset is on.
     if (!this.lit) {
@@ -851,6 +925,7 @@ export class Kitbasher {
     // body's meshes stay loaded and switching back is instant.
     this.rig?.root.removeFromParent();
     this.rig = null;
+    this.dropFigure();
 
     const rebuilt = await this.client.catalogue(body, ({ step, fraction }) => {
       this.publish({ status: `${step} ${Math.round(fraction * 100)}%` });
@@ -952,6 +1027,122 @@ export class Kitbasher {
     return loaded;
   }
 
+  /** The figure's parts for the current body, once built. */
+  private figure: { body: Body; parts: Array<{ loaded: Loaded; part: FigurePart }> } | null = null;
+
+  private showFigure = true;
+
+  /** Whether the worn undersuit reaches from the feet to the chest. */
+  private undersuitCovers = false;
+
+  /** Show or hide the bare body and head under whatever is worn. */
+  setFigure(on: boolean): void {
+    this.showFigure = on;
+    this.updateFigure();
+    this.publish({ figure: on });
+  }
+
+  /** Build the figure for the current rig and bind it. Idempotent per body. */
+  private async buildFigure(): Promise<void> {
+    const rig = this.rig;
+    if (!rig) return;
+    const body = this.state.body;
+    if (this.figure?.body === body) return;
+    this.dropFigure();
+    const parts: Array<{ loaded: Loaded; part: FigurePart }> = [];
+    for (const spec of FIGURE[body]) {
+      try {
+        parts.push({ loaded: await this.loadFigurePart(spec), part: spec.part });
+      } catch {
+        // A part that will not load leaves the rest of the figure standing.
+      }
+    }
+    if (this.disposed || this.rig !== rig || this.state.body !== body) return;
+    for (const { loaded } of parts) {
+      for (const object of loaded.objects) {
+        this.view.scene.add(object);
+        if (object instanceof SkinnedMesh) object.bind(rig.skeleton, object.matrixWorld);
+      }
+      this.refineLater(loaded);
+    }
+    this.figure = { body, parts };
+    this.updateFigure();
+  }
+
+  private dropFigure(): void {
+    for (const { loaded } of this.figure?.parts ?? []) {
+      for (const object of loaded.objects) object.removeFromParent();
+    }
+    this.figure = null;
+  }
+
+  private async loadFigurePart(spec: FigureSpec): Promise<Loaded> {
+    const meshPath = spec.mesh;
+    const key = `figure:${meshPath}:${this.surfaceMode}`;
+    const hit = this.cache.get(key);
+    if (hit) return hit;
+    const payload = (await this.client.mesh(meshPath)).mesh;
+    const material: MaterialPayload = (await this.client.material(spec.material)).material;
+    const count = Math.max(1, material.submaterials.length);
+    const { materials, refine } = await this.materialsFor(
+      FIGURE_ITEM,
+      material,
+      [{ uvs: payload.uvs, indices: payload.indices, submeshes: payload.submeshes }],
+      spec.textureSize >= 1024 ? 'weapon' : 'small',
+      spec.textureSize,
+    );
+    // Nothing reads a figure texture back, so its CPU copy goes once it is on
+    // the GPU: about 40% of what the figure held.
+    for (const texture of textureSlots(materials)) releaseAfterUpload(texture);
+    if (spec.skinMatch) {
+      const [r, g, b] = spec.skinMatch;
+      material.submaterials.forEach((sub, i) => {
+        const skin = materials[i];
+        if (sub.shader.toLowerCase().includes('humanskin') && skin instanceof MeshStandardMaterial) {
+          skin.color.multiply(new Color(r, g, b));
+        }
+      });
+    }
+    const object = new SkinnedMesh(drawnOnly(buildGeometry(payload, count).geometry, materials), materials);
+    object.frustumCulled = false;
+    object.name = meshPath.split('/').pop() ?? meshPath;
+    shaded(object);
+    const loaded = measure(key, [object], materials, []);
+    if (refine) loaded.refines = [refine];
+    this.cache.set(key, loaded);
+    return loaded;
+  }
+
+  /** Which of the figure's parts show: all of them, except the body under an
+   * undersuit that covers it and the hair under a helmet, and nothing when
+   * the figure is off. */
+  private updateFigure(): void {
+    const helmet = this.wearing.has('helmet');
+    for (const { loaded, part } of this.figure?.parts ?? []) {
+      // Hair would poke through every helmet shell; the face stays, since a
+      // visor shows it.
+      const hidden = (part === 'body' && this.undersuitCovers) || (part === 'hair' && helmet);
+      const visible = this.showFigure && !hidden;
+      for (const object of loaded.objects) object.visible = visible;
+    }
+  }
+
+  /** Measure the worn undersuit's reach, in the rig's rest pose. */
+  private measureUndersuit(): void {
+    const suit = this.equipped.get('undersuit');
+    if (!suit) {
+      this.undersuitCovers = false;
+      return;
+    }
+    const box = new Box3();
+    for (const object of suit.objects) {
+      const geometry = (object as Mesh).geometry;
+      geometry.computeBoundingBox();
+      if (geometry.boundingBox) box.union(geometry.boundingBox);
+    }
+    this.undersuitCovers = !box.isEmpty() && box.min.y <= COVERS_FEET_BELOW && box.max.y >= COVERS_CHEST_ABOVE;
+  }
+
   /** Materials for a piece's submaterials: live LayerBlend on the mesh
    * (RENDERING.md Phase 3), or the baked atlas on the low setting, with the
    * `.mtl`'s own constants and textures for everything that is not
@@ -961,6 +1152,8 @@ export class Kitbasher {
     material: MaterialPayload,
     geometry: CompositeGeometry[],
     size: 'armour' | 'weapon' | 'small',
+    /** The largest mip of a texture bound directly, not composited. */
+    plainSize = 1024,
   ): Promise<{ materials: Material[]; refine: (() => Promise<number>) | null }> {
     const sizes = size === 'armour' ? LIVE_DEFAULTS
       : size === 'weapon' ? { ...LIVE_DEFAULTS, controlSize: 1024, surfaceSize: 1024 }
@@ -986,7 +1179,7 @@ export class Kitbasher {
       if (live?.materials.has(sub.name)) continue;
       for (const want of texturesWanted(sub)) {
         if (byPath.has(want.path)) continue;
-        const payload = (await this.client.texture(want.path, 1024)).texture;
+        const payload = (await this.client.texture(want.path, plainSize, want.alpha ?? false)).texture;
         if (!payload) continue;
         byPath.set(
           want.path,
@@ -1009,7 +1202,7 @@ export class Kitbasher {
       materials: material.submaterials.map((sub) => live?.materials.get(sub.name)
         ?? (composited?.surfaces.has(sub.name)
           ? surfaceMaterial(sub, composited, { byPath })
-          : plainMaterial(sub, { byPath }))),
+          : plainMaterial(sub, { byPath }, material.submaterials))),
       refine,
     };
   }
@@ -1094,6 +1287,7 @@ export class Kitbasher {
    * one that is on the body. */
   private evict(keep?: Loaded): void {
     const worn = new Set(this.equipped.values());
+    for (const { loaded } of this.figure?.parts ?? []) worn.add(loaded);
     // The piece a load just made is about to be worn or carried, but is not
     // yet either. Unprotected, it was the one entry left to evict once live
     // pieces passed the budget: disposed, then equipped anyway and no longer
@@ -1197,6 +1391,8 @@ export class Kitbasher {
     this.equipped.set(slot, loaded);
     this.wearing.set(slot, item);
     this.applyOverrides();
+    this.measureUndersuit();
+    this.updateFigure();
     const gear = this.revalidateGear();
     // The piece this replaced may be evictable now.
     this.evict();
@@ -1225,6 +1421,8 @@ export class Kitbasher {
     this.equipped.delete(slot);
     this.wearing.delete(slot);
     this.applyOverrides();
+    this.measureUndersuit();
+    this.updateFigure();
     const gear = this.revalidateGear();
     const status = gear.removed.length
       ? `${slot} removed; ${gear.removed.join(', ')} came off with it`
@@ -1238,6 +1436,8 @@ export class Kitbasher {
     this.equipped.clear();
     this.wearing.clear();
     this.applyOverrides();
+    this.measureUndersuit();
+    this.updateFigure();
     const gear = this.revalidateGear();
     this.publish({ ports: gear.ports, status: 'cleared' });
     if (gear.lostHold) void this.setPose(this.unarmedPose()).then(() => this.publish({ status: 'cleared' }));
@@ -1835,6 +2035,19 @@ interface Carried {
 }
 
 /** Everything a loaded piece owns, measured, with a way to free it. */
+/** The textures bound to a material's own slots, skipping shared ones. */
+function textureSlots(materials: Material[]): Set<Texture> {
+  const textures = new Set<Texture>();
+  for (const material of materials) {
+    const m = material as Material & Record<string, unknown>;
+    for (const slot of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap', 'alphaMap']) {
+      const texture = m[slot] as Texture | null | undefined;
+      if (texture && !texture.userData.shared) textures.add(texture);
+    }
+  }
+  return textures;
+}
+
 function measure(
   key: string,
   objects: Object3D[],
@@ -1842,13 +2055,9 @@ function measure(
   overrides: AttachmentOverride[],
   helpers?: Record<string, Float32Array>,
 ): Loaded {
-  const textures = new Set<Texture>();
+  const textures = new Set<Texture>(textureSlots(materials));
   for (const material of materials) {
     const m = material as Material & Record<string, unknown>;
-    for (const slot of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap']) {
-      const texture = m[slot] as Texture | null | undefined;
-      if (texture && !texture.userData.shared) textures.add(texture);
-    }
     for (const bag of [m.userData?.fwGrain, m.userData?.fwLive]) {
       for (const uniform of Object.values((bag ?? {}) as Record<string, { value: unknown }>)) {
         const texture = uniform.value as Texture | null;
@@ -1862,7 +2071,10 @@ function measure(
     const texels = (image.width ?? 0) * (image.height ?? 0) * (image.depth ?? 1);
     // GPU with mips -- half a byte a texel for BC1 -- plus the CPU copy
     // three.js keeps for re-upload, unless the texture drops it once uploaded.
-    const perTexel = (texture as Texture & { isCompressedArrayTexture?: boolean }).isCompressedArrayTexture ? 0.5 : 4;
+    // RG8 and R8 are the live path's normal and hal maps and the hair's masks;
+    // before Phase 4 they were all counted as RGBA.
+    const perTexel = (texture as Texture & { isCompressedArrayTexture?: boolean }).isCompressedArrayTexture ? 0.5
+      : texture.format === RGFormat ? 2 : texture.format === RedFormat ? 1 : 4;
     bytes += texels * perTexel * 1.34 + (texture.userData.released ? 0 : (image.data?.length ?? 0));
   }
   const geometries = new Set<Mesh['geometry']>();

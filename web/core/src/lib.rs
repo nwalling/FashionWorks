@@ -776,6 +776,16 @@ impl Archive {
             js_sys::Reflect::set(&entry, &"opacity".into(), &sub.opacity.into())?;
             js_sys::Reflect::set(&entry, &"alphaTest".into(), &sub.alpha_test.into())?;
             js_sys::Reflect::set(&entry, &"shininess".into(), &sub.shininess.into())?;
+            let params = js_sys::Object::new();
+            for (name, values) in &sub.params {
+                let value: JsValue = if values.len() == 1 {
+                    values[0].into()
+                } else {
+                    js_sys::Float32Array::from(&values[..]).into()
+                };
+                js_sys::Reflect::set(&params, &name.as_str().into(), &value)?;
+            }
+            js_sys::Reflect::set(&entry, &"params".into(), &params.into())?;
 
             let textures = js_sys::Object::new();
             for (role, texture) in &sub.textures {

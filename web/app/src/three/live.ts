@@ -108,7 +108,7 @@ const GLOW_GAIN = 25;
 const srgbToLinear = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
 
 /** Drop a texture's CPU copy once the GPU has it. */
-function releaseAfterUpload(texture: Texture): Texture {
+export function releaseAfterUpload(texture: Texture): Texture {
   texture.userData.released = true;
   const release = () => {
     const image = texture.image as { data?: unknown } | undefined;
