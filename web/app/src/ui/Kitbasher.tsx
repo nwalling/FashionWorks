@@ -20,9 +20,11 @@ import {
   lineRepresentative,
   lineTitle,
   swatchColour,
+  CLOTHING_SLOTS,
   SLOTS,
   type Catalogue,
   type CatalogueItem,
+  type ClothingSlot,
   type GearSlot,
   type Slot,
   type WearSlot,
@@ -60,7 +62,18 @@ function titleOfLine(catalogue: Catalogue, item: CatalogueItem): string {
   return lineTitle(lineOf(catalogue, item));
 }
 
-type Mode = 'armour' | 'gear';
+/** What the listing is about. Armour and clothing are also the outfit on the
+ * body: the game makes them exclusive, so browsing one puts it on, and the
+ * other is kept aside until it comes back. CLOTHING.md Phase 3. */
+type Mode = 'armour' | 'clothing' | 'gear';
+
+/** A slot as a person would say it; the ids are the catalogue's. */
+const SLOT_LABELS: Partial<Record<string, string>> = {
+  accessory: 'torso accessory',
+  pack: 'backpack',
+};
+
+const slotLabel = (slot: string) => SLOT_LABELS[slot] ?? slot;
 
 /** The lighting preset a visitor last chose. Per-visitor convenience only:
  * storage can be blocked or empty, and the default is always fine. */
@@ -115,6 +128,7 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
   const [state, setState] = useState<KitbasherState | null>(null);
   const [mode, setMode] = useState<Mode>('armour');
   const [armourSlot, setArmourSlot] = useState<Slot>('torso');
+  const [clothingSlot, setClothingSlot] = useState<ClothingSlot>('shirt');
   const [gearSlot, setGearSlot] = useState<GearSlot>('primary');
   // The holster the next gear pick goes into; null picks the first free one.
   const [target, setTarget] = useState<string | null>(null);
@@ -123,7 +137,7 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
   const viewer = useRef<ViewerHandle | null>(null);
   const [quality, setQuality] = useState<Quality | null>(null);
   const picker = useRef<HTMLInputElement>(null);
-  const slot: Slot | GearSlot = mode === 'armour' ? armourSlot : gearSlot;
+  const slot: WearSlot | GearSlot = mode === 'armour' ? armourSlot : mode === 'clothing' ? clothingSlot : gearSlot;
 
   // The engine is built once the scene exists, and torn down with the view.
   const onScene = useCallback((handle: ViewerHandle) => {
@@ -174,6 +188,13 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
   }, [state, onLoadoutChange]);
 
   const wearing = state?.wearing ?? new Map<WearSlot, CatalogueItem>();
+
+  // The listing follows the outfit on the body: a share link that opens on
+  // clothing, or a piece of the other outfit equipped by a check, switches it.
+  const outfit = state?.outfit;
+  useEffect(() => {
+    if (outfit) setMode((current) => (current === 'gear' ? current : outfit));
+  }, [outfit]);
   const carrying = state?.carrying ?? new Map<string, CatalogueItem>();
   // The engine rebuilds this on a body switch, so the listing follows it
   // rather than the prop it started from.
@@ -188,8 +209,8 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
   // What the side panel's colour row is about: the armour piece in this slot,
   // or the gear in the targeted holster (else the first holster of this slot
   // that has anything in it).
-  const onBody: CatalogueItem | undefined = mode === 'armour'
-    ? wearing.get(armourSlot)
+  const onBody: CatalogueItem | undefined = mode !== 'gear'
+    ? wearing.get(slot as WearSlot)
     : (target ? carrying.get(target) : undefined)
       ?? holsters.map((h) => carrying.get(h.port.name)).find(Boolean);
   const onBodyPort = mode === 'gear' && onBody
@@ -267,26 +288,42 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
   const poses = engine.current?.poseOptions() ?? ['rest', 'idle', 'crouch'];
   const lighting = engine.current?.lightingOptions() ?? [];
   const holdable = [...carrying].filter(([, item]) => HOLDABLE.has(item.slot));
-  const tabs = mode === 'armour' ? SLOTS : GEAR_SLOTS;
   const countOf = (name: string) => (isGearSlot(name)
     ? catalogue.gearBySlot.get(name)?.length
-    : catalogue.bySlot.get(name as Slot)?.length) ?? 0;
+    : catalogue.bySlot.get(name as WearSlot)?.length) ?? 0;
+  // A clothing slot this build has nothing for is left out rather than shown
+  // empty: every torso accessory in 4.10 is a `<= PLACEHOLDER =>` record.
+  const tabs: readonly string[] = mode === 'armour'
+    ? SLOTS
+    : mode === 'clothing' ? CLOTHING_SLOTS.filter((name) => countOf(name) > 0) : GEAR_SLOTS;
+  const searchable = mode === 'gear'
+    ? catalogue.gear.length
+    : tabs.reduce((sum, name) => sum + countOf(name), 0);
+  const choose = (next: Mode) => {
+    setMode(next);
+    setSearch('');
+    if (next !== 'gear') void engine.current?.setOutfit(next);
+  };
 
   return (
     <div className="fw-kit" data-fashionworks-kitbasher="">
       <div className="fw-kit-bar" role="toolbar" aria-label="Slot, body, pose, surface, set and backdrop">
-        {/* Armour or gear: the one control that decides what the slot tabs
-            and the listing are about. Seven gear slots beside six armour ones
-            would not fit a toolbar that already wraps. */}
+        {/* Armour, clothing or gear: the one control that decides what the
+            slot tabs and the listing are about. Armour and clothing are also
+            the outfit on the body, since the game allows only one. */}
         <span className="fw-kit-group" role="radiogroup" aria-label="What to browse">
-          {(['armour', 'gear'] as const).map((name) => (
+          {(['armour', 'clothing', 'gear'] as const).map((name) => (
             <button
               key={name}
               type="button"
               role="radio"
               aria-checked={mode === name}
               aria-pressed={mode === name}
-              onClick={() => { setMode(name); setSearch(''); }}
+              disabled={busy && name !== 'gear' && mode !== name}
+              title={name === 'gear'
+                ? 'Weapons and equipment, into the holsters of what is worn'
+                : `Wear ${name}; the ${name === 'armour' ? 'clothing' : 'armour'} is kept aside`}
+              onClick={() => choose(name)}
             >
               {name}
             </button>
@@ -306,12 +343,14 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
                 if (isGearSlot(name)) {
                   setGearSlot(name);
                   setTarget(null);
+                } else if (mode === 'clothing') {
+                  setClothingSlot(name as ClothingSlot);
                 } else {
-                  setArmourSlot(name);
+                  setArmourSlot(name as Slot);
                 }
               }}
             >
-              {name} <span className="fw-kit-count">{countOf(name)}</span>
+              {slotLabel(name)} <span className="fw-kit-count">{countOf(name)}</span>
             </button>
           ))}
         </span>
@@ -323,7 +362,7 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
               type="button"
               aria-pressed={(state?.body ?? 'male') === body}
               disabled={busy}
-              title={`Show armour on the ${body} body`}
+              title={`Dress the ${body} body`}
               onClick={() => void engine.current?.setBody(body)}
             >
               {body}
@@ -332,7 +371,7 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
           <button
             type="button"
             aria-pressed={state?.figure ?? true}
-            title="Draw the body and head under the armour, or the armour alone"
+            title="Draw the body and head under what is worn, or what is worn alone"
             onClick={() => {
               const next = !(state?.figure ?? true);
               rememberFigure(next);
@@ -447,16 +486,18 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
           <button
             type="button"
             disabled={busy || wearing.size === 0}
-            title="Fill the empty slots to match the piece on the torso"
+            title={mode === 'clothing'
+              ? 'Fill the empty slots from the same clothing line'
+              : 'Fill the empty slots to match the piece on the torso'}
             onClick={() => void engine.current?.equipSet()}
           >
             equip set
           </button>
           <button
             type="button"
-            disabled={mode === 'armour' ? wearing.size === 0 : carrying.size === 0}
-            title={mode === 'armour' ? 'Take all armour off' : 'Take all gear off'}
-            onClick={() => (mode === 'armour' ? engine.current?.clear() : engine.current?.clearGear())}
+            disabled={mode === 'gear' ? carrying.size === 0 : wearing.size === 0}
+            title={mode === 'gear' ? 'Take all gear off' : `Take all ${mode} off`}
+            onClick={() => (mode === 'gear' ? engine.current?.clearGear() : engine.current?.undress())}
           >
             clear
           </button>
@@ -480,9 +521,9 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
           <input
             className="fw-kit-search"
             type="search"
-            placeholder={mode === 'armour'
-              ? `Search ${catalogue.items.length.toLocaleString()} pieces…`
-              : `Search ${catalogue.gear.length.toLocaleString()} pieces of gear…`}
+            placeholder={mode === 'gear'
+              ? `Search ${searchable.toLocaleString()} pieces of gear…`
+              : `Search ${searchable.toLocaleString()} pieces of ${mode}…`}
             autoComplete="off"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
@@ -558,13 +599,13 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
               })}
             </div>
           )}
-          <div className="fw-kit-items" role="listbox" aria-label={`${slot} pieces`}>
+          <div className="fw-kit-items" role="listbox" aria-label={`${slotLabel(slot)} pieces`}>
             {pool.length === 0 && (
               <p className="fw-kit-empty">{search ? 'nothing matches' : 'nothing in this slot'}</p>
             )}
             {pool.slice(0, MAX_ROWS).map((item) => {
               const line = familyOf(item);
-              const selected = mode === 'armour'
+              const selected = mode !== 'gear'
                 ? Boolean(onBody && lineKey(onBody) === lineKey(item))
                 : [...carrying.values()].some((c) => lineKey(c) === lineKey(item));
               const meta = [

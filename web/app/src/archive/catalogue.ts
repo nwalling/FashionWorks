@@ -121,6 +121,24 @@ export interface Catalogue {
  * `_NAME_SLOT_WORD`. */
 const SLOT_WORD = /^(helmet|helm|core|torso|arms|arm|legs|leg|backpack|pack|undersuit|suit|flight)$/i;
 
+/** Clothing's slot words: the garment. "Toughlife Boots Dark Red" is the
+ * Toughlife line in its Dark Red colourway. Mirrors the pipeline's
+ * `_CLOTHING_NAME_WORD`, and like it is read only for clothing. */
+const CLOTHING_WORD = new RegExp(`^(${[
+  'jacket', 'coat', 'duster', 'vest', 'waistcoat', 'harness', 'apron', 'collar', 'jumpsuit',
+  'coverall', 'coveralls', 'overalls', 'armor', 'dress', 'gown', 'robe', 'sweater', 'hoodie',
+  'top', 'tank', 'shirt', 't-shirt', 'pants', 'trousers', 'jeans', 'shorts', 'waders',
+  'skirt', 'leggings', 'boots', 'boot', 'shoes', 'pumps', 'slippers', 'sandals', 'sneakers',
+  'gloves', 'glove', 'hat', 'tophat', 'cap', 'beanie', 'mask', 'balaclava', 'bandana',
+  'goggles', 'cover', 'gear', 'hood', 'scarf', 'wrap', 'apparatus',
+].join('|')})$`, 'i');
+
+/** Whether a word of a name in `slot` is the word naming the slot. */
+export function isSlotWord(word: string, slot: string): boolean {
+  const bare = word.replace(/["'()]/g, '');
+  return SLOT_WORD.test(bare) || (isClothingSlot(slot) && CLOTHING_WORD.test(bare));
+}
+
 /** Leading words too generic to name a product on their own. */
 const ARTICLES = new Set(['the', 'a', 'an']);
 
@@ -155,11 +173,12 @@ export function lineTitle(line: readonly CatalogueItem[]): string {
   const names = line.map(displayName);
   if (line[0] && isGearSlot(line[0].slot)) return commonWords(names);
   const shared = sharedName(names);
-  if (line.length < 2 || shared.split(/\s+/).some((w) => SLOT_WORD.test(w.replace(/["'()]/g, '')))) {
+  const slot = line[0]?.slot ?? '';
+  if (line.length < 2 || shared.split(/\s+/).some((w) => isSlotWord(w, slot))) {
     return shared;
   }
   const words = displayName(lineRepresentative(line)).split(/\s+/);
-  const slotWord = words.find((w) => SLOT_WORD.test(w.replace(/["'()]/g, '')));
+  const slotWord = words.find((w) => isSlotWord(w, slot));
   return slotWord ? `${shared} ${slotWord}` : shared;
 }
 

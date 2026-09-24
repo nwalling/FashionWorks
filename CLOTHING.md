@@ -258,6 +258,38 @@ plus gloves and a beanie -- in the harness's `clothing` scene: 6 pieces, 136
 draw calls, 219k triangles, 133 MB worn, against the armour loadout's 1,765
 calls, 1.64M triangles and 372 MB. Clothing is the light case.
 
+## Phase 3, as run
+
+**The switch is the one that was already there.** The toolbar's "what to
+browse" control gains a third choice -- armour, clothing, gear -- and picking
+armour or clothing also puts that outfit on, the other going aside. Browsing
+one outfit while wearing the other would show a listing that has nothing to do
+with the body. The switch waits while a piece is loading, and the engine
+settles the race regardless: a piece whose outfit was switched away while it
+loaded goes aside with that outfit rather than onto the body over the new one.
+That race was real -- choosing clothing while the opening Sunchaser torso was
+still on its way left the torso on the clothing outfit.
+
+**Clothing slots in the game's order**, labelled as a person would say them:
+hat, shirt, jacket, gloves, trousers, footwear, backpack. **Torso accessory is
+left out because this build has none**: all ten `Char_Clothing_Torso_2`
+records are `<= PLACEHOLDER =>`, hidden, and an empty tab is noise. It comes
+back by itself when a real one ships.
+
+**Equip-set fills from the same line**, anchored on the jacket, else the
+shirt, trousers, footwear, gloves or hat, and including the hat, since hats are
+sold beside clothing lines. No clothing slot counts as missing -- a line is
+two or three pieces, not a head-to-toe set -- so the status reports what it
+found: from the Bellator shirt, "filled 3 slots from Bellator · footwear from
+Spettro". A pick from another line is named, as it is for armour. The row
+titles and the edition rule that scoring uses both read the garment words,
+so "Frontier 05 Pants" and "Frontier 11 Pants" title as "Frontier Pants".
+
+**Share links need no new field.** A slot belongs to one outfit, so the ids
+say which is on; clothing ids ride in the first segment in slot order, and
+restoring one switches the outfit. An armour link reads exactly as before.
+What is aside is not shared -- a link is what is on the body.
+
 ## Phases
 
 | phase | what | size |

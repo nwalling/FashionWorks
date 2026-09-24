@@ -40,6 +40,7 @@ import type { ArchiveClient } from '../archive/client';
 import {
   colourwayName,
   displayName,
+  isSlotWord,
   lineOf,
   lineTitle,
   readCatalogue,
@@ -475,15 +476,19 @@ export function decodeGear(
  */
 export const SET_MATCH_THRESHOLD = 8;
 
-/** What equip-set anchors on, in order of preference. */
-const ANCHOR_ORDER: readonly Slot[] = ['torso', 'helmet', 'arms', 'legs', 'undersuit', 'backpack'];
+/** What equip-set anchors on, in order of preference, per outfit. */
+const ANCHOR_ORDER: Readonly<Record<Outfit, readonly WearSlot[]>> = {
+  armour: ['torso', 'helmet', 'arms', 'legs', 'undersuit', 'backpack'],
+  clothing: ['jacket', 'shirt', 'trousers', 'footwear', 'gloves', 'hat', 'accessory', 'pack'],
+};
 
-/** Slots a set may simply not have, without the set being incomplete. */
-export const OPTIONAL_SLOTS: ReadonlySet<Slot> = new Set<Slot>(['backpack', 'undersuit']);
-
-/** Slot words, which end the product part of a display name. Mirrors the
- * pipeline's `_NAME_SLOT_WORD`. */
-const SLOT_WORD = /^(helmet|helm|core|torso|arms|arm|legs|leg|backpack|pack|undersuit|suit|flight)$/i;
+/** Slots a set may simply not have, without the set being incomplete.
+ *
+ * Every clothing slot is: a clothing line is rarely more than two or three
+ * pieces -- "Bellator Shirt and Waistcoat" and "Bellator Trousers" -- and
+ * never a head-to-toe set the way armour is, so what equip-set does not find
+ * is not a shortfall. */
+export const OPTIONAL_SLOTS: ReadonlySet<WearSlot> = new Set<WearSlot>(['backpack', 'undersuit', ...CLOTHING_SLOTS]);
 
 /** What a name says after its slot word: "Sunchaser", "(Modified)", or "".
  *
@@ -494,9 +499,9 @@ const SLOT_WORD = /^(helmet|helm|core|torso|arms|arm|legs|leg|backpack|pack|unde
  * scored three points for it. Reading the name against the slot word instead
  * gives the same answer whatever the family looks like.
  */
-function editionOf(name: string): string {
+function editionOf(name: string, slot: string): string {
   const words = name.split(/\s+/).filter(Boolean);
-  const at = words.findIndex((w) => SLOT_WORD.test(w.replace(/["'()]/g, '')));
+  const at = words.findIndex((w) => isSlotWord(w, slot));
   return at >= 0 ? words.slice(at + 1).join(' ') : '';
 }
 
@@ -518,21 +523,23 @@ function sharedLeadingWords(a: string, b: string): number {
 /** What equipping a set would do, and why it would not do the rest. */
 export interface SetPlan {
   readonly picks: CatalogueItem[];
-  readonly unfilled: ReadonlyArray<{ slot: Slot; reason: string; absent: boolean }>;
+  readonly unfilled: ReadonlyArray<{ slot: WearSlot; reason: string; absent: boolean }>;
   /** Picks taken from another product line -- a shared livery rather than a
    * shared set. Legitimate, and worth saying out loud. */
-  readonly crossLine: ReadonlyArray<{ slot: Slot; name: string; line: string }>;
+  readonly crossLine: ReadonlyArray<{ slot: WearSlot; name: string; line: string }>;
 }
 
 export function matchSet(
   anchor: CatalogueItem,
   catalogue: Catalogue,
   wearing: ReadonlyMap<WearSlot, CatalogueItem>,
+  /** The slots to fill: the armour's, unless the anchor is clothing. */
+  slots: readonly WearSlot[] = SLOTS,
 ): SetPlan {
   const familyName = (item: CatalogueItem) =>
     lineTitle(lineOf(catalogue, item));
   const anchorShared = familyName(anchor);
-  const edition = editionOf(displayName(anchor));
+  const edition = editionOf(displayName(anchor), anchor.slot);
   const anchorMarks = parentheticals(displayName(anchor));
   const anchorLine = anchorShared.split(' ')[0] ?? '';
   const paletteKey = anchor.tint?.layers?.[0]?.color ?? '';
@@ -558,7 +565,7 @@ export function matchSet(
     const shared = sharedLeadingWords(itemShared, anchorShared);
     if (shared >= 1) points += 4;
     if (shared >= 2) points += 2;
-    if (editionOf(displayName(item)) === edition) points += 3;
+    if (editionOf(displayName(item), item.slot) === edition) points += 3;
     // A parenthesised marker the anchor does not carry is a different product,
     // not a colourway of this one. Equipping a set from "Defiance Core
     // Sunchaser" was pulling "Defiance Legs (Modified)" over the Sunchaser
@@ -573,9 +580,9 @@ export function matchSet(
   };
 
   const picks: CatalogueItem[] = [];
-  const unfilled: Array<{ slot: Slot; reason: string; absent: boolean }> = [];
-  const crossLine: Array<{ slot: Slot; name: string; line: string }> = [];
-  for (const slot of SLOTS) {
+  const unfilled: Array<{ slot: WearSlot; reason: string; absent: boolean }> = [];
+  const crossLine: Array<{ slot: WearSlot; name: string; line: string }> = [];
+  for (const slot of slots) {
     if (wearing.has(slot)) continue;
     const ranked = (catalogue.bySlot.get(slot) ?? [])
       .map((item) => ({ item, points: score(item) }))
@@ -1491,6 +1498,14 @@ export class Kitbasher {
       return;
     }
     if (this.disposed) return;
+    // The outfit changed while this loaded -- the visitor chose clothing while
+    // the opening torso was still on its way. The latest choice wins, and the
+    // piece goes aside with its outfit rather than onto the body over it.
+    if (outfit && outfit !== this.state.outfit) {
+      this.aside.set(slot, item);
+      this.publish({ busy: false, status: `${name} kept aside with the ${outfit}` });
+      return;
+    }
 
     // The old piece comes out first, so a slot never holds two.
     for (const previous of this.equipped.get(slot)?.objects ?? []) previous.removeFromParent();
@@ -1596,6 +1611,17 @@ export class Kitbasher {
     });
   }
 
+  /** Everything on the body off; the outfit aside stays aside. */
+  undress(): void {
+    for (const slot of [...this.equipped.keys()]) this.takeOff(slot);
+    this.applyOverrides();
+    this.measureUndersuit();
+    this.applyOutfit();
+    const gear = this.revalidateGear();
+    this.publish({ ports: gear.ports, status: `${this.state.outfit} off` });
+    if (gear.lostHold) void this.setPose(this.unarmedPose()).then(() => this.publish({ status: `${this.state.outfit} off` }));
+  }
+
   /** Everything off, both outfits. */
   clear(): void {
     for (const slot of [...this.equipped.keys()]) this.takeOff(slot);
@@ -1615,13 +1641,29 @@ export class Kitbasher {
    * undersuit is rarely sold as part of a set, and anchoring on one matched
    * the armour to a pack. */
   async equipSet(): Promise<number> {
-    const anchor = ANCHOR_ORDER.map((slot) => this.wearing.get(slot)).find(Boolean);
+    const outfit = this.state.outfit;
+    const anchor = ANCHOR_ORDER[outfit].map((slot) => this.wearing.get(slot)).find(Boolean);
     if (!anchor) {
       this.publish({ status: 'equip something first, then match a set to it' });
       return 0;
     }
-    const plan = matchSet(anchor, this.catalogue, this.wearing);
+    // The hat is the head's, but it is sold with clothing lines -- "Keldur Hat
+    // and Hickory Goggles" beside the Keldur coat -- so a clothing set fills it.
+    const slots = outfit === 'clothing' ? ['hat' as const, ...outfitSlots('clothing')] : SLOTS;
+    const plan = matchSet(anchor, this.catalogue, this.wearing, slots);
     for (const item of plan.picks) await this.equip(item);
+    if (outfit === 'clothing') {
+      // A clothing line is two or three pieces, not a set with gaps in it.
+      const line = lineTitle(lineOf(this.catalogue, anchor)).split(' ')[0] ?? '';
+      const borrowed = plan.crossLine.map((c) => `${c.slot} from ${c.line}`);
+      this.publish({
+        status: plan.picks.length
+          ? `set: filled ${plan.picks.length} slot${plan.picks.length === 1 ? '' : 's'} from ${line}`
+            + (borrowed.length ? ` · ${borrowed.join(' · ')}` : '')
+          : `nothing else in the ${line} line`,
+      });
+      return plan.picks.length;
+    }
 
     // Say what happened to the slots that stayed empty. Reporting only the
     // count read as a silent failure: "filled 3" tells nobody whether the set
@@ -2167,6 +2209,12 @@ export class Kitbasher {
     for (const carried of this.carried.values()) {
       bounds.expandByObject(carried.instance);
       any = true;
+    }
+    // The head, where it shows: clothing rarely reaches it, and a jacket and
+    // trousers framed on their own cut the figure off at the collar.
+    for (const { loaded, part } of this.figure?.parts ?? []) {
+      if (part === 'body') continue;
+      for (const object of loaded.objects) if (object.visible) bounds.expandByObject(object);
     }
     if (!any) return;
     const { camera, controls } = this.view;

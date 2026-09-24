@@ -152,4 +152,15 @@ describe('the share string, version 2', () => {
     expect(decodeLoadout('heavy', catalogue).map((i) => i.id)).toEqual(['heavy']);
     expect(decodeGear('heavy', catalogue).carrying).toEqual([]);
   });
+
+  it('carries clothing in the same segment, with no marker needed', () => {
+    // A slot belongs to one outfit, so the ids alone say which is on.
+    const shirt = { ...armour('tee', 'shirt', []), outfit: 'clothing' as const };
+    const jacket = { ...armour('coat', 'jacket', []), outfit: 'clothing' as const };
+    const hat = { ...armour('cap', 'hat', []), outfit: 'clothing' as const };
+    const withClothing = readCatalogue(JSON.stringify({ items: [heavyCore, shirt, jacket, hat] }));
+    const encoded = encodeLoadout(new Map([['jacket', jacket], ['hat', hat], ['shirt', shirt]]));
+    expect(encoded).toBe('cap,tee,coat');
+    expect(decodeLoadout(encoded, withClothing).map((i) => i.slot)).toEqual(['hat', 'shirt', 'jacket']);
+  });
 });

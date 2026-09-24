@@ -91,6 +91,15 @@ describe('reading the catalogue', () => {
     expect(outfitOf('torso')).toBe('armour');
   });
 
+  it('titles a clothing row by its garment, as armour by its slot', () => {
+    const read = catalogue([
+      item({ id: 'a', name: 'Frontier 05 Pants Classic', slot: 'trousers', variant_of: null }),
+      item({ id: 'b', name: 'Frontier 11 Pants Harvest', slot: 'trousers', variant_of: null }),
+    ]);
+    // "Frontier" is what they share; the garment is put back, as "Core" is.
+    expect(lineTitle(lineOf(read, read.items[0]!))).toBe('Frontier Pants');
+  });
+
   it('hides Squadron 42 crew uniforms', () => {
     const read = catalogue([
       item({ id: 'pu', name: 'Clempt Pants', slot: 'trousers' }),
