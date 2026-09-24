@@ -293,6 +293,13 @@ vertex colour. glTF multiplies `COLOR_0` into base colour and three.js honours
 it, which rendered the whole character vivid magenta and yellow. `_common.strip_vertex_colors`
 removes them in both Blender scripts.
 
+The colour is data, not a paint mask, and stripping it for rendering is still
+right. Measured on the Sunchaser core and arms (RENDERING.md Phase 6): **A is
+255 minus the submaterial index**, exactly, on all 13 submaterials; B tracks
+the island's V (Spearman 0.95 core, -0.88 arms); R sits at 160-161 and G at
+16i + 5 on 99% of vertices, constant per island. The exception is a few dozen
+small overlay patches, covered under "Decals" below.
+
 **Option A is restored, but only because Blender does the remap.** Re-exporting
 each item against the canonical armature makes every item GLB carry the same
 220 joints in the same order, so the viewer binds by pointer swap. The runtime
@@ -530,6 +537,28 @@ temptation is real. Four independent findings say no:
 
 Sampled on UV0 anyway, it renders metre-high "WARNING" and "DEFENSE SYSTEMS"
 across the chest. That was implemented, rendered and reverted.
+
+**Addendum (2026-09-24): decal geometry does exist, inside the armour mesh.**
+The third finding above searched *file names*, and the geometry is not in its
+own file. The Sunchaser core carries 27 small islands (4-37 vertices, mostly
+mirrored pairs) and the arms 22, lying 0.2-2.5 mm off the plates, and they are
+the only places the vertex colour varies within an island: `R*256+G` is linear
+across each to 3-4 parts in 65,536 and B to 0.2-0.3 in 255, the two at right
+angles. The submaterials declare `%DECALS` in their `StringGenMask`. So the
+patches are almost certainly the decals and the colour their coordinate.
+
+**What is still missing is the mapping into the atlas**, and the data does not
+state it. Sixteen decodings -- 8-bit pairs, `R*256+G` with B, a 12-bit split,
+both axis orders, both V directions -- scored as atlas content under the
+patches against the same patches placed at random: none beats its null by a
+wide margin, and the best on each piece (1.8x on the core, 1.9x on the arms)
+is a different decoding that fails on the other. The two coordinates differ in
+scale by 16:1 per millimetre, so any mapping that keeps text square involves a
+factor the vertex data does not carry -- a shader constant, most likely, and
+the compiled shaders are outside what this project reads. **Closed again,
+with the geometry argument withdrawn**; the second-UV, UV0 and shoulder-pad
+findings stand. `web/core/examples/decal_probe.rs` and `decal_analysis.py`
+reproduce every figure.
 
 **The Detail map.** `DetailDiffuse`, `DetailBump`, `DetailGloss` and
 `DetailTiling` appear on 475 of the 495 layer materials, but they are template

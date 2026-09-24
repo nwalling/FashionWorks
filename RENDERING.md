@@ -27,6 +27,7 @@ Built on the `rendering` branch, not merged or pushed.
 | 3 -- LayerBlend on the mesh | done | UV-space against the bake on the Sunchaser core: mean difference **0.32-0.84** sRGB units, **99.6-100 %** of texels within 6. No moire at any zoom. Refined pieces 31-35 MB (bake: helmet 58.6, torso 44.2). Heavy loadout 958 -> **393 MB**, 60 fps, render 12.5 ms. Cold equip faster than the bake once warm (4.1 s against 4.6-4.7 s for four pieces). Contrast 3.31, still in band; tactical torso mean 33.9 against the in-game 34. |
 | 4 -- a body and a head | done | Both bodies with head, eyes and hair (`hair_31`, the customizer default's); no poke-through on the Sunchaser, Tactical + Artimex or Corbel sets; the body hides under a full undersuit, the hair under any helmet. Armour scores identical to Phase 3 (the harness scores armour with the figure off). The figure costs **47 MB**, +132 draw calls and +1.3 ms with the heavy loadout, 60 fps. A `figure` toggle beside the body buttons. |
 | 5 -- the idle loop | done | An `animate` toggle beside the poses, off by default. Unarmed standing plays the character customizer's own idle; a weapon in hand or a crouch keeps its still pose and takes that idle's sway on the spine, neck and head. 60 fps on both bodies, feet on the floor to **0 mm** every frame, the grip on rifle and pistol unchanged to **0 mm**, and no step at the seam larger than the clip's own frame-to-frame motion. |
+| 6 -- decals from vertex colour | closed again | Decal geometry exists inside the mesh -- 27 overlay patches on the Sunchaser core, 22 on the arms, 0.2-2.5 mm off the plates -- and carries a 2-D coordinate in its vertex colour. No decoding into the atlas beats a random-placement null by a wide margin on both pieces (best 1.8x and 1.9x, different decodings). Nothing shipped; `CLAUDE.md`'s decal entry has the addendum. |
 
 ### Baseline (built package, 1600x1000, today's renderer)
 
@@ -292,6 +293,52 @@ the customizer idle is 300 frames x 140 bones, 670 KB.
 Still stays the default, so screenshots, share links and the harness are
 unchanged; the toggle is not remembered between visits.
 
+### Phase 6, as run (a spike, closed)
+
+Everything here is reproduced by `cargo run --example decal_probe` (UV0,
+colour and material groups out of a `.skinm`) and `decal_analysis.py` over its
+dump and the piece's `TexSlot9` atlas.
+
+**Most of the colour is per-island bookkeeping.** A is 255 minus the
+submaterial index on all 13 submaterials of the Sunchaser core and arms. B
+tracks the island's V (Spearman 0.95 on the core, -0.88 on the arms). R sits
+at 160-161 and G at `16i + 5` on 99 % of vertices, constant across an island.
+G's sixteen levels match nothing tried: not U, not the island's orientation in
+UV space, not position, height or angle around the body.
+
+**The decals are geometry.** 27 islands on the core and 22 on the arms --
+4 to 40 vertices, nearly all mirrored pairs -- lie 0.2-2.5 mm off the plates
+(median 0.6 and 1.3 mm), and they are the only places the colour varies inside
+an island. There, `R*256+G` is linear across the surface to a median 3-4 parts
+in 65,536 and B to 0.2-0.3 in 255, at 86-88 degrees to each other: a 16-bit
+and an 8-bit coordinate on each patch. `CLAUDE.md` had closed decals partly
+because "there is no decal geometry"; that searched file names, and the
+geometry is inside the armour's own mesh.
+
+**The mapping into the atlas is not in the data.** Sixteen decodings, scored
+as the share of the patches' atlas footprint on content (alpha > 0.5; the
+atlas is 13.5 % content) against the same patches placed at random:
+
+| decoding | core | its null | arms | its null |
+| --- | --- | --- | --- | --- |
+| `(R, B)/255` | 0.08 / 0.15 | 0.19 / 0.15 | 0.14 / 0.11 | 0.17 / 0.18 |
+| `(R*256+G)/65536, B/255` | 0.08 / 0.15 | 0.19 / 0.15 | 0.14 / 0.11 | 0.18 / 0.15 |
+| `B/255, (R*256+G)/65536` | 0.13 / 0.09 | 0.13 / 0.12 | 0.06 / 0.05 | 0.16 / 0.13 |
+| `(R, G)/255` | 0.12 / 0.14 | 0.19 / 0.18 | 0.11 / **0.26** | 0.16 / 0.20 |
+| `(G, B)/255` | 0.13 / 0.21 | 0.17 / 0.18 | 0.15 / 0.12 | 0.18 / 0.13 |
+| `B/255`, 12-bit `(R&15)*256+G` | 0.18 / **0.24** | 0.17 / 0.17 | 0.13 / 0.14 | 0.15 / 0.17 |
+
+(Each cell: V as read / V flipped; the table keeps six of the sixteen, the
+rest are no better.) The best on each piece is a different decoding, within
+about two standard deviations of its own null, and at or below chance on the
+other piece. The coordinates also differ in scale by **16:1** per millimetre
+(0.062-0.063 on both pieces), so any mapping that keeps text square needs a
+factor the vertex data does not carry -- a shader constant, most likely.
+Reading it out of the compiled shaders is outside this plan's boundaries.
+
+Nothing shipped. The plan's rule was to proceed only on a decoding that beats
+chance widely and reproduces a decal in a CIG render; neither happened.
+
 ## Boundaries
 
 These hold for every phase. Changing any of them is Noel's decision, not a
@@ -407,7 +454,8 @@ eighth (224-255) on 99% and 100%, over 577 distinct values. SC Dressing Room's
 shader notes say decal atlas coordinates are packed here. That is the first
 evidence against `CLAUDE.md`'s closed "Decals and the Detail map" entry, whose
 strongest argument was that no armour mesh has a second UV set. The packing is
-**not** decoded.
+**not** decoded: Phase 6 found the decal geometry and the coordinate it
+carries, but not the mapping into the atlas.
 
 ### A body and a default head are data too
 
