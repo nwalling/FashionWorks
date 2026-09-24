@@ -17,7 +17,7 @@ because the archive ships the game's own lighting probes.
 
 ## Status
 
-Built on the `rendering` branch, not merged or pushed.
+Released in `@fashionworks/web` 0.7.0 (FashionWorks `faee59f`), vendored into Hangarworks at `5362738`.
 
 | phase | state | what it measured |
 | --- | --- | --- |
