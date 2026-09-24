@@ -11,7 +11,7 @@ The spike is in two halves because one of them cannot run on a Mac.
 
 ```bash
 ./build.sh
-node node-open-p4k.mjs "/Volumes/Plex/SC Data/Data.p4k"
+node node-open-p4k.mjs "/Volumes/SC Data/Data.p4k"
 ```
 
 Node's `fs.readSync` is a synchronous byte-range read, which is the same

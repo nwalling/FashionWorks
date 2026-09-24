@@ -48,7 +48,7 @@ async function main(): Promise<void> {
   const total = Number(head.headers.get('content-length') ?? 0);
   if (!total) {
     say('No archive is being served. Start the dev server with FW_ARCHIVE set:');
-    say('  FW_ARCHIVE="/Volumes/Plex/SC Data/Data.p4k" npm --prefix web/app run verify');
+    say('  FW_ARCHIVE="/Volumes/SC Data/Data.p4k" npm --prefix web/app run verify');
     return;
   }
   say(`archive   ${(total / 1024 ** 3).toFixed(2)} GB over HTTP ranges`);

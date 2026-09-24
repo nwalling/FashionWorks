@@ -14,7 +14,7 @@
  * What it does not prove: File System Access permissions, drag-and-drop from
  * Program Files, worker plumbing, or Firefox. Those stay open.
  *
- *   node web/spike/node-open-p4k.mjs "/Volumes/Plex/SC Data/Data.p4k"
+ *   node web/spike/node-open-p4k.mjs "/Volumes/SC Data/Data.p4k"
  */
 import fs from 'node:fs';
 import path from 'node:path';

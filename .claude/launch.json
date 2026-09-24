@@ -12,7 +12,7 @@
       ],
       "port": 5183,
       "env": {
-        "FW_ARCHIVE": "/Volumes/Plex/SC Data/Data.p4k"
+        "FW_ARCHIVE": "/Volumes/SC Data/Data.p4k"
       }
     },
     {
