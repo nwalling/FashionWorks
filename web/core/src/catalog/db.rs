@@ -34,25 +34,25 @@ pub struct ArmorRecord {
     pub value: Value,
 }
 
-/// Every wearable armour record in the database.
+/// Every wearable record in the database, armour and clothing, one at a time.
 ///
 /// Filtering on the struct type first matters: the build holds 116,921 records
-/// and only a few thousand are armour, so serialising all of them to JSON to
+/// and only a few thousand are wearable, so serialising all of them to JSON to
 /// find out would dominate the run.
-pub fn armor_records(db: &Database) -> Vec<ArmorRecord> {
-    let mut out = Vec::new();
-    for record in db.records_by_type_name(ENTITY_CLASS) {
+///
+/// **Yielded, not collected.** Each record's JSON tree is about 96 KB of text
+/// and several times that as a `serde_json::Value`, and holding all 4,416 of
+/// them before building the first item took the WebAssembly heap to **2.09 GB**
+/// -- 1.66 GB before clothing joined -- where dlmalloc spent 68% of the build
+/// growing memory. A caller that builds each item and lets the record go holds
+/// one tree at a time.
+pub fn armor_records<'a>(db: &'a Database<'a>) -> impl Iterator<Item = ArmorRecord> + 'a {
+    db.records_by_type_name(ENTITY_CLASS).filter_map(move |record| {
         let source = db.resolve_string(record.file_name_offset);
         if !source.replace('\\', "/").to_ascii_lowercase().contains(HUMAN_ITEMS) {
-            continue;
+            return None;
         }
-        let mut buf = Vec::new();
-        if export::write_json_compact(db, record, &mut buf).is_err() {
-            continue;
-        }
-        let Ok(value) = serde_json::from_slice::<Value>(&buf) else {
-            continue;
-        };
+        let value = record_json(db, record)?;
         let class_name = value
             .get("_RecordName_")
             .and_then(Value::as_str)
@@ -60,46 +60,31 @@ pub fn armor_records(db: &Database) -> Vec<ArmorRecord> {
             .unwrap_or_default()
             .to_string();
         // The attach type decides, and the class name is the fallback -- which
-        // is not a nicety: 23 wearable items, the Ready-Up Helmet's twenty
-        // colourways among them, are filed under `clothing/` with an attach
-        // type outside the `Char_Armor_*` family and nothing but their name to
-        // say what they are.
+        // is not a nicety: the ThermoWeave pieces and others are filed with an
+        // attach type the tables did not always list, and nothing but their
+        // name to say what they are.
         let attach_type = super::raw_attach_type(&value).unwrap_or_default().to_string();
-        if super::slot_of(
-            (!attach_type.is_empty()).then_some(attach_type.as_str()),
-            &class_name,
-        )
-        .is_none()
-        {
-            continue;
-        }
-        out.push(ArmorRecord {
+        super::slot_of((!attach_type.is_empty()).then_some(attach_type.as_str()), &class_name)?;
+        Some(ArmorRecord {
             class_name,
             attach_type,
             source_path: source.to_string(),
             value,
-        });
-    }
-    out
+        })
+    })
 }
 
 /// Every gear record -- weapons, knives, grenades, magazines, pens, gadgets --
-/// in the database. Scoped by path as the Python's DCB export is; which of
-/// them is gear the builder decides from the attach type.
-pub fn gear_records(db: &Database) -> Vec<ArmorRecord> {
-    let mut out = Vec::new();
-    for record in db.records_by_type_name(ENTITY_CLASS) {
+/// in the database, one at a time, as [`armor_records`] and for its reason.
+/// Scoped by path as the Python's DCB export is; which of them is gear the
+/// builder decides from the attach type.
+pub fn gear_records<'a>(db: &'a Database<'a>) -> impl Iterator<Item = ArmorRecord> + 'a {
+    db.records_by_type_name(ENTITY_CLASS).filter_map(move |record| {
         let source = db.resolve_string(record.file_name_offset);
         if !super::gear::in_scope(source) {
-            continue;
+            return None;
         }
-        let mut buf = Vec::new();
-        if export::write_json_compact(db, record, &mut buf).is_err() {
-            continue;
-        }
-        let Ok(value) = serde_json::from_slice::<Value>(&buf) else {
-            continue;
-        };
+        let value = record_json(db, record)?;
         let class_name = value
             .get("_RecordName_")
             .and_then(Value::as_str)
@@ -107,9 +92,15 @@ pub fn gear_records(db: &Database) -> Vec<ArmorRecord> {
             .unwrap_or_default()
             .to_string();
         let attach_type = super::raw_attach_type(&value).unwrap_or_default().to_string();
-        out.push(ArmorRecord { class_name, attach_type, source_path: source.to_string(), value });
-    }
-    out
+        Some(ArmorRecord { class_name, attach_type, source_path: source.to_string(), value })
+    })
+}
+
+/// One record as the JSON the Python reads, or `None` if it will not export.
+fn record_json(db: &Database, record: &starbreaker_datacore::types::Record) -> Option<Value> {
+    let mut buf = Vec::new();
+    export::write_json_compact(db, record, &mut buf).ok()?;
+    serde_json::from_slice::<Value>(&buf).ok()
 }
 
 /// Every record of one struct type, as JSON, keyed by lowercased name.

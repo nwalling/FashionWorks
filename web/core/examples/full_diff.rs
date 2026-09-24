@@ -27,9 +27,7 @@ fn main() {
     println!("locale {} keys, {} palettes, {} manufacturers", loc.len(), palettes.len(), makers.len());
 
     let t = Instant::now();
-    let records = db::armor_records(&database);
-    let mut items: Vec<Value> = records
-        .iter()
+    let mut items: Vec<Value> = db::armor_records(&database)
         .filter_map(|r| build::build_item(&r.value, &palettes, &makers, &loc, "male", &r.source_path))
         .filter(|i| {
             !i["flags"].as_array().map(|f| f.iter().any(|x| x == "npc")).unwrap_or(false)

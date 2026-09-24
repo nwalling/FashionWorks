@@ -334,9 +334,9 @@ pub fn build_catalogue(dcb: &[u8], ini: &str, skeleton: &str) -> Result<String, 
     let palettes = tint::PaletteIndex::build(&database);
     let makers = db::index_by_name(&database, "SCItemManufacturer");
 
-    let records = db::armor_records(&database);
-    let mut items: Vec<serde_json::Value> = records
-        .iter()
+    // One record at a time: each is built and dropped, so the heap holds one
+    // JSON tree rather than all of them (`db::armor_records`).
+    let mut items: Vec<serde_json::Value> = db::armor_records(&database)
         .filter_map(|r| build::build_item(&r.value, &palettes, &makers, &loc, skeleton, &r.source_path))
         // NPC-only records are in the DataCore and are not wearable, so they
         // never reach the listing.
@@ -384,7 +384,6 @@ pub fn build_gear(
     loc: &catalog::Localization,
 ) -> Vec<serde_json::Value> {
     let mut gear: Vec<serde_json::Value> = catalog::db::gear_records(database)
-        .iter()
         .filter_map(|r| catalog::gear::build_gear_item(&r.value, palettes, makers, loc))
         .filter(|g| g["geometry"].as_array().is_some_and(|a| !a.is_empty()))
         .collect();

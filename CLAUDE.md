@@ -2078,6 +2078,23 @@ combined GLB is the one that loses that race -- a six-piece loadout exports at
 anchor is appended to the document first, because Firefox ignores `click()` on a
 detached anchor.
 
+### The browser catalogue streams its records (2026-09-24)
+
+`buildCatalogue` parsed every wearable record into a `serde_json::Value` and
+held all of them before building the first item. The exported human records
+are 466 MB of JSON, several times that as trees, and the WebAssembly heap
+reached **2.09 GB** -- 1.66 GB before clothing joined -- with dlmalloc spending
+68% of the build in `memory.grow`. Opening an archive sat at "item names" for
+over a minute and a half. `db::armor_records` and `db::gear_records` now yield
+one record at a time, each built and dropped: **565 MB** peak, 316 MB of it the
+DataCore itself, and 32-44 s against 160-173 s for the same build under the
+same load. The output is unchanged, 100% both ways.
+
+Profile it with a wasm that keeps its names --
+`CARGO_PROFILE_RELEASE_STRIP=none CARGO_PROFILE_RELEASE_DEBUG=1` and
+`wasm-bindgen --keep-debug` -- under `node --cpu-prof`; a stripped build
+reports `wasm-function[690]`.
+
 ### Clothing is catalogued, and the pipeline ignores it (schema 5)
 
 `CLOTHING.md` is the plan and the record. Both catalogues map the eight

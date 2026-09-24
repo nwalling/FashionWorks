@@ -47,7 +47,7 @@ fn main() {
     println!("palettes  {} indexed in {:?}", palettes.len(), t.elapsed());
 
     let t = Instant::now();
-    let records = db::armor_records(&database);
+    let records: Vec<_> = db::armor_records(&database).collect();
     println!("armour    {} records in {:?}\n", records.len(), t.elapsed());
 
     // The Python manifest, keyed the way the port keys its own output.
