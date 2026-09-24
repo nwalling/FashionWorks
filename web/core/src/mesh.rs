@@ -82,6 +82,9 @@ pub struct LoadedMesh {
     /// Influences per vertex in `joints` and `weights`: 4, or 8 for a mesh
     /// loaded wide whose vertices use more than four.
     pub influences: usize,
+    /// u,v per vertex into the piece's decal sheet (`TexSlot9`), decoded from
+    /// the vertex colour by [`decal_uv`]. Empty for a mesh with no decal.
+    pub decal_uvs: Vec<f32>,
     /// The mesh's own bone names, in the order its joint indices address.
     ///
     /// **Not the canonical armature's order.** One armour piece exports 41
@@ -251,6 +254,7 @@ pub fn load_wide(skin: &[u8], skinm: &[u8], width: usize) -> Result<LoadedMesh, 
         joints: vec![0u16; vertices * width],
         weights: vec![0.0f32; vertices * width],
         influences: width,
+        decal_uvs: Vec::new(),
         bones,
         bone_parents,
         submeshes: built
@@ -312,11 +316,44 @@ pub fn load_wide(skin: &[u8], skinm: &[u8], width: usize) -> Result<LoadedMesh, 
         }
     }
 
+    // A decal is where the colour leaves its neutral value; a mesh with none
+    // carries no second set, so nothing downstream pays for it.
+    if let Some(colors) = &built.colors {
+        if colors.iter().any(|c| c[0] >= DECAL_R_MIN) {
+            out.decal_uvs = colors.iter().take(vertices).flat_map(|c| decal_uv(*c)).collect();
+        }
+    }
+
     if vertices == 0 {
         out.min = [0.0; 3];
         out.max = [0.0; 3];
     }
     Ok(out)
+}
+
+/// The smallest red a decal vertex carries. Everything else sits at 160-161.
+pub const DECAL_R_MIN: u8 = 162;
+
+/// Where a vertex samples the decal sheet: the second UV set, packed into the
+/// vertex colour at ten bits a coordinate.
+///
+/// `U = ((R - 160) * 16 + (G >> 4)) / 1024` and
+/// `V = (((G & 15) - 2) * 256 + B) / 1024`, V down the image. A is not part of
+/// it: it is 255 minus the submaterial index. Neutral geometry -- R 160, G
+/// `16i + 5` -- decodes to the sheet's bottom-left corner, which the sheets
+/// leave empty, and that is how a surface shows no decal.
+///
+/// Derived on the Shogun Kiba helmet, whose sheet is one painting laid out as
+/// an unwrap: decoded, its decal region is a clean full-square layout and the
+/// painting's edges follow its islands. Confirmed on the Sunchaser core and
+/// arms, which it was not fitted to: every overlay patch lands as a rectangle
+/// framing exactly one sticker, square to within 1 % and at right angles.
+/// RENDERING.md, "Decals, decoded".
+pub fn decal_uv(color: [u8; 4]) -> [f32; 2] {
+    let [r, g, b, _] = color.map(i32::from);
+    let u = ((r - 160) * 16 + (g >> 4)) as f32 / 1024.0;
+    let v = (((g & 15) - 2) * 256 + b) as f32 / 1024.0;
+    [u, v]
 }
 
 fn material_names(bytes: &[u8]) -> Vec<MaterialName> {
@@ -388,6 +425,24 @@ mod tests {
         assert!((total - 1.0).abs() < 1e-6, "got {total}");
         // Nothing dropped, so each is its own share of 201.
         assert!((weights[7] - 1.0 / 201.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn neutral_colour_decodes_to_the_empty_corner() {
+        let [u, v] = decal_uv([160, 16 * 9 + 5, 245, 250]);
+        assert!(u < 0.02 && v > 0.95, "({u}, {v})");
+    }
+
+    #[test]
+    fn a_sunchaser_decal_patch_decodes_square() {
+        // Island 205 of the Sunchaser core: a 17 x 21 mm quad.
+        let corners = [[211, 162, 239, 255], [211, 163, 78, 255], [216, 82, 241, 255], [216, 83, 78, 255]].map(decal_uv);
+        let width = corners[2][0] - corners[0][0];
+        let height = corners[1][1] - corners[0][1];
+        assert!((width - 75.0 / 1024.0).abs() < 1e-3, "{width}");
+        assert!((height - 95.0 / 1024.0).abs() < 1e-3, "{height}");
+        // 17:21 on the armour, 75:95 on the sheet.
+        assert!(((width / height) - 17.0 / 21.0).abs() < 0.03);
     }
 
     #[test]

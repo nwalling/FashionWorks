@@ -27,7 +27,7 @@ Released in `@fashionworks/web` 0.7.0 (FashionWorks `faee59f`), vendored into Ha
 | 3 -- LayerBlend on the mesh | done | UV-space against the bake on the Sunchaser core: mean difference **0.32-0.84** sRGB units, **99.6-100 %** of texels within 6. No moire at any zoom. Refined pieces 31-35 MB (bake: helmet 58.6, torso 44.2). Heavy loadout 958 -> **393 MB**, 60 fps, render 12.5 ms. Cold equip faster than the bake once warm (4.1 s against 4.6-4.7 s for four pieces). Contrast 3.31, still in band; tactical torso mean 33.9 against the in-game 34. |
 | 4 -- a body and a head | done | Both bodies with head, eyes and hair (`hair_31`, the customizer default's); no poke-through on the Sunchaser, Tactical + Artimex or Corbel sets; the body hides under a full undersuit, the hair under any helmet. Armour scores identical to Phase 3 (the harness scores armour with the figure off). The figure costs **47 MB**, +132 draw calls and +1.3 ms with the heavy loadout, 60 fps. A `figure` toggle beside the body buttons. |
 | 5 -- the idle loop | done | An `animate` toggle beside the poses, off by default. Unarmed standing plays the character customizer's own idle; a weapon in hand or a crouch keeps its still pose and takes that idle's sway on the spine, neck and head. 60 fps on both bodies, feet on the floor to **0 mm** every frame, the grip on rifle and pistol unchanged to **0 mm**, and no step at the seam larger than the clip's own frame-to-frame motion. |
-| 6 -- decals from vertex colour | closed again | Decal geometry exists inside the mesh -- 27 overlay patches on the Sunchaser core, 22 on the arms, 0.2-2.5 mm off the plates -- and carries a 2-D coordinate in its vertex colour. No decoding into the atlas beats a random-placement null by a wide margin on both pieces (best 1.8x and 1.9x, different decodings). Nothing shipped; `CLAUDE.md`'s decal entry has the addendum. |
+| 6 -- decals from vertex colour | done (after a first close) | The spike closed without a mapping; the Shogun Kiba helmet, reported with an in-game capture, settled it the same day. The colour is a second UV set at ten bits a coordinate. Its purple graffiti renders where the capture shows it, and the Sunchaser's patches land on single stickers. Harness scores unchanged; +2.6 MB of decal sheets. See "Decals, decoded". |
 | 7 -- eight-influence skinning | done | A mesh whose vertices use more than four influences keeps eight, as a second attribute pair and a define-gated shader patch, shadows included. In a crouch the extra four move 3.1 % of the Sunchaser core's vertices by 2.8 mm on average and up to 12.4 mm, and 4.8 % of the utility suit's by up to 16.6 mm; the render changes on 0.62 % of the frame, along seams and straps. Harness scores unchanged within noise; +2.1 MB worn, 61 fps. |
 
 ### Baseline (built package, 1600x1000, today's renderer)
@@ -379,6 +379,48 @@ effect". Rendered eight-way against four-way on the utility suit, 0.62 % of
 the frame changes by more than 12 levels, all of it along the collar, strap
 edges and shoulder seams. The harness's scored views are the idle pose, where
 it moves nothing measurable.
+
+### Decals, decoded
+
+The mapping the Phase 6 spike could not find:
+
+    U = ((R - 160) * 16 + (G >> 4)) / 1024
+    V = (((G & 15) - 2) * 256 + B) / 1024        (V down the image)
+
+Ten bits a coordinate, split across the three colour channels: R carries U's
+high six bits above a bias of 160, G's high nibble U's low four, G's low
+nibble V's high two above a bias of 2, and B V's low eight. Neutral geometry
+(R 160, G `16i + 5`) decodes to the sheet's empty bottom-left corner.
+
+**The Shogun Kiba helmet made it legible.** Its sheet
+(`m_qrt_combat_heavy_helmet_05_01_decal`, 2048, 1.1% opaque) is a purple
+dragon painting laid out as an unwrap rather than a page of stickers, and 23%
+of `shogun_m`'s 24,419 vertices leave the neutral colour -- whole panels, not
+the small patches the spike looked for. Split as twelve bits (U from R and G's
+high nibble, V from G's low nibble and B), the decal triangles formed coherent
+packed islands in a 0.24 x 0.25 window at (0.625, 0.125); the window's origin
+is exactly R 160 and G-low 2, so the coordinate is ten bits inside it. Decoded
+that way the layout fills the square and the painting sits inside its islands,
+edges following edges: 99.4% of the painting inside a footprint of 60% of the
+sheet, 83% with V flipped.
+
+**Confirmed on the Sunchaser core and arms**, which it was not fitted to: each
+of the 27 and 22 overlay patches decodes to a rectangle framing exactly one
+sticker -- the contract block, the WARNING sign, the Clark Defense logo, the
+skull -- with U:V scale 1.00 and 1.01 and the axes at 90 degrees. The spike's
+16:1 anisotropy was the unsplit G. Its content-under-patch scores stayed near
+chance because a text sticker is mostly transparent even when framed exactly;
+that metric was the wrong one for stickers.
+
+**Built.** The core decodes per vertex (`mesh::decal_uv`) for meshes with any
+decal vertex and sends `decalUvs`; a submaterial whose `StringGenMask` carries
+`%DECALS` sends its `TexSlot9` as `decalSheet` (StarBreaker's `has_decal`
+matches only `DECAL`). `three/decal.ts` lays the sheet over the surface by its
+alpha in both the live and baked paths -- colour from the sheet, dielectric,
+roughness from `DecalGloss` -- and gives any mesh sharing a decal material the
+neutral UV. Rendered: the Shogun's graffiti on the right side and cheek, as
+the capture shows it; the Sunchaser clean, with small stickers and no
+oversized text.
 
 ## Boundaries
 

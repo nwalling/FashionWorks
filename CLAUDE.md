@@ -171,6 +171,20 @@ Build **1.0.191.55227** (`sc-alpha-4.10.0-hotfix`, 3 Sep 2026), a 158 GB
 594 canonical plus 1881 colour variants across 210 sets, every one with real
 geometry, **0 flagged `no_geometry` and 0 duplicate class names**.
 
+**Rebuilt against 4.10.1 (2026-09-24)**: build **4.10.193.11644**
+(`sc-alpha-4.10.0`, 15 Sep 2026), 160.5 GB, on the GENIUS share mounted at
+`/Volumes/SC Data`. **2486 items**, 11 more than 4.10.0 and none removed,
+renamed or re-meshed; between the two archives, 1 of about 163,000 character,
+weapon and layer entries changed size and 437 were added. The new pieces are
+the Artimex Akuma arms and legs, Monde Streamline, Shogun Kiba Akuma, a
+Skullcap helmet, a Warden Streamline pack and a ForceFlex Skeleton undersuit,
+plus `qrt_specialist_medium_core_03_01_01`, which has no name in the build's own
+table. **A new archive must replace every cache built from the old one**: the
+DCB export was written over rather than replaced, so a record the new build
+dropped would have survived as a phantom item, and `global.ini` was extracted
+once and kept, which came out as the new pieces all `unnamed`. Both now carry
+the archive's key (`dcb.archive_key`) and are rebuilt when it changes.
+
 These are the figures after the phantom-record fix and the variant-linking fix
 below, both of which change the counts. An earlier reading of 2615 items in 165
 sets included 140 tint-palette records that are not items at all, and grouped
@@ -297,8 +311,8 @@ The colour is data, not a paint mask, and stripping it for rendering is still
 right. Measured on the Sunchaser core and arms (RENDERING.md Phase 6): **A is
 255 minus the submaterial index**, exactly, on all 13 submaterials; B tracks
 the island's V (Spearman 0.95 core, -0.88 arms); R sits at 160-161 and G at
-16i + 5 on 99% of vertices, constant per island. The exception is a few dozen
-small overlay patches, covered under "Decals" below.
+16i + 5 on 99% of vertices, constant per island. Where a decal is placed the
+colour is its UV instead -- see "Decals, decoded" below.
 
 **Option A is restored, but only because Blender does the remap.** Re-exporting
 each item against the canonical armature makes every item GLB carry the same
@@ -513,14 +527,42 @@ and no slaver legs mesh exists in the archive. Only 27 of 2103 items pair a
 mesh and material from different family folders, and they are genuine reuse.
 Do not "fix" this.
 
-### Decals and the Detail map are inert on armour -- both closed
+### Decals, decoded (2026-09-24) -- and the Detail map, still inert
 
-Both were chased as "the missing texture layer". Neither is implementable, and
-more importantly neither is *wanted*. Do not reopen either without new evidence.
+**Decals are real and are rendered.** `TexSlot9` on a submaterial compiled with
+`%DECALS` is a decal sheet, and the mesh places it with a **second UV set
+packed into its vertex colour** at ten bits a coordinate:
 
-**Decals (TexSlot9), declared by 5599 of 11436 layer-blend submaterials.**
-Compositing them lifts the gold region's luminance std from 13.4 to 36.9, so the
-temptation is real. Four independent findings say no:
+    U = ((R - 160) * 16 + (G >> 4)) / 1024
+    V = (((G & 15) - 2) * 256 + B) / 1024        (V down the image)
+
+A is not part of it: it is 255 minus the submaterial index. Neutral geometry --
+R 160, G `16i + 5` -- decodes to the sheet's bottom-left corner, which the
+sheets leave empty, and that is how a surface shows no decal.
+
+**Derived on the Shogun Kiba helmet, confirmed on pieces it was not fitted
+to.** Reported by Noel with an in-game capture: the helmet wears a purple
+dragon painting on one side. Its sheet is that painting laid out as an unwrap,
+and on `shogun_m` 23% of the vertices leave the neutral colour. Decoded, they
+form a clean full-square UV layout whose islands the painting's edges follow
+exactly; 99.4% of the painting falls inside the decoded footprint. On the
+Sunchaser core and arms -- the pieces the earlier attempts failed on -- every
+overlay patch decodes to a rectangle framing exactly one sticker on the sheet,
+square to within 1% and at right angles, where every earlier reading was off by
+16:1. Rendered, the Shogun's graffiti lands where the capture shows it and the
+Sunchaser carries small stickers, with no metre-high text anywhere.
+
+**Why the earlier attempts failed.** They scored the coordinate as 8- or 16-bit
+fields and never split G, whose high nibble belongs to U and low nibble to V;
+and they scored the Sunchaser's text stickers by how much of a patch is
+opaque, which is low for letters even when the patch frames them exactly. A
+sheet painted as an unwrap was what made the layout legible.
+
+`web/core/src/mesh.rs` `decal_uv` decodes it; `three/decal.ts` samples the
+sheet in both the live and baked paths. StarBreaker's own `has_decal` looks for
+the token `DECAL` and so misses LayerBlend's `DECALS` on every armour piece.
+
+**The superseded reasoning, kept for the record.** Four findings once said no:
 
 * No armour mesh has a second UV set. Sampling 25 `.skinm` files across 15
   manufacturers with `SB_DEBUG_STREAMS=1`, every one carries exactly
@@ -547,18 +589,18 @@ across each to 3-4 parts in 65,536 and B to 0.2-0.3 in 255, the two at right
 angles. The submaterials declare `%DECALS` in their `StringGenMask`. So the
 patches are almost certainly the decals and the colour their coordinate.
 
-**What is still missing is the mapping into the atlas**, and the data does not
-state it. Sixteen decodings -- 8-bit pairs, `R*256+G` with B, a 12-bit split,
+**What was still missing was the mapping into the atlas** (found the same day,
+above; this paragraph records the failed search). Sixteen decodings -- 8-bit pairs, `R*256+G` with B, a 12-bit split,
 both axis orders, both V directions -- scored as atlas content under the
 patches against the same patches placed at random: none beats its null by a
 wide margin, and the best on each piece (1.8x on the core, 1.9x on the arms)
 is a different decoding that fails on the other. The two coordinates differ in
 scale by 16:1 per millimetre, so any mapping that keeps text square involves a
 factor the vertex data does not carry -- a shader constant, most likely, and
-the compiled shaders are outside what this project reads. **Closed again,
-with the geometry argument withdrawn**; the second-UV, UV0 and shoulder-pad
-findings stand. `web/core/examples/decal_probe.rs` and `decal_analysis.py`
-reproduce every figure.
+the compiled shaders are outside what this project reads. It was closed a
+second time on that basis, hours before the Shogun helmet settled it.
+`web/core/examples/decal_probe.rs` and `decal_analysis.py` reproduce those
+figures.
 
 **The Detail map.** `DetailDiffuse`, `DetailBump`, `DetailGloss` and
 `DetailTiling` appear on 475 of the 495 layer materials, but they are template

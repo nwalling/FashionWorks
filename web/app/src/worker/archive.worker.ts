@@ -167,6 +167,8 @@ export interface MaterialPayload {
     /** Numeric `PublicParams`, for shaders other than LayerBlend: a number, or
      * a vector for a comma-separated value. Absent on older cores. */
     params?: Record<string, number | Float32Array>;
+    /** `TexSlot9` where the shader is compiled with `%DECALS`, else null. */
+    decalSheet?: string | null;
   }>;
   /** Every distinct detail layer the piece references, by lowercased path. */
   library: Record<string, LayerMaterial>;
@@ -227,6 +229,9 @@ export interface MeshPayload {
    * RENDERING.md Phase 7. */
   joints1?: Uint16Array;
   weights1?: Float32Array;
+  /** u,v per vertex into the decal sheet, decoded from the vertex colour.
+   * Absent on a mesh with no decal. */
+  decalUvs?: Float32Array;
   bones: string[];
   submeshes: Array<{ materialId: number; start: number; count: number }>;
   materialFile: string | null;

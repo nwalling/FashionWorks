@@ -158,10 +158,14 @@ pub struct SubMaterial {
     ///
     /// Hair is the case that needs them: `HairPBR` has no colour texture and
     /// no meaningful `Diffuse`, and takes its colour from `BaseMelanin`,
-    /// `DyeColor` and their kin. LayerBlend's own block is left out -- it
-    /// carries about twenty template values per submaterial and nothing reads
-    /// them.
+    /// `DyeColor` and their kin. LayerBlend keeps only its `Decal*` values --
+    /// the rest of its block is about twenty template values per submaterial
+    /// that nothing reads.
     pub params: Vec<(String, Vec<f32>)>,
+    /// The decal sheet: `TexSlot9`, where the shader is compiled with
+    /// `%DECALS`. Placed by the UV set the mesh packs into its vertex colour
+    /// (`mesh::decal_uv`). None where the material has no decals.
+    pub decal_sheet: Option<String>,
 }
 
 impl SubMaterial {
@@ -244,7 +248,29 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<SubMaterial>, String> {
                 opacity: sub.opacity,
                 alpha_test: sub.alpha_test,
                 shininess: (sub.shininess / 255.0).clamp(0.0, 1.0),
-                params: if layered { Vec::new() } else { numeric_params(&sub.public_params) },
+                // LayerBlend's block is ~20 template values nobody reads; its
+                // decal constants are the exception.
+                // LayerBlend's flag is `%DECALS`; StarBreaker's decoded
+                // `has_decal` matches only `DECAL`, and misses every armour.
+                decal_sheet: sub
+                    .string_gen_mask
+                    .split('%')
+                    .any(|t| t.eq_ignore_ascii_case("DECALS") || t.eq_ignore_ascii_case("DECAL"))
+                    .then(|| {
+                        sub.texture_slots
+                            .iter()
+                            .find(|b| b.slot.eq_ignore_ascii_case("TexSlot9") && !b.path.is_empty())
+                            .map(|b| b.path.clone())
+                    })
+                    .flatten(),
+                params: if layered {
+                    numeric_params(&sub.public_params)
+                        .into_iter()
+                        .filter(|(name, _)| name.to_ascii_lowercase().contains("decal"))
+                        .collect()
+                } else {
+                    numeric_params(&sub.public_params)
+                },
             }
         })
         .collect())

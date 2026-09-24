@@ -71,6 +71,7 @@ import { meshTexture, plainMaterial, surfaceMaterial, texturesWanted } from './m
 import { DEFAULT_PRESET, LIGHT_PRESETS, StudioLighting } from './lighting';
 import { ClipLoop, FADE_SECONDS, type LoopMode, smooth } from './idle';
 import { hasEight, padEight, skinEight } from './skin8';
+import { decalRoughness, padDecalUvs, withDecal } from './decal';
 import { LIVE_DEFAULTS, liveSurfaces, releaseAfterUpload, takesS3tc } from './live';
 import { applyClip, bonePosition, boneRotation, buildRig, mountMatrix, type BuiltRig } from './rig';
 import { compositeSurfaces, dataTexture, type CompositeGeometry, type PaletteEntry } from './surface';
@@ -1042,6 +1043,7 @@ export class Kitbasher {
       }
     }
     eightWhereNeeded(objects);
+    decalsWhereNeeded(objects);
 
     const loaded = measure(
       key,
@@ -1135,6 +1137,7 @@ export class Kitbasher {
     const object = new SkinnedMesh(drawnOnly(buildGeometry(payload, count).geometry, materials), materials);
     object.frustumCulled = false;
     eightWhereNeeded([object]);
+    decalsWhereNeeded([object]);
     object.name = meshPath.split('/').pop() ?? meshPath;
     shaded(object);
     const loaded = measure(key, [object], materials, []);
@@ -1228,13 +1231,31 @@ export class Kitbasher {
         refine,
       };
     }
-    return {
-      materials: material.submaterials.map((sub) => live?.materials.get(sub.name)
-        ?? (composited?.surfaces.has(sub.name)
-          ? surfaceMaterial(sub, composited, { byPath })
-          : plainMaterial(sub, { byPath }, material.submaterials))),
-      refine,
-    };
+    const materials = material.submaterials.map((sub) => live?.materials.get(sub.name)
+      ?? (composited?.surfaces.has(sub.name)
+        ? surfaceMaterial(sub, composited, { byPath })
+        : plainMaterial(sub, { byPath }, material.submaterials)));
+    await this.addDecals(material, materials, plainSize);
+    return { materials, refine };
+  }
+
+  /** Lay each submaterial's decal sheet over it, where it has one.
+   * RENDERING.md, "Decals, decoded". */
+  private async addDecals(material: MaterialPayload, materials: Material[], size: number): Promise<void> {
+    const sheets = new Map<string, Texture | null>();
+    for (const [i, sub] of material.submaterials.entries()) {
+      const target = materials[i];
+      if (!sub.decalSheet || !(target instanceof MeshStandardMaterial)) continue;
+      let sheet = sheets.get(sub.decalSheet);
+      if (sheet === undefined) {
+        const payload = (await this.client.texture(sub.decalSheet, size)).texture;
+        sheet = payload
+          ? releaseAfterUpload(meshTexture(dataTexture(payload.rgba, payload.width, payload.height, true), true))
+          : null;
+        sheets.set(sub.decalSheet, sheet);
+      }
+      if (sheet) withDecal(target, sheet, decalRoughness(sub));
+    }
   }
 
   /** Bring a piece's surface maps up to full size once it is on screen: the
@@ -1787,6 +1808,7 @@ export class Kitbasher {
       group.add(mesh);
       all.push(...materials);
     }
+    decalsWhereNeeded([group]);
     const loaded = measure(key, [group], all, [], payload.helpers);
     loaded.refines = refines;
     this.cache.set(key, loaded);
@@ -2100,6 +2122,17 @@ function eightWhereNeeded(objects: Object3D[]): void {
   }
 }
 
+/** Give every mesh of a piece the decal UV attribute if any of its materials
+ * samples a sheet: the materials are shared, and a mesh without the
+ * attribute would read the sheet's top-left corner. */
+function decalsWhereNeeded(objects: Object3D[]): void {
+  const meshes: Mesh[] = [];
+  for (const root of objects) root.traverse((o) => { if ((o as Mesh).isMesh) meshes.push(o as Mesh); });
+  const sampled = meshes.some((m) => ([] as Material[]).concat(m.material).some((mat) => mat.userData.fwDecal));
+  if (!sampled) return;
+  for (const mesh of meshes) padDecalUvs(mesh.geometry);
+}
+
 function drawnOnly<G extends { groups: Array<{ materialIndex?: number }> }>(geometry: G, materials: Material[]): G {
   geometry.groups = geometry.groups.filter((g) => materials[g.materialIndex ?? 0]?.visible !== false);
   return geometry;
@@ -2201,7 +2234,7 @@ function measure(
   const textures = new Set<Texture>(textureSlots(materials));
   for (const material of materials) {
     const m = material as Material & Record<string, unknown>;
-    for (const bag of [m.userData?.fwGrain, m.userData?.fwLive]) {
+    for (const bag of [m.userData?.fwGrain, m.userData?.fwLive, m.userData?.fwDecal]) {
       for (const uniform of Object.values((bag ?? {}) as Record<string, { value: unknown }>)) {
         const texture = uniform.value as Texture | null;
         if (texture && typeof texture === 'object' && 'isTexture' in texture && !texture.userData.shared) textures.add(texture);

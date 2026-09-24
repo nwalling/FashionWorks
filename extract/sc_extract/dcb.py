@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import shutil
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -56,7 +57,8 @@ class Record:
         return ""
 
 
-def _cache_key(p4k: Path) -> str:
+def archive_key(p4k: Path) -> str:
+    """Which archive a cache was built from: its path, size and mtime."""
     stat = p4k.stat()
     digest = hashlib.sha256(f"{p4k}|{stat.st_size}|{int(stat.st_mtime)}".encode()).hexdigest()
     return digest[:16]
@@ -99,16 +101,21 @@ def export(
     else:
         filters = list(filter_glob) or [None]
 
-    key = _cache_key(p4k)
+    key = archive_key(p4k)
     cache_path = out_dir / CACHE_FILE
-    if not force and cache_path.is_file():
+    if cache_path.is_file():
         try:
             cached = json.loads(cache_path.read_text())
         except json.JSONDecodeError:
             cached = {}
-        if cached.get("key") == key and cached.get("filters") == filters:
+        if not force and cached.get("key") == key and cached.get("filters") == filters:
             log.info("DCB export is current (key=%s); skipping", key)
             return out_dir
+        # A stale export is replaced, not written over. StarBreaker adds files
+        # and never removes one, so a record a new build dropped would survive
+        # from the old export and come back as a catalogue item the game no
+        # longer has. Only a directory carrying our own cache stamp is cleared.
+        _clear_export(out_dir, cached.get("p4k"))
 
     for pattern in filters:
         starbreaker_dcb_extract(settings, out_dir=out_dir, fmt="json", filter_glob=pattern)
@@ -116,6 +123,16 @@ def export(
     out_dir.mkdir(parents=True, exist_ok=True)
     cache_path.write_text(json.dumps({"key": key, "filters": filters, "p4k": str(p4k)}, indent=2))
     return out_dir
+
+
+def _clear_export(out_dir: Path, previous: str | None) -> None:
+    """Remove everything a previous export wrote, the cache stamp included."""
+    log.info("DCB export is stale (was %s); clearing %s", previous or "unknown", out_dir)
+    for child in out_dir.iterdir():
+        if child.is_dir() and not child.is_symlink():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
 
 
 def iter_json(root: Path) -> Iterator[Path]:

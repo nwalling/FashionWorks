@@ -195,15 +195,7 @@ def catalog(
     dcb.export(settings, filter_glob=list(filter_glob) or None, force=force)
     index = dcb.Index.load(settings.dcb_dir)
 
-    loc_file = settings.raw_dir / settings.localization_p4k_path()
-    if not loc_file.is_file():
-        click.echo("extracting the localization table...")
-        starbreaker_p4k_extract(
-            settings,
-            out_dir=settings.raw_dir,
-            filter_glob=f"**/{settings.localization_p4k_path()}",
-            convert=None,
-        )
+    loc_file = fresh_localization(settings, starbreaker_p4k_extract)
     if loc_file.is_file():
         loc = Localization.from_file(loc_file)
     else:
@@ -234,6 +226,34 @@ def catalog(
             f"{len(loc.missing)} unresolved @keys listed in {settings.errors_path()}",
             fg="yellow",
         )
+
+
+def fresh_localization(settings, extract) -> Path:
+    """The localization table, extracted again whenever the archive changes.
+
+    It used to be extracted once and kept, so a new build's catalogue resolved
+    its names against the old build's table: every item the new build added
+    came out `unnamed`. The table now carries a stamp of the archive it came
+    from, the same key the DataCore export uses.
+    """
+    from . import dcb
+
+    loc_file = settings.raw_dir / settings.localization_p4k_path()
+    stamp = loc_file.with_name(loc_file.name + ".archive")
+    key = dcb.archive_key(settings.p4k_path)
+    current = loc_file.is_file() and stamp.is_file() and stamp.read_text().strip() == key
+    if not current:
+        click.echo("extracting the localization table...")
+        loc_file.unlink(missing_ok=True)
+        extract(
+            settings,
+            out_dir=settings.raw_dir,
+            filter_glob=f"**/{settings.localization_p4k_path()}",
+            convert=None,
+        )
+        if loc_file.is_file():
+            stamp.write_text(key)
+    return loc_file
 
 
 # ---------------------------------------------------------------------------

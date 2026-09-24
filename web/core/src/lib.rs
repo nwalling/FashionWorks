@@ -626,6 +626,10 @@ fn mesh_to_js(
         set("weights", &js_sys::Float32Array::from(&loaded.weights[..]).into())?;
     }
 
+    if !loaded.decal_uvs.is_empty() {
+        set("decalUvs", &js_sys::Float32Array::from(&loaded.decal_uvs[..]).into())?;
+    }
+
     let bones = js_sys::Array::new();
     for name in &loaded.bones {
         bones.push(&JsValue::from_str(name));
@@ -816,6 +820,11 @@ impl Archive {
                 js_sys::Reflect::set(&params, &name.as_str().into(), &value)?;
             }
             js_sys::Reflect::set(&entry, &"params".into(), &params.into())?;
+            js_sys::Reflect::set(
+                &entry,
+                &"decalSheet".into(),
+                &sub.decal_sheet.as_deref().map_or(JsValue::NULL, JsValue::from_str),
+            )?;
 
             let textures = js_sys::Object::new();
             for (role, texture) in &sub.textures {
