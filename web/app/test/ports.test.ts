@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { readCatalogue, type CatalogueItem, type Port } from '../src/archive/catalogue';
 import {
   describePorts,
+  HAND,
+  HAND_PORT,
   portFor,
   portLabel,
   portShort,
@@ -10,6 +12,7 @@ import {
   refusal,
   resolvePorts,
   revalidate,
+  withHand,
 } from '../src/gear/ports';
 import { decodeGear, decodeLoadout, encodeLoadout } from '../src/three/kitbasher';
 
@@ -128,6 +131,39 @@ describe('holsters', () => {
     expect(portServes(RIFLE_RIGHT, 'primary')).toBe(true);
     expect(portServes(RIFLE_RIGHT, 'grenade')).toBe(false);
     expect(portServes(RIFLE_LEFT, 'gadget')).toBe(true);
+  });
+});
+
+describe('holsters with clothing, and the hand', () => {
+  const hip = port('wep_sidearm', [['WeaponPersonal', ['Small']]], 1, 1);
+  const trousers = armour('pants', 'trousers', [hip, port('utility_attach_1', [['WeaponPersonal', ['Small', 'Knife']]], 0, 1)]);
+  const jacket = armour('coat', 'jacket', [port('wep_sidearm', [['WeaponPersonal', ['Small']]], 1, 1)]);
+  const pistol = gear('p8', 'sidearm', 'WeaponPersonal', 'Small', 1);
+
+  it('takes trousers\' holsters, the jacket\'s over them', () => {
+    const ports = resolvePorts(new Map([['trousers', trousers], ['jacket', jacket]]));
+    expect(ports.get('wep_sidearm')!.owner).toBe('jacket');
+    expect(ports.get('utility_attach_1')!.owner).toBe('trousers');
+  });
+
+  it('puts a pistol on the hip and a rifle, with no holster for it, in the hand', () => {
+    const ports = withHand(resolvePorts(new Map([['trousers', trousers]])));
+    expect([...ports.keys()].at(-1)).toBe(HAND);
+    const p = portFor(pistol, ports, new Set());
+    expect('port' in p && p.port.port.name).toBe('wep_sidearm');
+    const r = portFor(rifle, ports, new Set());
+    expect('port' in r && r.port.port.name).toBe(HAND);
+    expect(portLabel(HAND_PORT)).toBe('hand');
+  });
+
+  it('keeps a rifle on the back rather than in the hand when armour has room', () => {
+    const r = portFor(rifle, withHand(resolvePorts(new Map([['torso', heavyCore]]))), new Set());
+    expect('port' in r && r.port.port.name).toBe('wep_stocked_2');
+  });
+
+  it('holds nothing that is thrown', () => {
+    expect(refusal(HAND_PORT, grenade)).not.toBeNull();
+    expect(refusal(HAND_PORT, launcher)).toBeNull();
   });
 });
 

@@ -28,7 +28,7 @@ import {
   type GearSlot,
   type WearSlot,
 } from '../archive/catalogue';
-import { portLabel, portServes, portShort } from '../gear/ports';
+import { HAND, portLabel, portServes, portShort } from '../gear/ports';
 import { Kitbasher as Engine, type KitbasherState } from '../three/kitbasher';
 import { HEAD_SLOTS } from '../three/outfit';
 import type { Tokens } from '../theme';
@@ -454,7 +454,7 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
               disabled={busy}
               onClick={() => void engine.current?.hold(null)}
             >
-              nothing
+              {carrying.has(HAND) ? 'put down' : 'nothing'}
             </button>
             {holdable.map(([port, item]) => (
               <button
@@ -464,7 +464,9 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
                 aria-checked={state?.holding === port}
                 aria-pressed={state?.holding === port}
                 disabled={busy}
-                title={`Hold the ${displayName(item)}, from the ${portLabel(state!.ports.get(port)!.port)} holster`}
+                title={port === HAND
+                  ? `The ${displayName(item)}, in the hand: nothing worn holsters it`
+                  : `Hold the ${displayName(item)}, from the ${portLabel(state!.ports.get(port)!.port)} holster`}
                 onClick={() => void engine.current?.hold(port)}
               >
                 {titleOf(item)}

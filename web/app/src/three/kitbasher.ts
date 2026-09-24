@@ -65,10 +65,14 @@ import type {
 import { buildGeometry } from './geometry';
 import {
   describePorts,
+  HAND,
+  HAND_PORT,
   portFor,
   portLabel,
+  refusal,
   resolvePorts,
   revalidate,
+  withHand,
   type OwnedPort,
 } from '../gear/ports';
 import { meshTexture, plainMaterial, surfaceMaterial, texturesWanted } from './materials';
@@ -215,7 +219,11 @@ const CACHE_BUDGET = 640 * 1024 * 1024;
  * most of them. The outermost piece that carries a point is the one it is
  * mounted on: the backpack hangs where the torso's shell puts it, the sidearm
  * where the legs put it. */
-const OVERRIDE_ORDER: readonly Slot[] = ['undersuit', 'helmet', 'arms', 'legs', 'torso'];
+const OVERRIDE_ORDER: readonly WearSlot[] = [
+  'undersuit', 'helmet', 'arms', 'legs', 'torso',
+  // Clothing is never worn with armour; among itself the jacket is outermost.
+  'trousers', 'shirt', 'jacket',
+];
 
 /** Bake resolution for a swatch. A 22px chip needs a mean, not a texture. */
 const SWATCH_BAKE = 64;
@@ -1632,9 +1640,14 @@ export class Kitbasher {
     const leaving = outfitSlots(this.state.outfit).filter((slot) => this.wearing.has(slot));
     const returning = [...this.aside.values()];
     const gearReturning = this.asideGear;
+    // What is in the hand comes along; what is in the holsters stays with
+    // the outfit that holds it.
+    const inHand = this.holdingPort ? this.carried.get(this.holdingPort)?.item ?? null : null;
     this.asideGear = {
-      carrying: [...this.carried].map(([port, c]) => ({ port, item: c.item })),
-      holding: this.holdingPort,
+      carrying: [...this.carried]
+        .filter(([port]) => port !== this.holdingPort)
+        .map(([port, c]) => ({ port, item: c.item })),
+      holding: null,
     };
     for (const carried of this.carried.values()) carried.instance.removeFromParent();
     this.carried.clear();
@@ -1646,11 +1659,15 @@ export class Kitbasher {
     this.applyOverrides();
     this.measureUndersuit();
     this.applyOutfit();
-    this.publish({ ports: resolvePorts(this.wearing), status: `${outfit} on` });
+    this.publish({ ports: this.ports(), status: `${outfit} on` });
 
     for (const item of returning) await this.equip(item);
-    for (const { port, item } of gearReturning.carrying) await this.carry(item, port);
-    if (gearReturning.holding && this.carried.has(gearReturning.holding)) {
+    for (const { port, item } of gearReturning.carrying) {
+      if (port !== HAND || !inHand) await this.carry(item, port);
+    }
+    if (inHand) {
+      await this.carry(inHand, HAND);
+    } else if (gearReturning.holding && this.carried.has(gearReturning.holding)) {
       await this.hold(gearReturning.holding);
     } else if (hadHold) {
       await this.setPose(this.unarmedPose());
@@ -1770,6 +1787,9 @@ export class Kitbasher {
   /** Put the held item back in its holster, or take one out, without posing. */
   private setHeld(port: string | null): void {
     if (port === this.holdingPort) return;
+    // A weapon with no holster behind it has nowhere to go but the hand: at
+    // ease it stays there. Putting it down is `hold(null)`'s to do.
+    if (port === null && this.holdingPort === HAND) return;
     const previous = this.holdingPort ? this.carried.get(this.holdingPort) : undefined;
     this.holdingPort = port;
     if (port) this.lastHeld = port;
@@ -2043,8 +2063,8 @@ export class Kitbasher {
   private hostFor(owned: OwnedPort): Object3D | null {
     const helper = owned.port.helper;
     if (!helper || !this.rig) return null;
-    const piece = this.equipped.get(owned.owner);
-    if (piece?.helpers && owned.item.bind_mode === 'socket') {
+    const piece = owned.owner === 'body' ? undefined : this.equipped.get(owned.owner);
+    if (piece?.helpers && owned.item?.bind_mode === 'socket') {
       const key = Object.keys(piece.helpers).find((k) => k.toLowerCase() === helper.toLowerCase());
       const node = piece.objects[0];
       if (key && node) {
@@ -2066,7 +2086,7 @@ export class Kitbasher {
   private mountCarried(carried: Carried): void {
     carried.instance.removeFromParent();
     carried.instance.matrixAutoUpdate = false;
-    if (this.holdingPort === carried.port.port.name) {
+    if (this.holdingPort === carried.port.port.name || carried.port.port.name === HAND) {
       // In the hand: the item's own origin on the hand bone, as the body's
       // `weapon_attach_hand_right` port declares -- it names no item locator.
       carried.instance.matrix.identity();
@@ -2104,11 +2124,16 @@ export class Kitbasher {
     if (!this.rig) await this.init();
     if (this.disposed || !this.rig) return false;
     const name = displayName(item);
-    const ports = resolvePorts(this.wearing);
+    const ports = this.ports();
     const occupied = new Set(this.carried.keys());
     // Choosing an occupied port swaps what is in it.
     if (port) occupied.delete(port);
-    const choice = portFor(item, ports, occupied, port);
+    let choice = portFor(item, ports, occupied, port);
+    // Every holster full, or none at all: a weapon the hand can hold goes
+    // there, in place of whatever the hand held. CLOTHING.md Phase 5.
+    if ('reason' in choice && !port && refusal(HAND_PORT, item) === null) {
+      choice = { port: ports.get(HAND)! };
+    }
     if ('reason' in choice) {
       this.publish({ ports, status: `${name}: ${choice.reason}` });
       return false;
@@ -2131,10 +2156,17 @@ export class Kitbasher {
     if (this.disposed) return false;
     const previous = this.carried.get(owned.port.name);
     if (previous) previous.instance.removeFromParent();
+    const toHand = owned.port.name === HAND;
+    // Into the hand means held: whatever was held from a holster goes back.
+    if (toHand && this.holdingPort && this.holdingPort !== HAND) this.setHeld(null);
     const carried: Carried = {
       item, template, instance: template.objects[0]!.clone(), magazine: null, port: owned,
     };
     this.carried.set(owned.port.name, carried);
+    if (toHand) {
+      this.holdingPort = HAND;
+      this.lastHeld = HAND;
+    }
     await this.attachMagazine(carried);
     this.mountCarried(carried);
     this.evict();
@@ -2142,11 +2174,15 @@ export class Kitbasher {
     // Clones share the template's materials, so one refine serves every copy.
     this.refineLater(template);
     if (carried.magazine) this.refineLater(carried.magazine.template);
-    this.publish({
-      busy: false,
-      ports,
-      status: `${name} · ${portLabel(owned.port)}${owned.owner === 'backpack' ? ' on the backpack' : ''}`,
-    });
+    const status = toHand
+      ? `${name} in hand · nothing worn holsters it`
+      : `${name} · ${portLabel(owned.port)}${owned.owner === 'backpack' ? ' on the backpack' : ''}`;
+    this.publish({ busy: false, ports, status });
+    // In the hand, it is raised -- crouched stays crouched.
+    if (toHand && WEAPON_POSES[item.anim_set ?? '']) {
+      await this.setPose(this.state.pose === 'crouch' ? 'crouch' : 'raised');
+      this.publish({ status });
+    }
     return true;
   }
 
@@ -2159,7 +2195,7 @@ export class Kitbasher {
     const wasHeld = this.holdingPort === port;
     if (wasHeld) this.holdingPort = null;
     this.evict();
-    const status = `${displayName(carried.item)} put away`;
+    const status = `${displayName(carried.item)} ${port === HAND ? 'put down' : 'put away'}`;
     this.publish({ status });
     // The removal is the news, so it keeps the status line over the re-pose.
     if (wasHeld) void this.setPose(this.unarmedPose()).then(() => this.publish({ status }));
@@ -2173,6 +2209,12 @@ export class Kitbasher {
   /** Hold a carried item, or nothing. The item leaves its holster for the
    * hand, as in the game, and the pose follows its animation set. */
   async hold(port: string | null): Promise<void> {
+    // The hand's weapon has no holster to go back in, so letting go of it puts
+    // it down -- and holding something else from a holster frees the hand.
+    if (this.carried.has(HAND) && port !== HAND) {
+      this.uncarry(HAND);
+      if (!port) return;
+    }
     const carried = port ? this.carried.get(port) : undefined;
     if (port && (!carried || !HOLDABLE.has(carried.item.slot as GearSlot))) {
       this.publish({ status: carried ? `${displayName(carried.item)} is not held in the hand` : 'nothing there to hold' });
@@ -2188,6 +2230,11 @@ export class Kitbasher {
     await this.setPose(carried ? (this.state.pose === 'crouch' ? 'crouch' : 'raised') : this.unarmedPose());
   }
 
+  /** Every holster on the body, and the hand. */
+  private ports(): Map<string, OwnedPort> {
+    return withHand(resolvePorts(this.wearing));
+  }
+
   /** Re-seat carried gear after the armour changed, and say what came off.
    *
    * A heavy core swapped for a light one takes `wep_stocked_2`, two grenade
@@ -2196,7 +2243,7 @@ export class Kitbasher {
    * port merely changed owner (a backpack went on, and now holds the rifles)
    * moves with it. */
   private revalidateGear(): { removed: string[]; ports: Map<string, OwnedPort>; lostHold: boolean } {
-    const ports = resolvePorts(this.wearing);
+    const ports = this.ports();
     const { kept, removed } = revalidate(this.carried, ports);
     const lostHold = removed.some(({ port }) => port === this.holdingPort);
     for (const { port, carried } of removed) {

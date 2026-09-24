@@ -15,6 +15,7 @@ a proposal with an exit test.
 | 2 -- outfit model | done | One outfit on the body and the other kept aside; `HiddenParts` and the zone rule applied generically. A full clothing outfit on both bodies with no skin through cloth; armour scores identical to before on every harness measure. The clothing outfit costs 133 MB and 136 draw calls against the armour loadout's 372 MB and 1,765. See "Phase 2, as run". |
 | 3 -- UI | done | Armour / clothing / gear; picking an outfit puts it on, the other aside. Clothing slots in the game's order, equip-set by line, clothing in share links with old links unchanged -- all driven through the real UI headless. See "Phase 3, as run". |
 | 4 -- head items | done | Eyewear catalogued (15, both catalogues); hat and glasses on both heads in either outfit, hidden under the helmets that hide their ports; the hair swaps to the record's `hatHair` cut under a cap. See "Phase 4, as run". |
+| 5 -- gear with clothing | done | Trousers and jackets carry holsters after all (368 and 35); the body's own hand takes a weapon nothing worn holsters, and holds it. Rifle in the hand and pistol on the hip in a clothing outfit, on both bodies; the held weapon crosses an outfit switch. See "Phase 5, as run". |
 
 ## What the data says
 
@@ -319,6 +320,32 @@ for nothing and keep the full hair, as they do in the game.
 77 styles are there to add as a picker if wanted, and the variant rule above
 applies to them unchanged.
 
+## Phase 5, as run
+
+**The premise was wrong, and the data says so.** 368 of 382 trousers declare
+a hip `wep_sidearm` and a thigh `utility_attach_1` (25 a second thigh point,
+eight pen points), and 35 jackets declare their own -- 27 a sidearm and two
+thigh points, eight a rifle holster and magazine points. So clothing joins
+the port owners, the jacket winning over the trousers as the outer layer, and
+holsters appear wherever something worn declares them: in a shirt and
+trousers, a pistol goes on the hip. Garments also move attachment points as
+armour does, so a hip holster sits on the trousers' own hip.
+
+**The hand is a port, because the body says it is.** The body record declares
+`weapon_attach_hand_right`, and the engine gives it to a weapon only when no
+holster will take it -- armour keeps its rifles on the back. A weapon in the
+hand has nowhere to go at ease, so it stays held and the stance stays its
+own; letting go of it ("put down" in place of "nothing") puts it down, and
+holding something from a holster frees the hand the same way. Grenades,
+magazines and pens are not held.
+
+**A held weapon crosses an outfit switch; holstered gear stays with its
+outfit.** Checked on both bodies: a P4-AR into the hand in a shirt and
+trousers, an Arclight onto the trousers' hip, the pistol drawn (the rifle put
+down) and holstered again at ease, then the rifle back in hand through a
+switch to a Sunchaser set and back, the pistol returning to the hip with the
+clothing.
+
 ## Phases
 
 | phase | what | size |
@@ -401,6 +428,9 @@ weapon without drawing it from a holster needs a small change to `raised`.
 
 **Exit:** hold a rifle and a pistol in a clothing outfit; holsters appear only
 when armour does.
+
+*Corrected when it was built: clothing does declare holsters. See "Phase 5,
+as run".*
 
 ## Not planned
 

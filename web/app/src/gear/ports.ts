@@ -18,10 +18,35 @@
  * range. A Large weapon (size 5) fits only the right side of the back.
  */
 
-import type { CatalogueItem, GearSlot, Port, Slot, WearSlot } from '../archive/catalogue';
+import type { CatalogueItem, GearSlot, Port, WearSlot } from '../archive/catalogue';
 
-/** Lowest first: a later slot's port replaces an earlier one's of the same name. */
-export const PORT_OWNERS: readonly Slot[] = ['undersuit', 'helmet', 'arms', 'legs', 'torso', 'backpack'];
+/** Lowest first: a later slot's port replaces an earlier one's of the same name.
+ *
+ * Clothing declares holsters too, whatever CLOTHING.md first assumed: 368 of
+ * 382 trousers carry a hip `wep_sidearm` and a thigh `utility_attach_1`, and
+ * 35 jackets their own, the jacket's winning as the outer layer. The two
+ * outfits are never on together, so their order against armour is moot. */
+export const PORT_OWNERS: readonly WearSlot[] = [
+  'undersuit', 'helmet', 'arms', 'legs', 'torso', 'backpack',
+  'trousers', 'shirt', 'jacket', 'pack',
+];
+
+/** The body's own hand, `weapon_attach_hand_right`: where a weapon goes when
+ * nothing worn has a holster for it, and is held there. The body record's
+ * port takes almost anything; this takes what a hand can hold and raise. */
+export const HAND = 'weapon_attach_hand_right';
+export const HAND_PORT: Port = {
+  name: HAND,
+  types: [
+    { type: 'WeaponPersonal', subtypes: ['Medium', 'Large', 'Small', 'Knife', 'Gadget'] },
+    { type: 'Gadget', subtypes: [] },
+  ],
+  min_size: 0,
+  max_size: 0,
+  helper: 'RightWeaponBone',
+  offset: null,
+  select_tag: null,
+};
 
 /** Item types a holster can take. The `backpack` and `helmethook_attach`
  * ports are armour-on-armour and are not holsters. */
@@ -29,9 +54,10 @@ const GEAR_TYPES = ['weaponpersonal', 'weaponattachment', 'fps_consumable', 'gad
 
 export interface OwnedPort {
   readonly port: Port;
-  /** The slot of the piece that declares it. */
-  readonly owner: Slot;
-  readonly item: CatalogueItem;
+  /** The slot of the piece that declares it, or the body for the hand. */
+  readonly owner: WearSlot | 'body';
+  /** The piece that declares it; none for the hand. */
+  readonly item: CatalogueItem | null;
 }
 
 export function isHolster(port: Port): boolean {
@@ -50,9 +76,16 @@ export function resolvePorts(wearing: ReadonlyMap<WearSlot, CatalogueItem>): Map
   return out;
 }
 
+/** The holsters and, last, the hand: filled only when no holster will take
+ * the item, so armour keeps its rifles on the back. */
+export function withHand(ports: ReadonlyMap<string, OwnedPort>): Map<string, OwnedPort> {
+  return new Map([...ports, [HAND, { port: HAND_PORT, owner: 'body' as const, item: null }]]);
+}
+
 /** A holster's name as a person would say it. */
 export function portLabel(port: Port): string {
   const n = port.name.toLowerCase();
+  if (port.name === HAND) return 'hand';
   const number = /_(\d+)$/.exec(n)?.[1] ?? '';
   if (port.select_tag === 'backLeft' || n === 'wep_stocked_2') return 'back left';
   if (port.select_tag === 'backRight' || n === 'wep_stocked_3') return 'back right';
@@ -73,6 +106,7 @@ export function portLabel(port: Port): string {
  * The full name goes in the chip's tooltip. */
 export function portShort(port: Port): string {
   const n = port.name.toLowerCase();
+  if (port.name === HAND) return 'hand';
   const number = /_(\d+)$/.exec(n)?.[1] ?? '';
   if (port.select_tag === 'backLeft' || n === 'wep_stocked_2') return 'left';
   if (port.select_tag === 'backRight' || n === 'wep_stocked_3') return 'right';
