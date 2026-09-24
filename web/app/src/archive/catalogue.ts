@@ -38,6 +38,9 @@ export interface CatalogueItem {
   /** The ports this piece hides while worn: a jacket the shirt, an undersuit
    * every clothing port, a helmet the hat and hair. */
   hidden?: string[];
+  /** `AttachDef.Tags`, one token each: `Set_02`, `Color_06`, and directives
+   * like `$hatHair+` that change what the character draws. */
+  tags?: string[];
 }
 
 /** An item port that hangs something off a bone: a holster. LOADOUT.md. */
@@ -61,7 +64,7 @@ export type Slot = (typeof SLOTS)[number];
  * makes the two outfits exclusive -- 215 of 222 undersuits hide every clothing
  * port -- so a slot belongs to exactly one of them. */
 export const CLOTHING_SLOTS = [
-  'hat', 'shirt', 'jacket', 'accessory', 'gloves', 'trousers', 'footwear', 'pack',
+  'hat', 'eyewear', 'shirt', 'jacket', 'accessory', 'gloves', 'trousers', 'footwear', 'pack',
 ] as const;
 export type ClothingSlot = (typeof CLOTHING_SLOTS)[number];
 
@@ -130,7 +133,7 @@ const CLOTHING_WORD = new RegExp(`^(${[
   'top', 'tank', 'shirt', 't-shirt', 'pants', 'trousers', 'jeans', 'shorts', 'waders',
   'skirt', 'leggings', 'boots', 'boot', 'shoes', 'pumps', 'slippers', 'sandals', 'sneakers',
   'gloves', 'glove', 'hat', 'tophat', 'cap', 'beanie', 'mask', 'balaclava', 'bandana',
-  'goggles', 'cover', 'gear', 'hood', 'scarf', 'wrap', 'apparatus',
+  'goggles', 'cover', 'gear', 'hood', 'scarf', 'wrap', 'apparatus', 'glasses', 'monocle',
 ].join('|')})$`, 'i');
 
 /** Whether a word of a name in `slot` is the word naming the slot. */

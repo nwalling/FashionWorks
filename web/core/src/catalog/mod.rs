@@ -70,14 +70,16 @@ pub fn slot_for(attach_type: &str) -> Option<&'static str> {
         "Char_Clothing_Legs" => "trousers",
         "Char_Clothing_Feet" => "footwear",
         "Char_Clothing_Backpack" => "pack",
+        // A head item, like the hat: glasses, goggles and a monocle.
+        "Char_Accessory_Eyes" => "eyewear",
         _ => return None,
     })
 }
 
 /// The clothing outfit's slots. A slot belongs to one outfit: in the game the
 /// two are exclusive, since 215 of 222 undersuits hide every clothing port.
-pub const CLOTHING_SLOTS: [&str; 8] =
-    ["hat", "shirt", "jacket", "accessory", "gloves", "trousers", "footwear", "pack"];
+pub const CLOTHING_SLOTS: [&str; 9] =
+    ["hat", "eyewear", "shirt", "jacket", "accessory", "gloves", "trousers", "footwear", "pack"];
 
 /// `armour` or `clothing`, by slot.
 pub fn outfit_of(slot: &str) -> &'static str {
@@ -234,6 +236,7 @@ mod tests {
             ("Char_Clothing_Hands", "gloves"),
             ("Char_Clothing_Legs", "trousers"),
             ("Char_Clothing_Feet", "footwear"),
+            ("Char_Accessory_Eyes", "eyewear"),
         ] {
             assert_eq!(slot_for(attach_type), Some(slot));
             assert_eq!(outfit_of(slot), "clothing");

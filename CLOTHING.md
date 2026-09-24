@@ -13,6 +13,8 @@ a proposal with an exit test.
 | 0 -- zones | done | The body's 30 (male) and 31 (female) zone submeshes named from geometry and coverage, and shared by every shirt and jacket that covers them. The rule -- a zone is hidden where a higher layer lists it, unless the chunk's `VisibleLayers` keeps that layer -- holds on shirt, trousers, boots and jacket on both bodies: no skin through cloth, and skin kept at the cuffs. See "Phase 0, as run". |
 | 1 -- catalogue | done | 1,970 clothing items in eight slots, both catalogues, 100% field agreement over 4,416 items in both directions. 261 clothing colourway families, all but six (unnamed, as for armour) sharing a name prefix. No armour item's set, family or name moved. See "Phase 1, as run". |
 | 2 -- outfit model | done | One outfit on the body and the other kept aside; `HiddenParts` and the zone rule applied generically. A full clothing outfit on both bodies with no skin through cloth; armour scores identical to before on every harness measure. The clothing outfit costs 133 MB and 136 draw calls against the armour loadout's 372 MB and 1,765. See "Phase 2, as run". |
+| 3 -- UI | done | Armour / clothing / gear; picking an outfit puts it on, the other aside. Clothing slots in the game's order, equip-set by line, clothing in share links with old links unchanged -- all driven through the real UI headless. See "Phase 3, as run". |
+| 4 -- head items | done | Eyewear catalogued (15, both catalogues); hat and glasses on both heads in either outfit, hidden under the helmets that hide their ports; the hair swaps to the record's `hatHair` cut under a cap. See "Phase 4, as run". |
 
 ## What the data says
 
@@ -289,6 +291,33 @@ so "Frontier 05 Pants" and "Frontier 11 Pants" title as "Frontier Pants".
 say which is on; clothing ids ride in the first segment in slot order, and
 restoring one switches the outfit. An armour link reads exactly as before.
 What is aside is not shared -- a link is what is on the body.
+
+## Phase 4, as run
+
+**Eyewear is a head slot beside the hat.** `Char_Accessory_Eyes` -- 15
+glasses, goggles and a monocle under `head/npc/eyes/accessories/`, each with a
+worn mesh per body -- maps to `eyewear` in both catalogues, 100% both ways over
+4,431 items. Head items belong to neither outfit in the engine: they stay on
+through a switch, and the listing offers them under armour too, since the game
+allows a hat or glasses with armour wherever no helmet covers them. A helmet
+hides the hat on all 683 records and the eyewear on 355, and 21 hats hide the
+eyewear; all of it is the generic `hidden` rule. Checked on both bodies: cap
+and aviators, beanie, then the ADP-mk4 Big Boss helmet over them, which hides
+both.
+
+**The hair under a hat is the record's, not a guess.** A cap left the hair
+drawn and the bun came out through its crown. The hair record answers it:
+`hair_31`'s geometry tree has children tagged `hatHair` (`m_hair_31_casual`,
+the bun let down) and `hatHair_mask`, and a hat's `AttachDef.Tags` carries a
+directive that adds one to the character -- `$hatHair+` on 80 of the 135 hats
+that leave the hair drawn, `$hatHair_mask+` on six. The engine collects the
+`$tag+` directives of everything drawn and the figure shows the tagged hair
+variant, loading it the first time one is asked for. The other 49 hats ask
+for nothing and keep the full hair, as they do in the game.
+
+**Hair beyond the default is not done.** The figure keeps `hair_31`; the other
+77 styles are there to add as a picker if wanted, and the variant rule above
+applies to them unchanged.
 
 ## Phases
 

@@ -26,11 +26,11 @@ import {
   type CatalogueItem,
   type ClothingSlot,
   type GearSlot,
-  type Slot,
   type WearSlot,
 } from '../archive/catalogue';
 import { portLabel, portServes, portShort } from '../gear/ports';
 import { Kitbasher as Engine, type KitbasherState } from '../three/kitbasher';
+import { HEAD_SLOTS } from '../three/outfit';
 import type { Tokens } from '../theme';
 import { QUALITIES, Viewer, type Quality, type ViewerHandle } from './Viewer';
 import './kitbasher.css';
@@ -127,7 +127,7 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
   const engine = useRef<Engine | null>(null);
   const [state, setState] = useState<KitbasherState | null>(null);
   const [mode, setMode] = useState<Mode>('armour');
-  const [armourSlot, setArmourSlot] = useState<Slot>('torso');
+  const [armourSlot, setArmourSlot] = useState<WearSlot>('torso');
   const [clothingSlot, setClothingSlot] = useState<ClothingSlot>('shirt');
   const [gearSlot, setGearSlot] = useState<GearSlot>('primary');
   // The holster the next gear pick goes into; null picks the first free one.
@@ -293,8 +293,10 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
     : catalogue.bySlot.get(name as WearSlot)?.length) ?? 0;
   // A clothing slot this build has nothing for is left out rather than shown
   // empty: every torso accessory in 4.10 is a `<= PLACEHOLDER =>` record.
+  // The head's slots are offered with armour too: a hat or glasses go on with
+  // it wherever no helmet covers them, as in the game.
   const tabs: readonly string[] = mode === 'armour'
-    ? SLOTS
+    ? [...SLOTS, ...HEAD_SLOTS.filter((name) => countOf(name) > 0)]
     : mode === 'clothing' ? CLOTHING_SLOTS.filter((name) => countOf(name) > 0) : GEAR_SLOTS;
   const searchable = mode === 'gear'
     ? catalogue.gear.length
@@ -346,7 +348,7 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
                 } else if (mode === 'clothing') {
                   setClothingSlot(name as ClothingSlot);
                 } else {
-                  setArmourSlot(name as Slot);
+                  setArmourSlot(name as WearSlot);
                 }
               }}
             >

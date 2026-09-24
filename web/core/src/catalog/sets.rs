@@ -27,13 +27,13 @@ const SLOT_WORDS: [&str; 13] = [
 /// Clothing's slot words: the garment. "Toughlife Boots Dark Red" is the
 /// Toughlife line. Read only for clothing slots, so no armour key moves -- the
 /// same list, in the same order, as the Python's `_CLOTHING_NAME_WORD`.
-const CLOTHING_WORDS: [&str; 52] = [
+const CLOTHING_WORDS: [&str; 54] = [
     "jacket", "coat", "duster", "vest", "waistcoat", "harness", "apron", "collar", "jumpsuit",
     "coverall", "coveralls", "overalls", "armor", "dress", "gown", "robe", "sweater", "hoodie",
     "top", "tank", "shirt", "t-shirt", "pants", "trousers", "jeans", "shorts", "waders",
     "skirt", "leggings", "boots", "boot", "shoes", "pumps", "slippers", "sandals", "sneakers",
     "gloves", "glove", "hat", "tophat", "cap", "beanie", "mask", "balaclava", "bandana",
-    "goggles", "cover", "gear", "hood", "scarf", "wrap", "apparatus",
+    "goggles", "cover", "gear", "hood", "scarf", "wrap", "apparatus", "glasses", "monocle",
 ];
 
 /// Tags are one space-separated string, not a list of references.

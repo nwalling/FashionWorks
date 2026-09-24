@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { CatalogueItem, WearSlot } from '../src/archive/catalogue';
-import { layerOf, outfitFor, outfitSlots, viewOf } from '../src/three/outfit';
+import { addedTags, layerOf, outfitFor, outfitSlots, viewOf } from '../src/three/outfit';
 
 function item(slot: WearSlot, partial: Partial<CatalogueItem> = {}): CatalogueItem {
   return {
@@ -66,6 +66,25 @@ describe('what an outfit hides', () => {
   it('hides a hat under a helmet', () => {
     const view = viewOf(worn(item('hat'), item('helmet', { hidden: ['Hat_ItemPort'] })));
     expect(view.hiddenSlots.has('hat')).toBe(true);
+  });
+});
+
+describe('the hair under a hat', () => {
+  it('reads the tags a piece adds from its directives', () => {
+    expect(addedTags(item('hat', { tags: ['cbd_hat', 'Set_03', '$hatHair+'] }))).toEqual(['hatHair']);
+    expect(addedTags(item('backpack', { tags: ['$$Pack++', '$environment'] }))).toEqual(['Pack']);
+  });
+
+  it('asks for the variant a drawn hat names, the mask cut first', () => {
+    expect(viewOf(worn(item('hat', { tags: ['$hatHair+'] }))).hairTag).toBe('hatHair');
+    expect(viewOf(worn(item('hat', { tags: ['$hatHair+', '$hatHair_mask+'] }))).hairTag).toBe('hatHair_mask');
+    expect(viewOf(worn(item('hat'))).hairTag).toBeUndefined();
+  });
+
+  it('asks for nothing from a hat a helmet hides', () => {
+    const view = viewOf(worn(item('hat', { tags: ['$hatHair+'] }), item('helmet', { hidden: ['Hat_ItemPort'] })));
+    expect(view.hairTag).toBeUndefined();
+    expect(view.hideHair).toBe(true);
   });
 });
 

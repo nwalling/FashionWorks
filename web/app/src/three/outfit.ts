@@ -36,6 +36,7 @@ export const SLOT_PORT: Readonly<Record<WearSlot, string>> = {
   // same name (`grin_refinery_apron`).
   backpack: 'backpack',
   hat: 'Hat_ItemPort',
+  eyewear: 'Eye_Accessories_ItemPort',
   shirt: 'Clothing_Torso_0',
   jacket: 'Clothing_Torso_1',
   accessory: 'Clothing_Torso2',
@@ -67,10 +68,12 @@ const SLOT_LAYER: Readonly<Record<WearSlot, number>> = {
   legs: 4,
   backpack: 4,
   hat: 4,
+  eyewear: 4,
 };
 
-/** Slots worn whichever outfit is on: the head's. */
-export const HEAD_SLOTS: readonly WearSlot[] = ['hat'];
+/** Slots worn whichever outfit is on: the head's. A helmet hides the hat on all
+ * 683 records and the eyewear on 355; 21 hats hide the eyewear too. */
+export const HEAD_SLOTS: readonly WearSlot[] = ['hat', 'eyewear'];
 
 /** The slots that belong to one outfit and come off when the other goes on. */
 export function outfitSlots(outfit: Outfit): readonly WearSlot[] {
@@ -110,6 +113,21 @@ export interface OutfitView {
   readonly chunks: readonly ZoneChunk[];
   readonly hideHair: boolean;
   readonly hideHead: boolean;
+  /** The hair variant a drawn piece asks for, if any: `hatHair` for a cap. */
+  readonly hairTag?: string;
+}
+
+/** Hair variants, most specific first: a hat that asks for both wants the
+ * one cut for a mask. */
+export const HAIR_TAGS = ['hatHair_mask', 'hatHair'] as const;
+
+/** The geometry tags a piece adds while worn, from its `$tag+` directives:
+ * `$hatHair+` on a cap, `$$Pack++` on a backpack. */
+export function addedTags(item: CatalogueItem): string[] {
+  return (item.tags ?? []).flatMap((token) => {
+    const found = /^\$+([^$+]+)\++$/.exec(token);
+    return found ? [found[1]!] : [];
+  });
 }
 
 export function viewOf(wearing: ReadonlyMap<WearSlot, CatalogueItem>): OutfitView {
@@ -130,5 +148,12 @@ export function viewOf(wearing: ReadonlyMap<WearSlot, CatalogueItem>): OutfitVie
     // hairstyle pokes through every shell.
     hideHair: portHidden(HAIR_PORT, hidden) || wearing.has('helmet'),
     hideHead: portHidden(HEAD_PORT, hidden),
+    hairTag: hairTagOf(
+      [...wearing].filter(([slot]) => !hiddenSlots.has(slot)).flatMap(([, item]) => addedTags(item)),
+    ),
   };
+}
+
+function hairTagOf(tags: readonly string[]): string | undefined {
+  return HAIR_TAGS.find((tag) => tags.includes(tag));
 }

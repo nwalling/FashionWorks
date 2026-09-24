@@ -684,7 +684,7 @@ _CLOTHING_NAME_WORD = re.compile(
     r"tank|shirt|t-shirt|pants|trousers|jeans|shorts|waders|skirt|leggings|"
     r"boots|boot|shoes|pumps|slippers|sandals|sneakers|gloves|glove|hat|"
     r"tophat|cap|beanie|mask|balaclava|bandana|goggles|cover|gear|hood|scarf|"
-    r"wrap|apparatus"
+    r"wrap|apparatus|glasses|monocle"
     r")$",
     re.IGNORECASE,
 )

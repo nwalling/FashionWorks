@@ -246,6 +246,7 @@ def test_clothing_types_map_to_clothing_slots() -> None:
         "Char_Clothing_Legs": "trousers",
         "Char_Clothing_Feet": "footwear",
         "Char_Clothing_Backpack": "pack",
+        "Char_Accessory_Eyes": "eyewear",
     }
     for attach_type, slot in cases.items():
         assert catalog.slot_for(_clothing(attach_type, "x_01_01_01")) == slot

@@ -16,7 +16,7 @@ SCHEMA_VERSION = 5
 
 Slot = Literal[
     "helmet", "torso", "arms", "legs", "backpack", "undersuit",
-    "hat", "shirt", "jacket", "accessory", "gloves", "trousers", "footwear", "pack",
+    "hat", "eyewear", "shirt", "jacket", "accessory", "gloves", "trousers", "footwear", "pack",
 ]
 SLOTS: tuple[str, ...] = ("helmet", "torso", "arms", "legs", "backpack", "undersuit")
 
@@ -24,7 +24,7 @@ SLOTS: tuple[str, ...] = ("helmet", "torso", "arms", "legs", "backpack", "unders
 # outfits are exclusive in the game -- 215 of 222 undersuits hide every clothing
 # port -- so a slot belongs to exactly one of them, and the slot says which.
 CLOTHING_SLOTS: tuple[str, ...] = (
-    "hat", "shirt", "jacket", "accessory", "gloves", "trousers", "footwear", "pack",
+    "hat", "eyewear", "shirt", "jacket", "accessory", "gloves", "trousers", "footwear", "pack",
 )
 ALL_SLOTS: tuple[str, ...] = SLOTS + CLOTHING_SLOTS
 

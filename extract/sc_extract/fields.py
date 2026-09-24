@@ -226,6 +226,9 @@ CLOTHING_ATTACH_TYPES = {
     "Char_Clothing_Legs": "trousers",
     "Char_Clothing_Feet": "footwear",
     "Char_Clothing_Backpack": "pack",
+    # A head item, like the hat: 15 glasses, goggles and a monocle under
+    # `head/npc/eyes/accessories/`, on the head's `Eye_Accessories_ItemPort`.
+    "Char_Accessory_Eyes": "eyewear",
 }
 
 # Fallback slot inference when AttachDef.Type is absent or unrecognised: match

@@ -54,7 +54,7 @@ def test_counts_cover_every_slot() -> None:
     counts = sample().counts_by_slot()
     assert counts["helmet"] == 1
     assert counts["undersuit"] == 0
-    assert len(counts) == 14, "six armour slots and eight clothing"
+    assert len(counts) == 15, "six armour slots, eight clothing and eyewear"
 
 
 def test_generated_at_is_filled() -> None:

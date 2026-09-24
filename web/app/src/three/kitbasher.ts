@@ -134,6 +134,13 @@ export const DONORS = SKELETONS.male.donors;
  * over a scalp cap, coloured from the material's melanin and dye
  * (`materials.hairColour`). It hides under any helmet, which it would
  * otherwise poke through. The teeth are left out; the mouth is closed.
+ *
+ * **Under a hat the hair changes, as the record says it does.** `hair_31`'s
+ * geometry tree carries children tagged `hatHair` (`_casual`, the bun let down)
+ * and `hatHair_mask`, and a hat's tags ask for one: 80 of the 135 hats that
+ * leave the hair drawn carry `$hatHair+`, six `$hatHair_mask+`. Without the
+ * swap the bun came out through the crown of every cap. A tagged part loads
+ * the first time something asks for it (CLOTHING.md Phase 4).
  */
 const HEADS = 'Objects/Characters/Human/heads';
 type FigurePart = 'body' | 'head' | 'hair';
@@ -146,6 +153,9 @@ interface FigureSpec {
   /** The largest mip its textures decode at. The face is what people look
    * at; the body is mostly under armour and the eyes are a few pixels. */
   readonly textureSize: number;
+  /** A variant drawn in place of its part's plain one while something worn
+   * adds this geometry tag -- `$hatHair+` on a cap. */
+  readonly tag?: string;
 }
 /** The body's skin against the head's, measured at the neck.
  *
@@ -164,12 +174,16 @@ export const FIGURE: Record<Body, readonly FigureSpec[]> = {
     { part: 'head', mesh: `${HEADS}/male/pu/protos_human_male_face_t1_pu/protos_human_male_face_t1_pu_head.skin`, material: `${HEADS}/male/pu/protos_human_male_face_t1_pu/protos_human_male_face_t1_pu_head_material.mtl`, textureSize: 1024 },
     { part: 'head', mesh: `${HEADS}/male/pu/protos_human_male_face_t1_pu/protos_human_male_face_t1_pu_eyes.skin`, material: `${HEADS}/male/pu/protos_human_male_face_t1_pu/protos_human_male_face_t1_pu_eyes_material.mtl`, textureSize: 256 },
     { part: 'hair', mesh: `${HEADS}/shared/hair_v2/sc/male/m_hair_31.skin`, material: `${HEADS}/shared/hair_v2/sc/male/m_hair_31.mtl`, textureSize: 1024 },
+    { part: 'hair', tag: 'hatHair', mesh: `${HEADS}/shared/hair_v2/sc/male/m_hair_31_casual.skin`, material: `${HEADS}/shared/hair_v2/sc/male/m_hair_31.mtl`, textureSize: 1024 },
+    { part: 'hair', tag: 'hatHair_mask', mesh: `${HEADS}/shared/hair_v2/sc/male/m_hair_31_mask.skin`, material: `${HEADS}/shared/hair_v2/sc/male/m_hair_31.mtl`, textureSize: 1024 },
   ],
   female: [
     { part: 'body', mesh: 'Objects/Characters/Human/female_v2/body/f_body.skin', material: 'Objects/Characters/Human/female_v2/body/f_body_cau.mtl', skinMatch: FEMALE_SKIN_MATCH, textureSize: 512 },
     { part: 'head', mesh: `${HEADS}/female/pu/protos_human_female_face_t1_pu/protos_human_female_face_t1_pu_head.skin`, material: `${HEADS}/female/pu/protos_human_female_face_t1_pu/protos_human_female_face_t1_pu_head_material.mtl`, textureSize: 1024 },
     { part: 'head', mesh: `${HEADS}/female/pu/protos_human_female_face_t1_pu/protos_human_female_face_t1_pu_eyes.skin`, material: `${HEADS}/female/pu/protos_human_female_face_t1_pu/protos_human_female_face_t1_pu_eyes_material.mtl`, textureSize: 256 },
     { part: 'hair', mesh: `${HEADS}/shared/hair_v2/sc/female/f_hair_31.skin`, material: `${HEADS}/shared/hair_v2/sc/female/f_hair_31.mtl`, textureSize: 1024 },
+    { part: 'hair', tag: 'hatHair', mesh: `${HEADS}/shared/hair_v2/sc/female/f_hair_31_casual.skin`, material: `${HEADS}/shared/hair_v2/sc/female/f_hair_31.mtl`, textureSize: 1024 },
+    { part: 'hair', tag: 'hatHair_mask', mesh: `${HEADS}/shared/hair_v2/sc/female/f_hair_31_mask.skin`, material: `${HEADS}/shared/hair_v2/sc/female/f_hair_31.mtl`, textureSize: 1024 },
   ],
 };
 
@@ -1108,7 +1122,10 @@ export class Kitbasher {
   }
 
   /** The figure's parts for the current body, once built. */
-  private figure: { body: Body; parts: Array<{ loaded: Loaded; part: FigurePart }> } | null = null;
+  private figure: { body: Body; parts: Array<{ loaded: Loaded; part: FigurePart; tag?: string }> } | null = null;
+
+  /** Tagged figure parts on their way in, so each loads once. */
+  private readonly figureLoading = new Set<string>();
 
   private showFigure = true;
 
@@ -1129,8 +1146,9 @@ export class Kitbasher {
     const body = this.state.body;
     if (this.figure?.body === body) return;
     this.dropFigure();
-    const parts: Array<{ loaded: Loaded; part: FigurePart }> = [];
-    for (const spec of FIGURE[body]) {
+    const parts: Array<{ loaded: Loaded; part: FigurePart; tag?: string }> = [];
+    // Tagged variants wait until something asks for them.
+    for (const spec of FIGURE[body].filter((f) => !f.tag)) {
       try {
         parts.push({ loaded: await this.loadFigurePart(spec), part: spec.part });
       } catch {
@@ -1217,13 +1235,46 @@ export class Kitbasher {
       const item = this.wearing.get(slot);
       if (drawn && item) zoned(loaded.objects, layerOf(item));
     }
-    for (const { loaded, part } of this.figure?.parts ?? []) {
+    // The hair variant something worn asks for, once it is loaded; until then
+    // the plain hair stands in rather than none at all.
+    const parts = this.figure?.parts ?? [];
+    const asked = view.hairTag;
+    const hairTag = asked && parts.some((p) => p.tag === asked) ? asked : undefined;
+    if (asked && !hairTag) void this.loadFigureVariant(asked);
+    for (const { loaded, part, tag } of parts) {
       const hidden = (part === 'body' && this.undersuitCovers)
-        || (part === 'hair' && view.hideHair)
+        || (part === 'hair' && (view.hideHair || tag !== hairTag))
         || (part === 'head' && view.hideHead);
       const visible = this.showFigure && !hidden;
       for (const object of loaded.objects) object.visible = visible;
       if (visible) zoned(loaded.objects, 0);
+    }
+  }
+
+  /** Load the figure's part for a geometry tag -- the hair under a hat -- and
+   * show it once it is in. */
+  private async loadFigureVariant(tag: string): Promise<void> {
+    const figure = this.figure;
+    const rig = this.rig;
+    const spec = figure && FIGURE[figure.body].find((f) => f.tag === tag);
+    const key = `${figure?.body}:${tag}`;
+    if (!figure || !rig || !spec || this.figureLoading.has(key)) return;
+    this.figureLoading.add(key);
+    try {
+      const loaded = await this.loadFigurePart(spec);
+      if (this.disposed || this.figure !== figure || this.rig !== rig) return;
+      for (const object of loaded.objects) {
+        object.visible = false;
+        this.view.scene.add(object);
+        if (object instanceof SkinnedMesh) object.bind(rig.skeleton, object.matrixWorld);
+      }
+      figure.parts.push({ loaded, part: spec.part, tag });
+      this.refineLater(loaded);
+      this.applyOutfit();
+    } catch {
+      // No variant: the plain part goes on standing in.
+    } finally {
+      this.figureLoading.delete(key);
     }
   }
 
