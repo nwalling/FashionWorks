@@ -58,10 +58,18 @@ export const PENUMBRA_PER_METRE = 0.05;
 const SEARCH = 0.14;
 
 /** How the floor reads against a theme, or over a backdrop. */
-export function groundLook(tokens: Tokens, light: boolean, backdrop: boolean): GroundLook {
+export function groundLook(tokens: Tokens, light: boolean, backdrop: boolean, linear = false): GroundLook {
+  // Drawn straight to the canvas the floor blends in sRGB, which is where
+  // these alphas were set. Through the post chain it blends in linear light,
+  // where the same alpha reads far weaker for a shadow and far stronger for a
+  // lift of a near-white on a near-black page, so the chain uses the linear
+  // equivalents: 1 - (1 - a)^2.2 for the shadows, and the pool scaled until the
+  // floor measured what it did before. A backdrop's shadow is composited by
+  // the browser over the photograph, in sRGB either way.
+  const toLinear = (a: number) => (linear ? 1 - (1 - a) ** 2.2 : a);
   if (backdrop) return { lit: 0, litAlpha: 0, shadow: 0, shadowAlpha: SHADOW_DEPTH };
-  if (light) return { lit: 0, litAlpha: 0, shadow: 0, shadowAlpha: SHADOW_DEPTH * 0.8 };
-  return { lit: toHex(tokens['--sc-text']), litAlpha: 0.07, shadow: 0, shadowAlpha: SHADOW_DEPTH };
+  if (light) return { lit: 0, litAlpha: 0, shadow: 0, shadowAlpha: toLinear(SHADOW_DEPTH * 0.8) };
+  return { lit: toHex(tokens['--sc-text']), litAlpha: linear ? 0.022 : 0.07, shadow: 0, shadowAlpha: toLinear(SHADOW_DEPTH) };
 }
 
 /** How much a full shadow takes off the floor, from the lights themselves:

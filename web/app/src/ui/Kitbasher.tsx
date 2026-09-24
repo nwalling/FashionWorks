@@ -29,7 +29,7 @@ import {
 import { portLabel, portServes, portShort } from '../gear/ports';
 import { Kitbasher as Engine, type KitbasherState } from '../three/kitbasher';
 import type { Tokens } from '../theme';
-import { Viewer, type ViewerHandle } from './Viewer';
+import { QUALITIES, Viewer, type Quality, type ViewerHandle } from './Viewer';
 import './kitbasher.css';
 
 /** How many rows to draw before asking for a search term.
@@ -101,12 +101,14 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
   const [search, setSearch] = useState('');
   const [backdrop, setBackdrop] = useState<string | null>(null);
   const viewer = useRef<ViewerHandle | null>(null);
+  const [quality, setQuality] = useState<Quality | null>(null);
   const picker = useRef<HTMLInputElement>(null);
   const slot: Slot | GearSlot = mode === 'armour' ? armourSlot : gearSlot;
 
   // The engine is built once the scene exists, and torn down with the view.
   const onScene = useCallback((handle: ViewerHandle) => {
     viewer.current = handle;
+    setQuality(handle.quality());
     const built = new Engine(client, initialCatalogue, handle);
     const remembered = rememberedLighting();
     if (remembered) void built.setLighting(remembered);
@@ -320,6 +322,24 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
             </button>
           ))}
         </span>
+        {quality && (
+          <span className="fw-kit-group">
+            <span className="fw-kit-label">quality</span>
+            <select
+              className="fw-kit-select"
+              aria-label="Render quality"
+              title="Low draws straight to the screen; medium and high add ambient occlusion; the percentages draw more pixels than the display has"
+              value={quality}
+              onChange={(event) => {
+                const next = event.target.value as Quality;
+                viewer.current?.setQuality(next);
+                setQuality(next);
+              }}
+            >
+              {QUALITIES.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
+            </select>
+          </span>
+        )}
         {lighting.length > 0 && (
           <span className="fw-kit-group">
             <span className="fw-kit-label">light</span>

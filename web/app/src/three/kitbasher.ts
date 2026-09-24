@@ -947,7 +947,7 @@ export class Kitbasher {
     for (const payload of payloads) {
       if (socket) {
         const prop = payload as PropPayload;
-        const object = new Mesh(buildGeometry(prop, count).geometry, materials);
+        const object = new Mesh(drawnOnly(buildGeometry(prop, count).geometry, materials), materials);
         object.frustumCulled = false;
         shaded(object);
         if (prop.mount) {
@@ -956,7 +956,7 @@ export class Kitbasher {
         }
         objects.push(object);
       } else {
-        const object = new SkinnedMesh(buildGeometry(payload, count).geometry, materials);
+        const object = new SkinnedMesh(drawnOnly(buildGeometry(payload, count).geometry, materials), materials);
         object.frustumCulled = false;
         shaded(object);
         objects.push(object);
@@ -1355,7 +1355,7 @@ export class Kitbasher {
           name: '', shader: 'Illum', tintable: false, textures: {}, layers: [],
           glow: 0, opacity: 1, alphaTest: 0, shininess: 0.45,
         }, { byPath })];
-      const mesh = new Mesh(buildGeometry(part.mesh, count).geometry, materials);
+      const mesh = new Mesh(drawnOnly(buildGeometry(part.mesh, count).geometry, materials), materials);
       mesh.name = part.name;
       mesh.frustumCulled = false;
       shaded(mesh);
@@ -1651,6 +1651,16 @@ function tally(names: readonly string[]): string[] {
   const counts = new Map<string, number>();
   for (const name of names) counts.set(name, (counts.get(name) ?? 0) + 1);
   return [...counts].map(([name, n]) => (n > 1 ? `${n} × ${name}` : name));
+}
+
+/** Drop the draw groups whose material is never drawn -- NoDraw proxies, HUD
+ * planes. `visible: false` on a material hides it from the colour pass, but
+ * any pass that swaps in its own material draws every group: ambient
+ * occlusion's normal pass did, and shaded invisible collision shells into the
+ * armour. Gone from the geometry, no pass can draw them. */
+function drawnOnly<G extends { groups: Array<{ materialIndex?: number }> }>(geometry: G, materials: Material[]): G {
+  geometry.groups = geometry.groups.filter((g) => materials[g.materialIndex ?? 0]?.visible !== false);
+  return geometry;
 }
 
 /** Lowest world height of the foot and toe bones.

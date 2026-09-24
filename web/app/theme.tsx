@@ -40,7 +40,12 @@ function canvasPixel(): [number, number, number] | null {
   if (!gl) return null;
   const pixel = new Uint8Array(4);
   gl.readPixels(1, 1, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
-  return [pixel[0]!, pixel[1]!, pixel[2]!];
+  if (pixel[3]! > 0) return [pixel[0]!, pixel[1]!, pixel[2]!];
+  // With a post chain the canvas is transparent and the theme colour is the
+  // view element's own CSS background: what shows at the corner is that.
+  const view = canvas?.parentElement;
+  const css = view ? getComputedStyle(view).backgroundColor.match(/\d+(\.\d+)?/g) : null;
+  return css ? [Number(css[0]), Number(css[1]), Number(css[2])] : null;
 }
 
 function Harness() {

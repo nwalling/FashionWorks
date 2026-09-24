@@ -16,16 +16,22 @@ import {
   Color,
   DirectionalLight,
   GridHelper,
+  HalfFloatType,
   PCFSoftShadowMap,
   PerspectiveCamera,
   Scene,
   Vector3,
   WebGLRenderer,
+  WebGLRenderTarget,
 } from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 
 import { createGround, groundLook, type Ground } from '../three/ground';
-import { applyTheme, isLight } from '../three/sceneTheme';
+import { applyTheme, isLight, untoneMapped } from '../three/sceneTheme';
 import { readTokens, type Tokens } from '../theme';
 
 /** What a caller gets once the scene exists. */
@@ -36,6 +42,11 @@ export interface ViewerHandle {
   readonly controls: OrbitControls;
   /** The lights a lighting preset drives. */
   readonly lights: { readonly key: DirectionalLight; readonly rim: DirectionalLight; readonly fill: AmbientLight };
+  /** Render one frame through whatever pipeline the quality setting runs. */
+  render(): void;
+  /** The quality setting in use, and a way to change it. */
+  readonly quality: () => Quality;
+  setQuality(quality: Quality): void;
   /** A photograph behind the character, or none.
    *
    * Cropped to cover rather than stretched. **Lighting still comes from the
@@ -43,6 +54,53 @@ export interface ViewerHandle {
    * so using it to light the armour would be wrong. The grid goes away while a
    * backdrop is up, because it reads as floating debris over a photo. */
   setBackdrop(url: string | null): void;
+}
+
+/** RENDERING.md Phase 2: how much the renderer does per pixel.
+ *
+ * - **low** draws straight to the canvas with the context's own 4x
+ *   multisampling, as the viewer always did;
+ * - **medium** adds a post chain: the scene into a multisampled half-float
+ *   target, ground-truth ambient occlusion (contact shading under straps and
+ *   plate edges), then tone mapping and colour space in `OutputPass`;
+ * - **high** is medium at the display's full pixel ratio, and the two scaled
+ *   settings draw 1.5x and 2x the display's pixels besides.
+ *
+ * With the post chain the canvas is transparent and the theme colour is the
+ * element's CSS background: `OutputPass` tone-maps and exposes the whole
+ * image, and a page colour pushed through the armour's exposure no longer
+ * matched the page around it. */
+export type Quality = 'low' | 'medium' | 'high' | 'high-150' | 'high-200';
+
+export const QUALITIES: ReadonlyArray<{ readonly id: Quality; readonly label: string }> = [
+  { id: 'low', label: 'low' },
+  { id: 'medium', label: 'medium' },
+  { id: 'high', label: 'high' },
+  { id: 'high-150', label: 'high 150%' },
+  { id: 'high-200', label: 'high 200%' },
+];
+
+/** A first guess from the GPU's name: software renderers get low, integrated
+ * Intel and mobile parts medium, everything else high. A visitor's own choice
+ * replaces it and is remembered. */
+export function detectQuality(renderer: WebGLRenderer): Quality {
+  const gl = renderer.getContext();
+  const info = gl.getExtension('WEBGL_debug_renderer_info');
+  const name = String(info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+  if (/swiftshader|llvmpipe|software/i.test(name)) return 'low';
+  if (/intel|mali|adreno|powervr|apple gpu/i.test(name)) return 'medium';
+  return 'high';
+}
+
+function pixelRatioFor(quality: Quality): number {
+  const dpr = typeof devicePixelRatio === 'number' ? devicePixelRatio : 1;
+  switch (quality) {
+    case 'low': return 1;
+    case 'medium': return Math.min(dpr, 1.5);
+    case 'high': return Math.min(dpr, 2);
+    case 'high-150': return Math.min(dpr * 1.5, 3);
+    default: return Math.min(dpr * 2, 3);
+  }
 }
 
 /** Where the key light comes from -- up, behind and to the right of a figure
@@ -55,6 +113,25 @@ const KEY_DISTANCE = 6;
 const SHADOW_REACH = 1.2;
 const SHADOW_DEPTH = 5;
 const SHADOW_MAP = 2048;
+
+const QUALITY_KEY = 'fashionworks:quality';
+
+function rememberedQuality(): Quality | null {
+  try {
+    const saved = localStorage.getItem(QUALITY_KEY);
+    return QUALITIES.some((q) => q.id === saved) ? (saved as Quality) : null;
+  } catch {
+    return null;
+  }
+}
+
+function rememberQuality(quality: Quality): void {
+  try {
+    localStorage.setItem(QUALITY_KEY, quality);
+  } catch {
+    // Blocked storage: the setting lasts for this visit.
+  }
+}
 
 export interface ViewerProps {
   readonly tokens: Tokens;
@@ -76,6 +153,8 @@ export function Viewer({ tokens, onScene, className }: ViewerProps): JSX.Element
     fill: AmbientLight;
     ground: Ground;
     backdrop: boolean;
+    /** Re-apply the page colour, grid and floor for the current theme. */
+    sync: () => void;
   } | null>(null);
 
   // Set-up runs once. Tokens are applied in a second effect so a theme change
@@ -91,7 +170,8 @@ export function Viewer({ tokens, onScene, className }: ViewerProps): JSX.Element
     // compositing, which is how a check confirms the scene followed a theme
     // change -- without it `readPixels` outside the draw call returns nothing.
     const renderer = new WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, alpha: true });
-    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    let quality: Quality = rememberedQuality() ?? detectQuality(renderer);
+    renderer.setPixelRatio(pixelRatioFor(quality));
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = PCFSoftShadowMap;
     element.appendChild(renderer.domElement);
@@ -135,27 +215,122 @@ export function Viewer({ tokens, onScene, className }: ViewerProps): JSX.Element
     const fill = new AmbientLight(0xffffff, 1.3);
     scene.add(fill);
 
+    // The post chain, when the quality setting wants one.
+    let chain: { composer: EffectComposer; gtao: GTAOPass } | null = null;
+    const buildChain = () => {
+      const width = Math.max(1, element.clientWidth);
+      const height = Math.max(1, element.clientHeight);
+      const target = new WebGLRenderTarget(width, height, { type: HalfFloatType, samples: 4 });
+      const composer = new EffectComposer(renderer, target);
+      composer.setPixelRatio(renderer.getPixelRatio());
+      composer.setSize(width, height);
+      composer.addPass(new RenderPass(scene, camera));
+      const gtao = new GTAOPass(scene, camera, width, height);
+      // Metres: the figure is 1.8 m, and occlusion wants to reach a strap's
+      // depth under a plate, not the neighbouring limb.
+      gtao.updateGtaoMaterial({ radius: 0.12, distanceExponent: 1, thickness: 1, scale: 1, samples: 16 });
+      gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 16 });
+      gtao.blendIntensity = 0.9;
+      composer.addPass(gtao);
+      composer.addPass(new OutputPass());
+      return { composer, gtao };
+    };
+    const dropChain = () => {
+      if (!chain) return;
+      chain.gtao.dispose();
+      chain.composer.dispose();
+      chain = null;
+    };
+
     const resize = () => {
       const { clientWidth, clientHeight } = element;
       if (!clientWidth || !clientHeight) return;
       renderer.setSize(clientWidth, clientHeight, false);
       camera.aspect = clientWidth / clientHeight;
       camera.updateProjectionMatrix();
+      if (chain) {
+        chain.composer.setPixelRatio(renderer.getPixelRatio());
+        chain.composer.setSize(clientWidth, clientHeight);
+      }
     };
     resize();
     const observer = new ResizeObserver(resize);
     observer.observe(element);
 
+    // What the theme asked for, kept so the chain can compensate for its own
+    // exposure and tone curve every frame -- a preset can change either.
+    const page = new Color();
+    const gridBase = new Color();
+    const scratch = new Color();
+    // GridHelper's minor lines carry 0x888888 as a vertex colour.
+    const GRID_MINOR = new Color(0x888888).r;
+    const gridMaterial = () => (Array.isArray(grid.material) ? grid.material[0] : grid.material) as { color: Color };
+    const remember = () => {
+      if (scene.background && (scene.background as Color).isColor) page.copy(scene.background as Color);
+      gridBase.copy(gridMaterial().color);
+    };
+    const compensate = () => {
+      if (!chain || state.backdrop || !scene.background) return;
+      untoneMapped(page, renderer.toneMappingExposure, renderer.toneMapping, scene.background as Color);
+      scratch.copy(gridBase).multiplyScalar(GRID_MINOR);
+      untoneMapped(scratch, renderer.toneMappingExposure, renderer.toneMapping, scratch);
+      gridMaterial().color.copy(scratch).multiplyScalar(1 / GRID_MINOR);
+    };
+    const render = () => {
+      if (chain) {
+        compensate();
+        chain.composer.render();
+      } else {
+        renderer.render(scene, camera);
+      }
+    };
     let frame = 0;
     const tick = () => {
       frame = requestAnimationFrame(tick);
       controls.update();
-      renderer.render(scene, camera);
+      render();
     };
-    tick();
 
-    const state = { scene, renderer, grid, fill, ground, backdrop: false };
+    const state = { scene, renderer, grid, fill, ground, backdrop: false, sync: () => {} };
     live.current = state;
+
+    /** The canvas paints the theme colour itself only when nothing tone-maps
+     * the image after it; otherwise it is transparent over the element's
+     * CSS background, which is the theme colour. */
+    /** The canvas paints the page colour itself, opaque, except behind a
+     * backdrop photograph. Transparent over a CSS colour was tried for the
+     * post chain and failed twice: the panel colour showed through, and the
+     * output pass sRGB-encodes premultiplied colour, which brightened every
+     * half-covered pixel of the floor until the grid drowned. Opaque, with
+     * the page colour run backwards through the tone curve, is exact. */
+    const syncBackground = () => {
+      element.style.backgroundColor = 'var(--sc-dark)';
+      const tokens = readTokens();
+      if (state.backdrop) {
+        scene.background = null;
+        renderer.setClearAlpha(0);
+      } else {
+        scene.background = new Color(0x000000);
+        renderer.setClearAlpha(1);
+        applyTheme({ scene, renderer, grid }, tokens);
+      }
+      remember();
+      ground.setLook(groundLook(tokens, isLight(tokens), state.backdrop, Boolean(chain)));
+    };
+
+    state.sync = syncBackground;
+
+    const setQuality = (next: Quality) => {
+      quality = next;
+      renderer.setPixelRatio(pixelRatioFor(next));
+      renderer.shadowMap.needsUpdate = true;
+      if (next === 'low') dropChain();
+      else if (!chain) chain = buildChain();
+      resize();
+      syncBackground();
+    };
+    setQuality(quality);
+    tick();
 
     const setBackdrop = (url: string | null) => {
       state.backdrop = Boolean(url);
@@ -170,31 +345,34 @@ export function Viewer({ tokens, onScene, className }: ViewerProps): JSX.Element
         element.style.backgroundRepeat = 'no-repeat';
         element.classList.add('fw-has-backdrop');
         // The canvas has to stop painting the theme colour over the photo.
-        scene.background = null;
-        renderer.setClearAlpha(0);
+        syncBackground();
         grid.visible = false;
-        ground.setLook(groundLook(readTokens(), false, true));
       } else {
         element.style.backgroundImage = '';
         element.style.backgroundSize = '';
         element.style.backgroundPosition = '';
         element.style.backgroundRepeat = '';
         element.classList.remove('fw-has-backdrop');
-        scene.background = new Color(0x000000);
-        renderer.setClearAlpha(1);
         grid.visible = true;
-        const tokens = readTokens();
-        applyTheme({ scene, renderer, grid }, tokens);
-        ground.setLook(groundLook(tokens, isLight(tokens), false));
+        syncBackground();
       }
     };
 
-    latestOnScene.current?.({ scene, renderer, camera, controls, lights: { key, rim, fill }, setBackdrop });
+    latestOnScene.current?.({
+      scene, renderer, camera, controls, lights: { key, rim, fill }, setBackdrop,
+      render,
+      quality: () => quality,
+      setQuality: (next) => {
+        rememberQuality(next);
+        setQuality(next);
+      },
+    });
 
     return () => {
       cancelAnimationFrame(frame);
       observer.disconnect();
       controls.dispose();
+      dropChain();
       ground.dispose();
       renderer.dispose();
       renderer.domElement.remove();
@@ -206,19 +384,14 @@ export function Viewer({ tokens, onScene, className }: ViewerProps): JSX.Element
   useEffect(() => {
     const current = live.current;
     if (!current) return;
-    // With a backdrop up there is no scene background to tint; the grid is
-    // hidden too, so only the lighting balance still applies.
-    applyTheme(
-      { scene: current.scene, renderer: current.renderer, grid: current.backdrop ? undefined : current.grid },
-      tokens,
-    );
+    // Page colour, grid and floor, and what the post chain compensates from.
+    current.sync();
     // A light theme needs less ambient fill, or everything washes out; a dark
     // one needs more, or the armour reads as a silhouette. Decided from the
     // page colour rather than from the theme's name, which can change.
     // Scaled from whatever the lighting preset set as its base.
     current.fill.userData.themeScale = isLight(tokens) ? 0.65 : 1;
     current.fill.intensity = ((current.fill.userData.base as number | undefined) ?? 1.3) * current.fill.userData.themeScale;
-    current.ground.setLook(groundLook(tokens, isLight(tokens), current.backdrop));
   }, [tokens]);
 
   return <div ref={host} className={className} data-fashionworks-view="" />;

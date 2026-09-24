@@ -22,6 +22,7 @@ Built on the `rendering` branch, not merged or pushed.
 | --- | --- | --- |
 | 0 -- harness | done | `npm run harness -- <label> [--compare <old>]`; two runs agree on every scored figure, render time within 0.1 ms. Baseline below. Found and fixed an eviction bug on the way. |
 | 1 -- tone, probes, presets | done | Contrast 2.19 -> **2.88** (band 2.48-3.47); Corbel hue error 13.2 -> 3.9 degrees, Lynx 5.5 -> 3.3, its saturated share 7.7 -> 27.7 % (the blue specular now reads); Beacon 0.2 -> 2.5 (the one that moved away). Probe decode 24-43 ms. Render 6.4 -> 7.5 ms. Details under "Phase 1, as built". |
+| 2 -- AO, AA, quality | done | Post chain on medium/high: multisampled half-float target, GTAO, `OutputPass`. High: contrast 2.88 -> **2.95**, tactical median 26.7 -> 28.1 (in-game 29), 61 fps with the 23-item loadout, render 7.5 -> 11.2 ms, app 170 of 400 KB. Low is the old direct path, unchanged. Details under "Phase 2, as built". |
 
 ### Baseline (built package, 1600x1000, today's renderer)
 
@@ -97,6 +98,41 @@ palette entry A `#f6c000` (46.8), Beacon's BaseLayer3 tint (30.2), Lynx's
 palette specular `#0314fd` (235.6). The first cut used guesses and a
 peak-of-bins hue that flipped between neighbouring bins on a small exposure
 change; it is now the median.
+
+### Phase 2, as built
+
+`low / medium / high / high 150% / high 200%`, detected from the GPU's name
+(software low; Intel, Mali, Adreno, PowerVR and Apple's mobile GPUs medium;
+the rest high) and remembered per visitor. Medium and high render the scene
+into a 4x multisampled half-float target, run three's `GTAOPass` (radius 12 cm,
+blend 0.9) and finish in `OutputPass`; the scaled settings multiply the
+display's pixel ratio, capped at 3.
+
+**Invisible groups are dropped from the geometry at load.** GTAO draws its
+normals with one override material, which ignores a submaterial's
+`visible: false`, so NoDraw proxies and HUD planes would have shaded the armour
+they sit inside. Gone from `geometry.groups`, no pass can draw them.
+
+**The page colour now goes through the tone curve backwards.** `OutputPass`
+tone-maps and exposes the whole image, background and grid included, where the
+direct path never touched a clear colour. A transparent canvas over a CSS
+colour was tried first and failed twice: the kitbasher's panel colour showed
+through instead of the page's, and `OutputPass` sRGB-encodes premultiplied
+colour, which brightened every half-covered floor pixel until the grid lines
+vanished (floor row 29 -> 43, 10 line peaks -> 0). Opaque, with the page colour
+and the grid colour inverted through Neutral each frame (`untoneMapped`), the
+corner pixel is exact in both themes -- (10, 18, 25) dark, (244, 246, 248)
+light -- and the grid is back. Neutral is not identity in the darks: it
+subtracts a toe, which is why a plain divide by exposure would not have done.
+
+**The floor blends in linear light through the chain**, so its alphas are
+the linear equivalents of the sRGB ones it was tuned with, 1 - (1 - a)^2.2 for
+the shadow, the pool scaled until the floor measured what it did (26 against
+29 on the same row, the same ten grid lines).
+
+**The harness counts a whole frame.** three resets `renderer.info` per render
+call; a post chain makes several, so the first Phase 2 run reported one draw
+call and one triangle -- the final quad.
 
 ## Boundaries
 

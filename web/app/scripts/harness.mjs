@@ -46,6 +46,8 @@ const compareWith = args.includes('--compare') ? args[args.indexOf('--compare') 
 // The lighting preset every scene is scored under. `inventory` is the
 // reference; `classic` reproduces the renderer before Phase 1.
 const LIGHT = process.env.FW_HARNESS_LIGHT ?? 'inventory';
+// The render quality every scene is scored at; `low` is the pre-Phase-2 path.
+const QUALITY = process.env.FW_HARNESS_QUALITY ?? 'high';
 // Calibration: override a preset's numbers after it is applied, as JSON --
 // {"exposure":0.8,"environment":0.3,"key":2,"rim":0.4,"ambient":0.3}.
 const TWEAK = process.env.FW_HARNESS_TWEAK ? JSON.parse(process.env.FW_HARNESS_TWEAK) : null;
@@ -107,9 +109,9 @@ async function main() {
     await new Promise((r) => setTimeout(r, 500));
     window.__kit.exposed.engine.view.renderer.domElement.scrollIntoView({ block: 'start' });
   });
-  await page.evaluate(installHelpers, { light: LIGHT, tweak: TWEAK });
+  await page.evaluate(installHelpers, { light: LIGHT, tweak: TWEAK, quality: QUALITY });
 
-  const report = { label, url: URL_, light: LIGHT, at: new Date().toISOString(), viewport: VIEWPORT, scenes: {} };
+  const report = { label, url: URL_, light: LIGHT, quality: QUALITY, at: new Date().toISOString(), viewport: VIEWPORT, scenes: {} };
   const shot = async (name) => {
     const box = await page.evaluate(() => {
       const r = window.__kit.exposed.engine.view.renderer.domElement.getBoundingClientRect();
@@ -173,7 +175,7 @@ async function main() {
 }
 
 /** Runs in the page. Installs `window.__harness`. */
-function installHelpers({ light, tweak }) {
+function installHelpers({ light, tweak, quality }) {
   const kit = window.__kit;
   const engine = () => kit.exposed.engine;
   const frames = (n = 2) => new Promise((resolve) => {
@@ -220,10 +222,15 @@ function installHelpers({ light, tweak }) {
   const scratch = document.createElement('canvas');
   const capture = async (background) => {
     const { scene, renderer } = engine().view;
-    // The theme's background is a Color; swapping in a clone keeps the one
-    // the viewer themes untouched.
+    // With no post chain the theme's background is a Color on the scene;
+    // with one the canvas is transparent and the clear colour is what shows.
+    // Either way a clone is swapped in, so the viewer's own is untouched.
     const previous = scene.background;
-    scene.background = previous.clone().setHex(background);
+    const clearColor = engine().view.lights.key.color.clone();
+    renderer.getClearColor(clearColor);
+    const clearAlpha = renderer.getClearAlpha();
+    if (previous) scene.background = previous.clone().setHex(background);
+    else renderer.setClearColor(clearColor.clone().setHex(background), 1);
     await frames(3);
     const canvas = renderer.domElement;
     scratch.width = canvas.width;
@@ -232,6 +239,7 @@ function installHelpers({ light, tweak }) {
     ctx.drawImage(canvas, 0, 0);
     const data = ctx.getImageData(0, 0, scratch.width, scratch.height).data;
     scene.background = previous;
+    renderer.setClearColor(clearColor, clearAlpha);
     return data;
   };
 
@@ -284,6 +292,7 @@ function installHelpers({ light, tweak }) {
       const e = engine();
       if (e.setLighting && !window.__harnessLit) {
         window.__harnessLit = true;
+        e.view.setQuality?.(quality);
         await e.setLighting(light);
         if (tweak) {
           const { renderer, scene, lights } = e.view;
@@ -416,6 +425,14 @@ function installHelpers({ light, tweak }) {
         gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
         times.push(performance.now() - t0);
       }
+      // One whole frame's counts: three resets them per render call, and a
+      // post chain makes several, so without this they report its last quad.
+      renderer.info.autoReset = false;
+      renderer.info.reset();
+      render();
+      const frameCalls = renderer.info.render.calls;
+      const frameTriangles = renderer.info.render.triangles;
+      renderer.info.autoReset = true;
       let n = 0;
       const t0 = performance.now();
       await new Promise((resolve) => {
@@ -432,8 +449,8 @@ function installHelpers({ light, tweak }) {
         carried: e.carried.size,
         fps: Math.round(n / 3),
         renderMs: +median(times).toFixed(2),
-        calls: renderer.info.render.calls,
-        triangles: renderer.info.render.triangles,
+        calls: frameCalls,
+        triangles: frameTriangles,
         textures: renderer.info.memory.textures,
         geometries: renderer.info.memory.geometries,
         wornMB: +(worn / 1048576).toFixed(1),
@@ -467,7 +484,7 @@ function printReport(report, previous) {
     add(`loadout ${k}`, s.loadout[k], '', p?.loadout?.[k]);
   }
   const width = Math.max(...rows.map((r) => r.metric.length));
-  console.log(`\n${report.label}  (${report.url}, light: ${report.light ?? 'classic'})`);
+  console.log(`\n${report.label}  (${report.url}, light: ${report.light ?? 'classic'}, quality: ${report.quality ?? 'low'})`);
   console.log(`${'metric'.padEnd(width)}  ${'value'.padStart(9)}  ${'target'.padStart(11)}${previous ? `  ${previous.label.padStart(9)}` : ''}`);
   for (const r of rows) {
     console.log(`${r.metric.padEnd(width)}  ${String(r.value ?? '-').padStart(9)}  ${String(r.target ?? '').padStart(11)}${previous ? `  ${String(r.old ?? '-').padStart(9)}` : ''}`);
