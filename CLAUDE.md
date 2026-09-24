@@ -18,6 +18,9 @@ is go** — with the conditions recorded under "Legal" at the foot of this file.
 that site: the same boundary, as steps rather than as a spec.
 `LOADOUT.md` is the plan for weapons, holsters and the raised pose, with the
 port survey and clip measurements it rests on.
+`RENDERING.md` is the plan for closing the gap to a studio render -- tone
+mapping, the game's own probes as IBL, per-pixel LayerBlend, a body -- with
+the archive measurements it rests on and the boundaries it keeps.
 
 `PLAN.md` is the design document. This file is the operational one: what is
 decided, what is verified, and what to run. When the two disagree, this file wins

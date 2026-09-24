@@ -4,6 +4,10 @@ Parked 2026-09-16 to work on the catalogue first. **Nothing here is
 implemented.** The findings come from reading the current rig and drei's
 internals, and they are where the work should start.
 
+This plan is for the **local** viewer. The web kitbasher's lighting is planned
+in `RENDERING.md` Phase 1, which keeps the preset table below but lights from
+the game's own probes in the archive instead of downloaded HDRs.
+
 ## What is true today
 
 `viewer/src/components/Scene.tsx`:
