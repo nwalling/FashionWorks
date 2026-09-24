@@ -346,6 +346,13 @@ down) and holstered again at ease, then the rifle back in hand through a
 switch to a Sunchaser set and back, the pistol returning to the hip with the
 clothing.
 
+**The armour harness is unchanged, except where the hand now says yes.**
+Every Sunchaser, Tactical and hue measure agrees with the pre-Phase-2
+baseline to within 0.1. The 23-item loadout lists 25 pieces, and the one the
+armour has no free holster for, refused before, now goes to the hand: 24
+carried, one more template (+85 MB worn), 60 more draw calls. The clothing
+outfit is unchanged at 136 calls and 133 MB.
+
 ## Phases
 
 | phase | what | size |
