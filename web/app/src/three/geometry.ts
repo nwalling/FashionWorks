@@ -85,6 +85,8 @@ export function buildGeometry(mesh: MeshPayload, materialCount: number): BuiltGe
       group.count,
       beyond ? Math.max(0, materialCount - 1) : group.materialId,
     );
+    // The zone rides on the group, for `zones.showUncovered`.
+    (geometry.groups[geometry.groups.length - 1] as { zone?: string | null }).zone = group.zone ?? null;
   }
 
   geometry.computeBoundingBox();

@@ -61,6 +61,10 @@ pub struct Submesh {
     /// The NMC node this group belongs to, in a rigid `.cga`/`.cgf`. Its
     /// vertices are in that node's space; 0 is the root.
     pub node: u16,
+    /// A skinned character mesh's zone word for this group -- the entry of the
+    /// mesh's zone table its node index points at. [`crate::zones::name`]
+    /// names the body's. None for a rigid mesh.
+    pub zone_word: Option<u32>,
 }
 
 /// One mesh, flattened into the arrays a `BufferGeometry` binds directly.
@@ -265,6 +269,7 @@ pub fn load_wide(skin: &[u8], skinm: &[u8], width: usize) -> Result<LoadedMesh, 
                 first_index: s.first_index,
                 index_count: s.num_indices,
                 node: s.node_parent_index,
+                zone_word: skin_mesh.extra_words.get(usize::from(s.node_parent_index)).copied(),
             })
             .collect(),
         material_file: names.first().map(|n| n.name.clone()),

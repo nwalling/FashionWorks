@@ -72,6 +72,7 @@ import { DEFAULT_PRESET, LIGHT_PRESETS, StudioLighting } from './lighting';
 import { ClipLoop, FADE_SECONDS, type LoopMode, smooth } from './idle';
 import { hasEight, padEight, skinEight } from './skin8';
 import { decalRoughness, padDecalUvs, withDecal } from './decal';
+import { showUncovered, type ZoneChunk } from './zones';
 import { LIVE_DEFAULTS, liveSurfaces, releaseAfterUpload, takesS3tc } from './live';
 import { applyClip, bonePosition, boneRotation, buildRig, mountMatrix, type BuiltRig } from './rig';
 import { compositeSurfaces, dataTexture, type CompositeGeometry, type PaletteEntry } from './surface';
@@ -952,6 +953,7 @@ export class Kitbasher {
     // The cache is keyed by body, so nothing has to be thrown away; the old
     // body's meshes stay loaded and switching back is instant.
     this.cancelLoop();
+    this.clearClothing();
     this.rig?.root.removeFromParent();
     this.rig = null;
     this.dropFigure();
@@ -1098,6 +1100,73 @@ export class Kitbasher {
     }
     this.figure = { body, parts };
     this.updateFigure();
+    this.applyZones();
+  }
+
+  // ---------------------------------------------------------------- clothing
+
+  /** Clothing on the figure. CLOTHING.md Phase 0: enough to prove the zone
+   * rule on real garments; the catalogue and the UI are Phases 1 to 3. */
+  private clothing: Array<{ loaded: Loaded; layer: number; chunks: readonly ZoneChunk[] }> = [];
+
+  /** Wear one garment, given as its mesh, material, layer and the zones its
+   * record lists. */
+  async wearClothing(spec: ClothingSpec): Promise<void> {
+    if (!this.rig) await this.init();
+    const rig = this.rig;
+    if (this.disposed || !rig) return;
+    const loaded = await this.loadClothingPart(spec);
+    if (this.disposed || this.rig !== rig) return;
+    for (const object of loaded.objects) {
+      this.view.scene.add(object);
+      if (object instanceof SkinnedMesh) object.bind(rig.skeleton, object.matrixWorld);
+    }
+    this.refineLater(loaded);
+    this.clothing.push({ loaded, layer: spec.layer, chunks: spec.chunks });
+    this.applyZones();
+  }
+
+  clearClothing(): void {
+    for (const worn of this.clothing) for (const object of worn.loaded.objects) object.removeFromParent();
+    this.clothing = [];
+    this.applyZones();
+  }
+
+  /** Hide every zone something on a higher layer covers: the figure at layer
+   * 0, and each garment at its own. */
+  private applyZones(): void {
+    const chunks = this.clothing.flatMap((c) => c.chunks);
+    const apply = (objects: Object3D[], layer: number) => {
+      for (const object of objects) if ((object as Mesh).isMesh) showUncovered((object as Mesh).geometry, layer, chunks);
+    };
+    for (const { loaded } of this.figure?.parts ?? []) apply(loaded.objects, 0);
+    for (const worn of this.clothing) apply(worn.loaded.objects, worn.layer);
+  }
+
+  private async loadClothingPart(spec: ClothingSpec): Promise<Loaded> {
+    const key = `clothing:${spec.mesh}:${spec.material}:${this.surfaceMode}`;
+    const hit = this.cache.get(key);
+    if (hit) return hit;
+    const payload = (await this.client.mesh(spec.mesh)).mesh;
+    const material: MaterialPayload = (await this.client.material(spec.material)).material;
+    const count = Math.max(1, material.submaterials.length);
+    const item = { tint: spec.palette ? { layers: spec.palette } : null } as unknown as CatalogueItem;
+    const { materials, refine } = await this.materialsFor(
+      item,
+      material,
+      [{ uvs: payload.uvs, indices: payload.indices, submeshes: payload.submeshes }],
+      'weapon',
+    );
+    const object = new SkinnedMesh(drawnOnly(buildGeometry(payload, count).geometry, materials), materials);
+    object.frustumCulled = false;
+    eightWhereNeeded([object]);
+    decalsWhereNeeded([object]);
+    object.name = spec.mesh.split('/').pop() ?? spec.mesh;
+    shaded(object);
+    const loaded = measure(key, [object], materials, []);
+    if (refine) loaded.refines = [refine];
+    this.cache.set(key, loaded);
+    return loaded;
   }
 
   private dropFigure(): void {
@@ -1339,6 +1408,7 @@ export class Kitbasher {
   private evict(keep?: Loaded): void {
     const worn = new Set(this.equipped.values());
     for (const { loaded } of this.figure?.parts ?? []) worn.add(loaded);
+    for (const { loaded } of this.clothing) worn.add(loaded);
     // The piece a load just made is about to be worn or carried, but is not
     // yet either. Unprotected, it was the one entry left to evict once live
     // pieces passed the budget: disposed, then equipped anyway and no longer
@@ -2120,6 +2190,16 @@ function eightWhereNeeded(objects: Object3D[]): void {
     padEight(mesh.geometry);
     skinEight(mesh);
   }
+}
+
+/** A garment for `Kitbasher.wearClothing`: CLOTHING.md Phase 0. */
+export interface ClothingSpec {
+  readonly mesh: string;
+  readonly material: string;
+  /** `Chunks[].Layer` of the record: 1 shirt, trousers, boots, gloves; 2 jacket. */
+  readonly layer: number;
+  readonly chunks: readonly ZoneChunk[];
+  readonly palette?: ReadonlyArray<{ color: string; spec: string; glossiness: number }>;
 }
 
 /** Give every mesh of a piece the decal UV attribute if any of its materials

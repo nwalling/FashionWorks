@@ -26,6 +26,7 @@ pub mod mesh;
 mod p4k;
 pub mod poses;
 pub mod rebind;
+pub mod zones;
 pub mod socket;
 mod range;
 
@@ -642,6 +643,12 @@ fn mesh_to_js(
         js_sys::Reflect::set(&entry, &"materialId".into(), &(sub.material_id as f64).into())?;
         js_sys::Reflect::set(&entry, &"start".into(), &(sub.first_index as f64).into())?;
         js_sys::Reflect::set(&entry, &"count".into(), &(sub.index_count as f64).into())?;
+        if let Some(word) = sub.zone_word {
+            js_sys::Reflect::set(&entry, &"zoneWord".into(), &(word as f64).into())?;
+            if let Some(zone) = zones::name(word) {
+                js_sys::Reflect::set(&entry, &"zone".into(), &JsValue::from_str(zone))?;
+            }
+        }
         submeshes.push(&entry);
     }
     set("submeshes", &submeshes.into())?;

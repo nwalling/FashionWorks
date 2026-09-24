@@ -6,6 +6,12 @@ boots, gloves, hats -- instead of the armour layer. Everything under "What the
 data says" was read out of this build's DataCore; everything under "Phases" is
 a proposal with an exit test.
 
+## Status
+
+| phase | state | what it measured |
+| --- | --- | --- |
+| 0 -- zones | done | The body's 30 (male) and 31 (female) zone submeshes named from geometry and coverage, and shared by every shirt and jacket that covers them. The rule -- a zone is hidden where a higher layer lists it, unless the chunk's `VisibleLayers` keeps that layer -- holds on shirt, trousers, boots and jacket on both bodies: no skin through cloth, and skin kept at the cuffs. See "Phase 0, as run". |
+
 ## What the data says
 
 ### The character is a chain of item ports, and armour hangs off the undersuit
@@ -77,11 +83,8 @@ not to guess.
 
 `m_body.skin` is 30 submeshes -- the "30 bone-parented regions" RENDERING.md
 Phase 4 already noticed -- each with a node index, plus a sorted table of 30
-32-bit words. Thirty zones, thirty submeshes. **Which submesh is which zone is
-not yet known**: the words are not the CRC32 of the zone names or of any bone
-name, nor FNV-1/1a, djb2 or CRC32C of any spelling tried. The submeshes' own
-centres make a geometric assignment easy if the hash stays hidden -- hands at
-x ±0.64, feet at z 0.06, the arm segments in order along the arm.
+32-bit words. Thirty zones, thirty submeshes, and each node index points into
+that table. Which word is which zone is settled under "Phase 0, as run".
 
 ### Clothing is armour-shaped everywhere else
 
@@ -96,6 +99,72 @@ x ±0.64, feet at z 0.06, the arm segments in order along the arm.
   `pu_bespoke`), about 50 Squadron 42 crew uniforms (`s42_clothing`), and the
   rest medical-bay and armour-folder oddities.
 - **Head items**: 77 hair, 51 beards, 15 eyewear and goggles, 80 piercings.
+
+## Phase 0, as run
+
+**Every character mesh carries a zone table, and the node index points into
+it.** After the submesh list, a sorted run of 32-bit words, one per zone; each
+submesh's `node_parent_index` is its zone's position in that run. The same
+zone has the same word in every mesh that has it -- the body's torso and arm
+words turn up in 100 shirt and jacket meshes. The words are not the CRC32,
+CRC32C, any of the other CRC-32 variants, FNV-1/1a, djb2, MurmurHash3 or
+xxHash32 of any spelling of the names, so they are named another way.
+`examples/zone_words.rs` dumps every mesh's table.
+
+**The body's zones, named from geometry and coverage** (`web/core/src/zones.rs`).
+The male body is 30 submeshes and the female 31, sharing 30 words. Off-centre
+submeshes split by side -- the character faces +y, so left is -x -- the arms
+by distance out (shoulder, `arm01`..`arm05`, hand) and the legs top to bottom
+(`leg01`..`leg04`, foot). The six central ones take the evidence of which
+items cover them:
+
+| zone | where | what decided it |
+| --- | --- | --- |
+| `vneck` | the narrow V at the collar, 75 vertices | shirts without it are the V-necks |
+| `torso01` | upper chest, front only | open-collar shirts leave it bare |
+| `torso02` | abdomen, front only | jackets with lapels cover it and skip `torso01` |
+| `torso03`, `torso04` | middle and lower back | open-front jackets cover just these two |
+| `underwear` | the pelvis, 1,471 vertices | armour legs cover only it |
+| `underwear_top` | the female's extra submesh | the bra area |
+
+`hips_zone` is **not on the body**: it is a garment zone, a shirt's hem or a
+trousers waistband, and it is what jackets and long shirts hide.
+
+**`VisibleLayers`, settled.** It appears only on the last zone a sleeve
+reaches -- `arm02` on 119 short-sleeved shirts, `arm05` at the wrist of 93 long
+ones, the shoulders under a tank top's straps -- always as `[0]`. The item
+covers the zone at its layer but leaves the body drawn there, because it ends
+part way across it. Rendered: short sleeves end over drawn forearm, with no
+gap of missing skin.
+
+**The rule, proven.** `three/zones.ts`: a submesh on layer K is not drawn
+where an item on a higher layer lists its zone, unless that chunk's
+`VisibleLayers` includes K. Worn through `Kitbasher.wearClothing` on both
+bodies -- `eld_shirt_04` (layer 1), `dmc_pants_05` (1), `gsb_boots_03` (1),
+then `drn_jacket_01` (2) over them. Under the shirt and trousers the body keeps
+12 of its 30 zones -- `arm02`..`arm05`, the hands and the ankles (`leg04`) --
+and under the jacket only the wrists, hands and ankles, with the shirt beneath
+hidden entirely. No skin through cloth anywhere in the renders; skin
+where the sleeves and the trousers end.
+
+**Only the body and shirts carry zone tables, and that is enough.** Of the
+clothing meshes, 96 of 100 shirt meshes are fully zoned (1,712 of their 1,819
+submeshes named by the body's words), while 212 of 221 jackets, 130 of 144
+trousers, 114 of 120 boots, every glove and 80 of 84 hats have no table at
+all. That fits the layering: what gets covered by other clothing is the body
+and, under a jacket, the shirt. Outer garments are never hidden, so they need
+no zones.
+
+**Garment-only zones are the open item.** 45 words appear in garments and not
+on the body, most in a single garment each: hems, cuffs, the `omega_*` zones
+armour covers. The records cannot name them -- every statistic tried measures
+garment type rather than zone, since shirts and jackets list the `omega_*`
+zones and trousers do not. One is named because the evidence is unambiguous:
+`232552810`, shared by 35 shirt meshes, an all-round band at the waist, whose
+records list `hips_zone` 271 times in 273. Before it was named, the female
+shirt's hem showed as a white strip under the jacket. The rest are for Phase
+2, by where each submesh sits (a hem at the waist is `hips`, a cuff at the
+wrist `arm05_torso0`).
 
 ## Phases
 

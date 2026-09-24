@@ -233,7 +233,9 @@ export interface MeshPayload {
    * Absent on a mesh with no decal. */
   decalUvs?: Float32Array;
   bones: string[];
-  submeshes: Array<{ materialId: number; start: number; count: number }>;
+  /** `zone` names a character mesh's body zone where the core knows it;
+   * `zoneWord` is the mesh's own word for it, named or not. CLOTHING.md. */
+  submeshes: Array<{ materialId: number; start: number; count: number; zone?: string; zoneWord?: number }>;
   materialFile: string | null;
   /** Null when the mesh was loaded without a rig. */
   rebind: { mapped: number; stray: number; redistributed: number; inherited?: number; guessed: number } | null;
