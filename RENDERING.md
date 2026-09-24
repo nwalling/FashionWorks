@@ -14,6 +14,44 @@ what is not.
 preset-table idea carries over to Phase 1 here; its downloaded CC0 HDRs do not,
 because the archive ships the game's own lighting probes.
 
+## Status
+
+Built on the `rendering` branch, not merged or pushed.
+
+| phase | state | what it measured |
+| --- | --- | --- |
+| 0 -- harness | done | `npm run harness -- <label> [--compare <old>]`; two runs agree on every scored figure, render time within 0.1 ms. Baseline below. Found and fixed an eviction bug on the way. |
+
+### Baseline (built package, 1600x1000, today's renderer)
+
+| metric | baseline | target |
+| --- | --- | --- |
+| Sunchaser gold % of each piece's visible pixels: helmet / torso / arms / legs | 46.8 / 34.1 / 18.0 / 11.3 | in-game 50.1 / 24.5 / 8.9-11.8 / 5.3 |
+| Sunchaser gold-to-non-gold contrast, pooled | 2.19 | 2.48-3.47 |
+| Sunchaser back, torso gold % | 42.2 | store render 33.0 (upper back only) |
+| Defiance Tactical torso luminance mean / median / p95 | 39.3 / 33 / 83.1 | in-game 34 / 29 / 68 |
+| hue of saturated pixels: Corbel Halcyon / Beacon Orange / Lynx Blue | 65 / 35 / 245 | 48 / 25 / 235 |
+| saturated share: Corbel / Beacon / Lynx | 28.8 / 76.4 / 7.9 % | -- |
+| 23-item loadout: fps / render ms / draw calls / triangles | 61 / 6.6 / 426 / 398,181 | -- |
+| 23-item loadout: memory of the 11 live pieces / whole cache | 958 / 988 MB | -- |
+
+The per-piece gold targets are the in-game sheet's, measured at a different
+framing; they are directions, not pass marks. The arms and legs gap is the
+known open palette-index question in `CLAUDE.md`, which no rendering phase is
+expected to close. What the phases must do is move contrast into the band and
+hue toward the name without moving gold coverage the wrong way.
+
+**The harness found a cache bug on its first run.** `evict()` ran inside
+`load()` and `loadGear()` before the new piece was registered as worn or
+carried, so once live pieces passed the 640 MB budget the piece just loaded was
+the one unprotected entry: disposed, then equipped anyway and no longer
+tracked. 377 MB of the heavy loadout was live but outside the cache. A load now
+protects what it just made; uncached live memory is 0.
+
+**A carried magazine costs 40 MB**, a 512 bake plus normal maps fetched at
+1024, which is most of why eleven live pieces reach 958 MB. Phase 3 is where
+that comes down.
+
 ## Boundaries
 
 These hold for every phase. Changing any of them is Noel's decision, not a

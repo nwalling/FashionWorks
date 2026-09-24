@@ -921,14 +921,19 @@ export class Kitbasher {
       socket ? (payloads[0] as PropPayload | undefined)?.helperTransforms : undefined,
     );
     this.cache.set(key, loaded);
-    this.evict();
+    this.evict(loaded);
     return loaded;
   }
 
   /** Drop least-recently-used pieces until the cache fits its budget. Never
    * one that is on the body. */
-  private evict(): void {
+  private evict(keep?: Loaded): void {
     const worn = new Set(this.equipped.values());
+    // The piece a load just made is about to be worn or carried, but is not
+    // yet either. Unprotected, it was the one entry left to evict once live
+    // pieces passed the budget: disposed, then equipped anyway and no longer
+    // tracked -- 377 MB of a 23-item loadout, found by the render harness.
+    if (keep) worn.add(keep);
     for (const carried of this.carried.values()) {
       worn.add(carried.template);
       if (carried.magazine) worn.add(carried.magazine.template);
@@ -1309,7 +1314,7 @@ export class Kitbasher {
     }
     const loaded = measure(key, [group], all, [], payload.helpers);
     this.cache.set(key, loaded);
-    this.evict();
+    this.evict(loaded);
     return loaded;
   }
 

@@ -46,3 +46,6 @@ web/core/pkg/
 
 # The library build output.
 web/app/dist/
+
+# Render harness output: renders of CIG's assets, never committed.
+/web/app/harness-out/
