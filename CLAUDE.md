@@ -18,6 +18,9 @@ is go** — with the conditions recorded under "Legal" at the foot of this file.
 that site: the same boundary, as steps rather than as a spec.
 `LOADOUT.md` is the plan for weapons, holsters and the raised pose, with the
 port survey and clip measurements it rests on.
+`CLOTHING.md` is the plan for clothing as a wearable layer instead of armour:
+the body's ports, the undersuit that carries armour and hides clothing, and the
+layered body zones that decide what shows.
 `RENDERING.md` is the plan for closing the gap to a studio render -- tone
 mapping, the game's own probes as IBL, per-pixel LayerBlend, a body -- with
 the archive measurements it rests on and the boundaries it keeps.
