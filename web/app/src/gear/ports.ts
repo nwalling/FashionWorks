@@ -18,7 +18,7 @@
  * range. A Large weapon (size 5) fits only the right side of the back.
  */
 
-import type { CatalogueItem, GearSlot, Port, Slot } from '../archive/catalogue';
+import type { CatalogueItem, GearSlot, Port, Slot, WearSlot } from '../archive/catalogue';
 
 /** Lowest first: a later slot's port replaces an earlier one's of the same name. */
 export const PORT_OWNERS: readonly Slot[] = ['undersuit', 'helmet', 'arms', 'legs', 'torso', 'backpack'];
@@ -39,7 +39,7 @@ export function isHolster(port: Port): boolean {
 }
 
 /** Every holster on the body, each from the outermost piece that declares it. */
-export function resolvePorts(wearing: ReadonlyMap<Slot, CatalogueItem>): Map<string, OwnedPort> {
+export function resolvePorts(wearing: ReadonlyMap<WearSlot, CatalogueItem>): Map<string, OwnedPort> {
   const out = new Map<string, OwnedPort>();
   for (const owner of PORT_OWNERS) {
     const item = wearing.get(owner);

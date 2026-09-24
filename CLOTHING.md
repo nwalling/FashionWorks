@@ -12,6 +12,7 @@ a proposal with an exit test.
 | --- | --- | --- |
 | 0 -- zones | done | The body's 30 (male) and 31 (female) zone submeshes named from geometry and coverage, and shared by every shirt and jacket that covers them. The rule -- a zone is hidden where a higher layer lists it, unless the chunk's `VisibleLayers` keeps that layer -- holds on shirt, trousers, boots and jacket on both bodies: no skin through cloth, and skin kept at the cuffs. See "Phase 0, as run". |
 | 1 -- catalogue | done | 1,970 clothing items in eight slots, both catalogues, 100% field agreement over 4,416 items in both directions. 261 clothing colourway families, all but six (unnamed, as for armour) sharing a name prefix. No armour item's set, family or name moved. See "Phase 1, as run". |
+| 2 -- outfit model | done | One outfit on the body and the other kept aside; `HiddenParts` and the zone rule applied generically. A full clothing outfit on both bodies with no skin through cloth; armour scores identical to before on every harness measure. The clothing outfit costs 133 MB and 136 draw calls against the armour loadout's 372 MB and 1,765. See "Phase 2, as run". |
 
 ## What the data says
 
@@ -213,6 +214,49 @@ names, as armour's three are.
 **The pipeline stays armour-only.** `scx convert`, `scx variants`, `scx sets`
 and `scx audit` read `Manifest.armour()`; the local viewer drops clothing when
 it parses the manifest, keeping `Item.slot` the six armour slots.
+
+## Phase 2, as run
+
+**The rules are data, in one module** (`three/outfit.ts`). Each slot plugs
+into a named port -- `Clothing_Torso_0` for a shirt, `Armor_Undersuit`,
+`Hat_ItemPort` -- read off the body, undersuit and head records. A worn piece
+is drawn unless something worn lists its port in `hidden`, compared without
+case (the records spell the hair port `Hair_ItemPort` and `Hair_itemPort`).
+Then the zone rule: every drawn piece and the figure lose the zone submeshes a
+drawn piece on a higher layer covers. A hidden piece covers nothing, so a
+shirt under a jacket that hides it cannot also hide skin at a hem the jacket
+leaves open. All of it is recomputed when the outfit changes, never per frame.
+
+**The two outfits are exclusive and neither is lost.** The engine keeps one
+on the body and the other aside, with the gear in its holsters, and
+`setOutfit` swaps them. Equipping a piece of the other outfit switches to it.
+The plan had that step "ask the caller to choose"; with the other outfit kept
+rather than taken off there is nothing to choose between, so it simply
+switches, and the status says what went aside. Head items stay on through a
+switch: the head's ports are neither outfit's. A body switch carries both
+outfits and the aside gear.
+
+**What changed for armour, and what did not.** Armour's own chunks name
+`omega_*` and `theta_*` zones, which Phase 0 left unnamed, so they hide
+nothing. What does move: the body's hands go under armour arms that list
+`l_hand_zone`/`r_hand_zone` (212 of them), its pelvis under the 39 leg pieces
+listing `underwear_zone`, its zones under an undersuit, and **the head under
+the 249 helmets that hide `Head_ItemPort`** -- 81 of 173 canonical helmets,
+the Sunchaser, Artimex, Morozov-SH and Corbel among them. Those are the closed
+ones: rendered with the head hidden and forced visible, all four are
+pixel-identical, so the head was being drawn for nothing. The harness
+confirms it: every Sunchaser, Tactical and hue measure identical to the
+baseline, and the 23-item loadout 20 draw calls and 83k triangles lighter.
+
+**Every helmet still hides the hair,** although the records hide the hair port
+on only 113 of 683. The rest rely on the game swapping in a flattened hair
+variant, which the figure does not have, and its one hairstyle pokes through
+every shell. That is the one rule here the data does not state.
+
+**Measured on a full outfit** -- the Phase 0 shirt, jacket, trousers and boots
+plus gloves and a beanie -- in the harness's `clothing` scene: 6 pieces, 136
+draw calls, 219k triangles, 133 MB worn, against the armour loadout's 1,765
+calls, 1.64M triangles and 372 MB. Clothing is the light case.
 
 ## Phases
 

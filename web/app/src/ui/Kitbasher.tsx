@@ -25,6 +25,7 @@ import {
   type CatalogueItem,
   type GearSlot,
   type Slot,
+  type WearSlot,
 } from '../archive/catalogue';
 import { portLabel, portServes, portShort } from '../gear/ports';
 import { Kitbasher as Engine, type KitbasherState } from '../three/kitbasher';
@@ -172,7 +173,7 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
     }
   }, [state, onLoadoutChange]);
 
-  const wearing = state?.wearing ?? new Map<Slot, CatalogueItem>();
+  const wearing = state?.wearing ?? new Map<WearSlot, CatalogueItem>();
   const carrying = state?.carrying ?? new Map<string, CatalogueItem>();
   // The engine rebuilds this on a body switch, so the listing follows it
   // rather than the prop it started from.

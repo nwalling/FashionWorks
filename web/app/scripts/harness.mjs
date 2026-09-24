@@ -16,7 +16,9 @@
  *   pixels against the colour in the name -- hue, never luminance, since hue
  *   survives lighting changes;
  * - **the 23-item loadout**: frame time, draw calls, triangles and memory by
- *   the engine's own accounting.
+ *   the engine's own accounting;
+ * - **a clothing outfit** -- hat, shirt, jacket, gloves, trousers, boots -- by
+ *   the same accounting, against the armour loadout. CLOTHING.md Phase 2.
  *
  *   npm run harness -- <label>                 score and write harness-out/<label>.json
  *   npm run harness -- <label> --compare <old> and print the difference
@@ -168,6 +170,13 @@ async function main() {
     return h.heavyLoadout(camera);
   }, { camera: FRONT });
   if (wanted('loadout')) await shot('loadout');
+
+  // ---- A clothing outfit, costed the same way.
+  if (wanted('clothing')) report.scenes.clothing = await page.evaluate(async ({ camera }) => {
+    const h = window.__harness;
+    return h.clothingOutfit(camera);
+  }, { camera: FRONT });
+  if (wanted('clothing')) await shot('clothing');
 
   await browser.close();
   writeFileSync(`${OUT}${label}.json`, `${JSON.stringify(report, null, 1)}\n`);
@@ -417,6 +426,36 @@ function installHelpers({ light, tweak, quality }) {
       for (let k = 0; k < 12; k += 1) items.push(mag);
       for (let k = 0; k < 4; k += 1) items.push(one((i) => i.slot === 'consumable'));
       for (const item of items) if (item) await e.carry(item);
+      return window.__harness.cost(camera);
+    },
+
+    /** A full clothing outfit on the figure. The pieces are the ones CLOTHING.md
+     * Phase 0 proved the zone rule on, plus gloves and a hat. */
+    async clothingOutfit(camera) {
+      const e = engine();
+      e.clearGear();
+      e.clear();
+      e.setFigure(true);
+      await settle();
+      const C = e.catalogue.items;
+      const byClass = (c) => C.find((i) => i.class_name === c);
+      const pieces = [
+        byClass('eld_shirt_04_crus01_01'),
+        byClass('drn_jacket_01_01_14'),
+        byClass('dmc_pants_05_01_02'),
+        byClass('gsb_boots_03_01_19'),
+        C.find((i) => i.slot === 'gloves' && /^Adroit Gloves/.test(i.name || '')),
+        C.find((i) => i.slot === 'hat' && /Beanie/.test(i.name || '')),
+      ];
+      for (const item of pieces) if (item) await e.equip(item);
+      await e.setPose('idle');
+      const cost = await window.__harness.cost(camera);
+      return { pieces: pieces.filter(Boolean).length, outfit: e.current.outfit, ...cost };
+    },
+
+    /** Frame time, draw calls, triangles and memory for what is on the body. */
+    async cost(camera) {
+      const e = engine();
       window.__harness.look(camera);
       await settle();
 
@@ -490,6 +529,9 @@ function printReport(report, previous) {
   }
   for (const k of ['fps', 'renderMs', 'calls', 'triangles', 'textures', 'wornMB', 'figureMB', 'cacheMB']) {
     add(`loadout ${k}`, s.loadout[k], '', p?.loadout?.[k]);
+  }
+  for (const k of ['pieces', 'fps', 'renderMs', 'calls', 'triangles', 'textures', 'wornMB', 'figureMB']) {
+    if (s.clothing) add(`clothing ${k}`, s.clothing[k], '', p?.clothing?.[k]);
   }
   const width = Math.max(...rows.map((r) => r.metric.length));
   console.log(`\n${report.label}  (${report.url}, light: ${report.light ?? 'classic'}, quality: ${report.quality ?? 'low'})`);

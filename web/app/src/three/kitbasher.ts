@@ -44,10 +44,13 @@ import {
   lineTitle,
   readCatalogue,
   sharedName,
+  CLOTHING_SLOTS,
   SLOTS,
   type Catalogue,
   type CatalogueItem,
+  type Outfit,
   type Slot,
+  type WearSlot,
 } from '../archive/catalogue';
 import type { GearSlot } from '../archive/catalogue';
 import type {
@@ -72,7 +75,8 @@ import { DEFAULT_PRESET, LIGHT_PRESETS, StudioLighting } from './lighting';
 import { ClipLoop, FADE_SECONDS, type LoopMode, smooth } from './idle';
 import { hasEight, padEight, skinEight } from './skin8';
 import { decalRoughness, padDecalUvs, withDecal } from './decal';
-import { showUncovered, type ZoneChunk } from './zones';
+import { showUncovered } from './zones';
+import { layerOf, outfitFor, outfitSlots, viewOf } from './outfit';
 import { LIVE_DEFAULTS, liveSurfaces, releaseAfterUpload, takesS3tc } from './live';
 import { applyClip, bonePosition, boneRotation, buildRig, mountMatrix, type BuiltRig } from './rig';
 import { compositeSurfaces, dataTexture, type CompositeGeometry, type PaletteEntry } from './surface';
@@ -348,7 +352,12 @@ export interface KitbasherScene {
 /** What the UI renders from. Replaced wholesale on every change, so React can
  * compare by identity. */
 export interface KitbasherState {
-  readonly wearing: ReadonlyMap<Slot, CatalogueItem>;
+  readonly wearing: ReadonlyMap<WearSlot, CatalogueItem>;
+  /** Which outfit is on the body. The game makes armour and clothing
+   * exclusive, so the other is kept aside rather than worn. CLOTHING.md. */
+  readonly outfit: Outfit;
+  /** The outfit that is not on, as it was left: switching back restores it. */
+  readonly aside: ReadonlyMap<WearSlot, CatalogueItem>;
   readonly pose: string;
   /** The lighting preset in use. */
   readonly lighting: string;
@@ -408,14 +417,18 @@ export function paletteOf(item: CatalogueItem): PaletteEntry[] {
  * come to about 220 characters, which is fine for a fragment.
  */
 export function encodeLoadout(
-  wearing: ReadonlyMap<Slot, CatalogueItem>,
+  wearing: ReadonlyMap<WearSlot, CatalogueItem>,
   carrying: ReadonlyMap<string, CatalogueItem> = new Map(),
   holding: string | null = null,
 ): string {
   // Version 2 appends `;port=id` per piece of gear and `;hold=port`. The first
   // segment is exactly version 1, so an old link still decodes, and the
   // string stays opaque to the host.
-  const parts = [SLOTS.filter((s) => wearing.has(s)).map((s) => wearing.get(s)!.id).join(',')];
+  //
+  // Clothing (CLOTHING.md Phase 3) needs no marker: a slot belongs to one
+  // outfit, so the ids say which is on. An armour link reads exactly as before.
+  const order: readonly WearSlot[] = [...SLOTS, ...CLOTHING_SLOTS];
+  const parts = [order.filter((s) => wearing.has(s)).map((s) => wearing.get(s)!.id).join(',')];
   for (const [port, item] of carrying) parts.push(`${port}=${item.id}`);
   if (holding) parts.push(`hold=${holding}`);
   return parts.join(';');
@@ -514,7 +527,7 @@ export interface SetPlan {
 export function matchSet(
   anchor: CatalogueItem,
   catalogue: Catalogue,
-  wearing: ReadonlyMap<Slot, CatalogueItem>,
+  wearing: ReadonlyMap<WearSlot, CatalogueItem>,
 ): SetPlan {
   const familyName = (item: CatalogueItem) =>
     lineTitle(lineOf(catalogue, item));
@@ -642,9 +655,19 @@ export class Kitbasher {
    * clip loaded never starts, and a stale frame callback does nothing. */
   private loopTicket = 0;
 
-  private readonly equipped = new Map<Slot, Loaded>();
+  private readonly equipped = new Map<WearSlot, Loaded>();
 
-  private readonly wearing = new Map<Slot, CatalogueItem>();
+  private readonly wearing = new Map<WearSlot, CatalogueItem>();
+
+  /** The outfit that is not on the body, by slot. */
+  private aside = new Map<WearSlot, CatalogueItem>();
+
+  /** The gear that went aside with it: holsters belong to the outfit that
+   * declares them. */
+  private asideGear: { carrying: Array<{ port: string; item: CatalogueItem }>; holding: string | null } = {
+    carrying: [],
+    holding: null,
+  };
 
   /** Loaded pieces, so re-equipping is instant. Keyed by item, wear **and
    * body**, because all three pick a genuinely different mesh or bake.
@@ -683,6 +706,8 @@ export class Kitbasher {
   ) {
     this.state = {
       wearing: new Map(),
+      outfit: 'armour',
+      aside: new Map(),
       pose: 'rest',
       lighting: DEFAULT_PRESET,
       wear: true,
@@ -885,6 +910,7 @@ export class Kitbasher {
       ...this.state,
       ...patch,
       wearing: new Map(this.wearing),
+      aside: new Map(this.aside),
       carrying: new Map([...this.carried].map(([port, c]) => [port, c.item])),
       holding: this.holdingPort,
     };
@@ -943,6 +969,10 @@ export class Kitbasher {
     this.publish({ busy: true, status: `switching to the ${body} body…` });
 
     const worn = [...this.wearing.values()].map((item) => item.id);
+    // The outfit that is aside comes across too, and stays aside.
+    const aside = [...this.aside.values()].map((item) => item.id);
+    const asideGear = this.asideGear.carrying.map(({ port, item }) => ({ port, id: item.id }));
+    const asideHolding = this.asideGear.holding;
     // Gear is the same item on either body; it comes back into the same ports.
     const gear = [...this.carried].map(([port, c]) => ({ port, id: c.item.id }));
     const held = this.holdingPort;
@@ -953,7 +983,6 @@ export class Kitbasher {
     // The cache is keyed by body, so nothing has to be thrown away; the old
     // body's meshes stay loaded and switching back is instant.
     this.cancelLoop();
-    this.clearClothing();
     this.rig?.root.removeFromParent();
     this.rig = null;
     this.dropFigure();
@@ -976,6 +1005,17 @@ export class Kitbasher {
       restored += 1;
     }
     const gearById = new Map(this.state.catalogue.gear.map((i) => [i.id, i]));
+    for (const id of aside) {
+      const item = byId.get(id);
+      if (item) this.aside.set(item.slot as WearSlot, item);
+    }
+    this.asideGear = {
+      carrying: asideGear.flatMap(({ port, id }) => {
+        const item = gearById.get(id);
+        return item ? [{ port, item }] : [];
+      }),
+      holding: asideHolding,
+    };
     for (const { port, id } of gear) {
       const item = gearById.get(id);
       if (item) await this.carry(item, port);
@@ -1071,7 +1111,7 @@ export class Kitbasher {
   /** Show or hide the bare body and head under whatever is worn. */
   setFigure(on: boolean): void {
     this.showFigure = on;
-    this.updateFigure();
+    this.applyOutfit();
     this.publish({ figure: on });
   }
 
@@ -1099,74 +1139,7 @@ export class Kitbasher {
       this.refineLater(loaded);
     }
     this.figure = { body, parts };
-    this.updateFigure();
-    this.applyZones();
-  }
-
-  // ---------------------------------------------------------------- clothing
-
-  /** Clothing on the figure. CLOTHING.md Phase 0: enough to prove the zone
-   * rule on real garments; the catalogue and the UI are Phases 1 to 3. */
-  private clothing: Array<{ loaded: Loaded; layer: number; chunks: readonly ZoneChunk[] }> = [];
-
-  /** Wear one garment, given as its mesh, material, layer and the zones its
-   * record lists. */
-  async wearClothing(spec: ClothingSpec): Promise<void> {
-    if (!this.rig) await this.init();
-    const rig = this.rig;
-    if (this.disposed || !rig) return;
-    const loaded = await this.loadClothingPart(spec);
-    if (this.disposed || this.rig !== rig) return;
-    for (const object of loaded.objects) {
-      this.view.scene.add(object);
-      if (object instanceof SkinnedMesh) object.bind(rig.skeleton, object.matrixWorld);
-    }
-    this.refineLater(loaded);
-    this.clothing.push({ loaded, layer: spec.layer, chunks: spec.chunks });
-    this.applyZones();
-  }
-
-  clearClothing(): void {
-    for (const worn of this.clothing) for (const object of worn.loaded.objects) object.removeFromParent();
-    this.clothing = [];
-    this.applyZones();
-  }
-
-  /** Hide every zone something on a higher layer covers: the figure at layer
-   * 0, and each garment at its own. */
-  private applyZones(): void {
-    const chunks = this.clothing.flatMap((c) => c.chunks);
-    const apply = (objects: Object3D[], layer: number) => {
-      for (const object of objects) if ((object as Mesh).isMesh) showUncovered((object as Mesh).geometry, layer, chunks);
-    };
-    for (const { loaded } of this.figure?.parts ?? []) apply(loaded.objects, 0);
-    for (const worn of this.clothing) apply(worn.loaded.objects, worn.layer);
-  }
-
-  private async loadClothingPart(spec: ClothingSpec): Promise<Loaded> {
-    const key = `clothing:${spec.mesh}:${spec.material}:${this.surfaceMode}`;
-    const hit = this.cache.get(key);
-    if (hit) return hit;
-    const payload = (await this.client.mesh(spec.mesh)).mesh;
-    const material: MaterialPayload = (await this.client.material(spec.material)).material;
-    const count = Math.max(1, material.submaterials.length);
-    const item = { tint: spec.palette ? { layers: spec.palette } : null } as unknown as CatalogueItem;
-    const { materials, refine } = await this.materialsFor(
-      item,
-      material,
-      [{ uvs: payload.uvs, indices: payload.indices, submeshes: payload.submeshes }],
-      'weapon',
-    );
-    const object = new SkinnedMesh(drawnOnly(buildGeometry(payload, count).geometry, materials), materials);
-    object.frustumCulled = false;
-    eightWhereNeeded([object]);
-    decalsWhereNeeded([object]);
-    object.name = spec.mesh.split('/').pop() ?? spec.mesh;
-    shaded(object);
-    const loaded = measure(key, [object], materials, []);
-    if (refine) loaded.refines = [refine];
-    this.cache.set(key, loaded);
-    return loaded;
+    this.applyOutfit();
   }
 
   private dropFigure(): void {
@@ -1215,17 +1188,35 @@ export class Kitbasher {
     return loaded;
   }
 
-  /** Which of the figure's parts show: all of them, except the body under an
-   * undersuit that covers it and the hair under a helmet, and nothing when
-   * the figure is off. */
-  private updateFigure(): void {
-    const helmet = this.wearing.has('helmet');
+  /** Draw what the outfit shows, and nothing it hides. CLOTHING.md Phase 2.
+   *
+   * Worked out whenever the outfit changes, never per frame. A worn piece is
+   * drawn unless something worn hides its port; the figure's hair and head
+   * likewise, and its body not at all under an undersuit that reaches from the
+   * feet to the chest. Then the zone rule: each drawn mesh, and the figure at
+   * layer 0, loses the zone submeshes a piece on a higher layer covers. */
+  private applyOutfit(): void {
+    const view = viewOf(this.wearing);
+    const zoned = (objects: Object3D[], layer: number) => {
+      for (const object of objects) {
+        object.traverse((o) => {
+          if ((o as Mesh).isMesh) showUncovered((o as Mesh).geometry, layer, view.chunks);
+        });
+      }
+    };
+    for (const [slot, loaded] of this.equipped) {
+      const drawn = !view.hiddenSlots.has(slot);
+      for (const object of loaded.objects) object.visible = drawn;
+      const item = this.wearing.get(slot);
+      if (drawn && item) zoned(loaded.objects, layerOf(item));
+    }
     for (const { loaded, part } of this.figure?.parts ?? []) {
-      // Hair would poke through every helmet shell; the face stays, since a
-      // visor shows it.
-      const hidden = (part === 'body' && this.undersuitCovers) || (part === 'hair' && helmet);
+      const hidden = (part === 'body' && this.undersuitCovers)
+        || (part === 'hair' && view.hideHair)
+        || (part === 'head' && view.hideHead);
       const visible = this.showFigure && !hidden;
       for (const object of loaded.objects) object.visible = visible;
+      if (visible) zoned(loaded.objects, 0);
     }
   }
 
@@ -1408,7 +1399,6 @@ export class Kitbasher {
   private evict(keep?: Loaded): void {
     const worn = new Set(this.equipped.values());
     for (const { loaded } of this.figure?.parts ?? []) worn.add(loaded);
-    for (const { loaded } of this.clothing) worn.add(loaded);
     // The piece a load just made is about to be worn or carried, but is not
     // yet either. Unprotected, it was the one entry left to evict once live
     // pieces passed the budget: disposed, then equipped anyway and no longer
@@ -1481,8 +1471,13 @@ export class Kitbasher {
   async equip(item: CatalogueItem): Promise<void> {
     if (!this.rig) await this.init();
     if (this.disposed || !this.rig) return;
-    const slot = item.slot as Slot;
+    const slot = item.slot as WearSlot;
     const name = displayName(item);
+    // A piece of the other outfit puts that outfit on. Nothing is lost: what
+    // was on goes aside, and switching back restores it.
+    const outfit = outfitFor(slot);
+    if (outfit && outfit !== this.state.outfit) await this.setOutfit(outfit);
+    if (this.disposed || !this.rig) return;
     this.publish({ busy: true, status: `${name}…` });
 
     let loaded: Loaded;
@@ -1513,7 +1508,7 @@ export class Kitbasher {
     this.wearing.set(slot, item);
     this.applyOverrides();
     this.measureUndersuit();
-    this.updateFigure();
+    this.applyOutfit();
     const gear = this.revalidateGear();
     // The piece this replaced may be evictable now.
     this.evict();
@@ -1537,13 +1532,11 @@ export class Kitbasher {
     }
   }
 
-  unequip(slot: Slot): void {
-    for (const object of this.equipped.get(slot)?.objects ?? []) object.removeFromParent();
-    this.equipped.delete(slot);
-    this.wearing.delete(slot);
+  unequip(slot: WearSlot): void {
+    this.takeOff(slot);
     this.applyOverrides();
     this.measureUndersuit();
-    this.updateFigure();
+    this.applyOutfit();
     const gear = this.revalidateGear();
     const status = gear.removed.length
       ? `${slot} removed; ${gear.removed.join(', ')} came off with it`
@@ -1552,13 +1545,65 @@ export class Kitbasher {
     if (gear.lostHold) void this.setPose(this.unarmedPose()).then(() => this.publish({ status }));
   }
 
-  clear(): void {
-    for (const loaded of this.equipped.values()) for (const o of loaded.objects) o.removeFromParent();
-    this.equipped.clear();
-    this.wearing.clear();
+  /** Take a piece off the body without telling anyone: the callers settle
+   * the outfit and publish once. */
+  private takeOff(slot: WearSlot): void {
+    for (const object of this.equipped.get(slot)?.objects ?? []) object.removeFromParent();
+    this.equipped.delete(slot);
+    this.wearing.delete(slot);
+  }
+
+  /** Put one outfit on and the other aside. CLOTHING.md Phase 2.
+   *
+   * The game makes armour and clothing exclusive -- 215 of 222 undersuits
+   * hide every clothing port -- so there is no mixing them, only choosing.
+   * What comes off is kept, with the gear in its holsters, and comes back when
+   * its outfit does; the head's items stay, since the head is neither's. */
+  async setOutfit(outfit: Outfit): Promise<void> {
+    if (outfit === this.state.outfit) return;
+    if (!this.rig) await this.init();
+    if (this.disposed || !this.rig) return;
+    const leaving = outfitSlots(this.state.outfit).filter((slot) => this.wearing.has(slot));
+    const returning = [...this.aside.values()];
+    const gearReturning = this.asideGear;
+    this.asideGear = {
+      carrying: [...this.carried].map(([port, c]) => ({ port, item: c.item })),
+      holding: this.holdingPort,
+    };
+    for (const carried of this.carried.values()) carried.instance.removeFromParent();
+    this.carried.clear();
+    const hadHold = this.holdingPort !== null;
+    this.holdingPort = null;
+    this.aside = new Map(leaving.map((slot) => [slot, this.wearing.get(slot)!]));
+    for (const slot of leaving) this.takeOff(slot);
+    this.state = { ...this.state, outfit };
     this.applyOverrides();
     this.measureUndersuit();
-    this.updateFigure();
+    this.applyOutfit();
+    this.publish({ ports: resolvePorts(this.wearing), status: `${outfit} on` });
+
+    for (const item of returning) await this.equip(item);
+    for (const { port, item } of gearReturning.carrying) await this.carry(item, port);
+    if (gearReturning.holding && this.carried.has(gearReturning.holding)) {
+      await this.hold(gearReturning.holding);
+    } else if (hadHold) {
+      await this.setPose(this.unarmedPose());
+    }
+    this.frameLoadout();
+    const kept = this.aside.size;
+    this.publish({
+      status: `${outfit} on` + (kept ? ` · ${kept} piece${kept === 1 ? '' : 's'} of ${outfit === 'armour' ? 'clothing' : 'armour'} kept aside` : ''),
+    });
+  }
+
+  /** Everything off, both outfits. */
+  clear(): void {
+    for (const slot of [...this.equipped.keys()]) this.takeOff(slot);
+    this.aside.clear();
+    this.asideGear = { carrying: [], holding: null };
+    this.applyOverrides();
+    this.measureUndersuit();
+    this.applyOutfit();
     const gear = this.revalidateGear();
     this.publish({ ports: gear.ports, status: 'cleared' });
     if (gear.lostHold) void this.setPose(this.unarmedPose()).then(() => this.publish({ status: 'cleared' }));
@@ -2190,16 +2235,6 @@ function eightWhereNeeded(objects: Object3D[]): void {
     padEight(mesh.geometry);
     skinEight(mesh);
   }
-}
-
-/** A garment for `Kitbasher.wearClothing`: CLOTHING.md Phase 0. */
-export interface ClothingSpec {
-  readonly mesh: string;
-  readonly material: string;
-  /** `Chunks[].Layer` of the record: 1 shirt, trousers, boots, gloves; 2 jacket. */
-  readonly layer: number;
-  readonly chunks: readonly ZoneChunk[];
-  readonly palette?: ReadonlyArray<{ color: string; spec: string; glossiness: number }>;
 }
 
 /** Give every mesh of a piece the decal UV attribute if any of its materials
