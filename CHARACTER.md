@@ -18,7 +18,7 @@ player's machine; `.chr` is the skeleton format this project already reads.
 | research | done | The `.chf` fully parsed; every item it names resolves to a record the catalogue already exports; the face is a per-region blend of library heads that ship as ordinary meshes of the protos head's topology; the skin colour is the shader's own tone target. See below. |
 | 0 -- the face | done, awaiting the in-game comparison | Head id *k* is name *k*, proven on the archive's own characters; a one-head character reproduces its head to 0.0002 mm. Faces blend in the browser in 3.3 s cold, 1.7 s warm, with the eyes following their sockets. Three things the data did not say had to be settled on the way -- seams, shading, rough masks. See "Phase 0, as run". |
 | 1 -- the face in the core | done | All 38 characters among the archive's 40 `.chf` files blend, 24 male and 14 female, v7 and v8; the other two are a tattoo overlay and a hair colour, and fail with a message. |
-| 2 -- colour | done; the dye reading is open | The `.chf`'s head material resolves through one record's lookup table; head and body recolour to `BodyColor` and meet at the neck with the fudge factors gone; the iris takes `EyeColor`; hair, beard and brows take their melanin and dye. Freckles and sun spots are not drawn. See "Phases 1-4, as run". |
+| 2 -- colour | done | The `.chf`'s head material resolves through one record's lookup table; head and body recolour to `BodyColor` and meet at the neck with the fudge factors gone; the iris takes `EyeColor`; hair, beard and brows take their melanin and dye. Freckles and sun spots are not drawn. See "Phases 1-4, as run". |
 | 3 -- the player's items | done | Hair, brows, lashes, beard, stubble, scalp and piercings, fitted to the face; the hair swaps under a cap and goes under a mask or helmet. |
 | 4 -- UI | done | The character stays on through outfits, belongs to its own body, and a share link of its outfit opens on the default figure. |
 
@@ -261,17 +261,17 @@ inside it the texel becomes `IrisColor` scaled by its brightness over the
 iris's mean. The protos head's own brown eye is untouched.
 
 **Hair.** `HairDyeColor1` is `DyeColor` in sRGB, exactly (`#89756b` is
-`hair_31`'s), and the melanin and dye parameters match by name. **Open:** how
-the dye combines. Mixed toward the dye colour by `DyeAmount` -- the reading
-`materials.hairColour` has always used -- seven archive characters get vivid
-blue brows: the masculine default, Macken and five more share a preset of
-black melanin under a `#08049c` dye at amount 1. Absorbed instead (colours
-multiplying, as Chiang et al. add a dye's absorption to melanin's) those brows
-are black, but `hair_31`'s own dye then darkens the figure's hair from brown
-to near black. `DyeFadeout` (up to 14.5) and a second dye colour suggest a
-root-to-tip ombre that a flat colour draws neither way. The mix stays; Ilucide
-settles it -- the `.chf` dyes the beard and brows `#fefefe` at 0.71 and 0.91,
-so under the mix they are light grey.
+`hair_31`'s), and the melanin and dye parameters match by name. **The dye
+absorbs; settled by Ilucide.** The `.chf` dyes Ilucide's beard and brows
+`#fefefe` at 0.71 and 0.91; mixed toward the dye colour by `DyeAmount` -- the
+first reading -- they came out light grey and near-white, and Noel reports
+them **dark with grey highlights** in game. Absorbed (colours multiplying, as
+Chiang et al. add a dye's absorption to melanin's: `pigment x dye ^ amount`)
+a near-white dye takes nothing away, and the grey is the strands' highlight.
+The same reading turns the seven archive characters whose brows the mix drew
+vivid blue -- black melanin under a `#08049c` dye -- black. It also takes
+`hair_31`'s own brown dye to darken the default figure's hair to near black.
+`DyeFadeout` (up to 14.5) and the second dye colour stay unread.
 
 **Not drawn:** freckles and sun spots (the blemish masks are resolved, the
 shader's use of them is not), makeup and tattoos.
@@ -314,6 +314,31 @@ solid: an opaque sheet over the forehead, the brows and the jaw. And strands
 are drawn no glossier than roughness 0.75: hair's highlight is a thin
 anisotropic band, and an isotropic one at `1 - Smoothness` spread across
 `hair_75`'s flat back and sides as a grey-white sheet.
+
+**Strands, drawn as strands.** Hair looked like scratches and clumps, and
+not for want of texture: the strand masks are 4096, two channels, strands
+1.25-2 px wide, and decoding them at full size changed nothing on screen,
+because a head on screen samples a small mip regardless. Box-filtered down to
+that mip a strand is a faint smear, and the alpha test turned smears into
+clumps; the flat 1.6x lift that stood in for mip handling made every level
+about twice as dense as the strands are. Now each mip is scaled so the
+fraction passing the test is its mean opacity -- which box filtering
+preserves, and which is the true coverage (`texture_6`: 8.1% mean against
+8.3% of texels over half) -- and three.js's alpha to coverage sharpens each
+strand by its screen footprint. Both strand sets are drawn (red and green):
+one alone read as thinning hair.
+
+Cards are shaded as hair from two maps the material names and the viewer
+ignored: the **ID map** (`%CARD_ID_MAP`, a random grey per strand) moves each
+strand's melanin either way by `BaseMelaninVariation`, and the **direction
+map** (`%DIRECTION_MAP`) drives an anisotropic highlight across the strands
+(`MeshPhysicalMaterial` anisotropy, tangents from screen derivatives). How far
+a variation of one moves the melanin, the highlight's strength and its
+stretch are chosen (`STRAND_MELANIN_SPREAD`, `HAIR_SPECULAR`,
+`HAIR_ANISOTROPY`), against Noel's "dark with grey highlights". What is left:
+the scalp under the strands shows skin, where the game's coat and cap layers
+shade it; and a card's own edge -- the hairline, the foot of the beard's cap
+-- is a hard cut.
 
 **The outfit decides what shows, by the character's own ports.** An item is
 hidden when something worn hides its port or the head; hair also under any

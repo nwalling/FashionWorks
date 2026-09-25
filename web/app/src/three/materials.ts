@@ -29,6 +29,7 @@ import {
   type Material,
   MeshBasicMaterial,
   LinearMipmapLinearFilter,
+  MeshPhysicalMaterial,
   MeshStandardMaterial,
   NoColorSpace,
   RGBAFormat,
@@ -277,7 +278,7 @@ export function plainMaterial(sub: Submaterial, textures: SurfaceTextures, sibli
     });
   }
 
-  if (shader.includes('hair')) return hairMaterial(sub, diffuseMap, siblings);
+  if (shader.includes('hair')) return hairMaterial(sub, textures, siblings);
 
   const skin = ['humanskin', 'eye', 'organic'].some((s) => shader.includes(s));
   const material = new MeshStandardMaterial({
@@ -319,33 +320,35 @@ export function plainMaterial(sub: Submaterial, textures: SurfaceTextures, sibli
  * black on the scalp, and `TexSlot1` is an opacity mask, two strand sets in red
  * and green over a flat blue. Drawn as a colour map it came out as blue and
  * rainbow cards. The colour is physical: `BaseMelanin` and
- * `BaseMelaninRedness` for the pigment, `DyeColor` over it by `DyeAmount`.
+ * `BaseMelaninRedness` for the pigment, `DyeColor` absorbed over it by
+ * `DyeAmount` (`hairColour`).
  *
- * Cards are alpha-tested on the red strands, with alpha to coverage so the
- * MSAA target softens the edges, and the mask lifted by `OpacityMipScale`'s
- * spirit so strands do not thin to nothing in the smaller mips. The scalp
- * cap is the same colour blended over the skin through its density mask. */
-function hairMaterial(sub: Submaterial, mask: Texture | undefined, siblings: readonly Submaterial[]): Material {
+ * Cards (`%HAIR_CARDS`) are drawn as strands: alpha to coverage on a mask whose
+ * mips keep the strands' coverage (`strandMask`), each strand its own shade of
+ * the pigment from the ID map (`%CARD_ID_MAP`, `BaseMelaninVariation`), and an
+ * anisotropic highlight running across the strands from the direction map
+ * (`%DIRECTION_MAP`). A cap (`%HAIR_CAP`) or a coat (`%HAIR_COAT`, a buzz
+ * cut's short hair) is shade on the skin: the pigment, matte, blended through
+ * its density mask. */
+function hairMaterial(sub: Submaterial, textures: SurfaceTextures, siblings: readonly Submaterial[]): Material {
   const params = sub.params ?? {};
-  // Cards are alpha-tested strands; a cap (`%HAIR_CAP`) or a coat
-  // (`%HAIR_COAT`, a buzz cut's short hair) is blended over the skin through
-  // its mask. The flags say which; a core too old to send them leaves the
-  // name, where the cards' mask is the one named `_opac` -- which a coat's
+  // The flags say which kind; a core too old to send them leaves the name,
+  // where the cards' mask is the one named `_opac` -- which a coat's
   // (`hair_02_shaved_opac`) is too, drawn as a solid band on the forehead.
   const cap = sub.hair ? sub.hair !== 'cards' : !/_opac\b/i.test(sub.textures.base_color ?? '');
-  const smoothness = scalar(params.Smoothness, 0.5);
+  const mask = sub.textures.base_color ? textures.byPath.get(sub.textures.base_color) : undefined;
   // The cap declares only smoothness and specular; its colour is the hair's.
   const pigment = params.BaseMelanin !== undefined
     ? params
     : siblings.find((s) => s.params?.BaseMelanin !== undefined)?.params ?? params;
+  return cap ? hairCap(sub, mask, pigment) : hairCards(sub, mask, textures, pigment);
+}
+
+function hairCap(sub: Submaterial, mask: Texture | undefined, pigment: HairParams): Material {
   const material = new MeshStandardMaterial({
     name: sub.name,
     color: hairColour(pigment),
-    // Hair's highlight is anisotropic, a thin band along each strand. Drawn
-    // isotropic at `1 - Smoothness` it spread into a sheet across cards that
-    // lie flat, and `hair_75`'s short back and sides shone grey-white; from
-    // 0.75 up it is gone. A cap or coat is matte: it is shade on the skin.
-    roughness: cap ? 1 : Math.min(1, Math.max(HAIR_MIN_ROUGHNESS, 1 - smoothness)),
+    roughness: 1,
     metalness: 0,
     side: DoubleSide,
   });
@@ -353,71 +356,212 @@ function hairMaterial(sub: Submaterial, mask: Texture | undefined, siblings: rea
   // be laid over it (CHARACTER.md Phase 2).
   material.userData.hairPigment = pigment;
   if (!mask) return material;
-  material.alphaMap = twoChannel(mask);
-  if (cap) {
-    material.transparent = true;
-    material.depthWrite = false;
-    material.polygonOffset = true;
-    material.polygonOffsetFactor = -1;
-    material.polygonOffsetUnits = -1;
-  } else {
-    material.alphaTest = HAIR_ALPHA_TEST;
-    material.alphaToCoverage = true;
-  }
-  // three.js reads an alpha map's green; the cards' first strand set is red,
-  // and the scalp's density is grey, where red is as good as any.
+  material.alphaMap = densityMask(mask, false);
+  material.transparent = true;
+  material.depthWrite = false;
+  material.polygonOffset = true;
+  material.polygonOffsetFactor = -1;
+  material.polygonOffsetUnits = -1;
   material.onBeforeCompile = (shader) => {
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <alphamap_fragment>',
       `#ifdef USE_ALPHAMAP
-        diffuseColor.a *= clamp(texture2D(alphaMap, vAlphaMapUv).r * ${cap ? '1.0' : HAIR_ALPHA_LIFT.toFixed(2)}, 0.0, 1.0);
+        diffuseColor.a *= texture2D(alphaMap, vAlphaMapUv).r;
       #endif`,
     );
   };
-  material.customProgramCacheKey = () => (cap ? 'fw-hair-cap' : 'fw-hair');
+  material.customProgramCacheKey = () => 'fw-hair-cap';
   return material;
 }
 
-/** A mask's density and green only, at half an RGBA's memory.
+function hairCards(
+  sub: Submaterial,
+  mask: Texture | undefined,
+  textures: SurfaceTextures,
+  pigment: HairParams,
+): Material {
+  const smoothness = scalar(sub.params?.Smoothness, 0.5);
+  const strandId = sub.textures.strand_id ? textures.byPath.get(sub.textures.strand_id) : undefined;
+  const direction = sub.textures.strand_direction ? textures.byPath.get(sub.textures.strand_direction) : undefined;
+  const [light, dark] = strandColours(pigment);
+  const material = new MeshPhysicalMaterial({
+    name: sub.name,
+    color: hairColour(pigment),
+    roughness: Math.min(1, Math.max(HAIR_MIN_ROUGHNESS, 1 - smoothness)),
+    metalness: 0,
+    side: DoubleSide,
+    // The map's blue is the strand's lean out of the card, about half on
+    // every texel, and three.js scales the strength by it.
+    anisotropy: direction ? HAIR_ANISOTROPY * 2 : HAIR_ANISOTROPY,
+    anisotropyMap: direction ?? null,
+    // Strands run down the card's V; without a map, turn the default U onto it.
+    anisotropyRotation: direction ? 0 : Math.PI / 2,
+    specularIntensity: HAIR_SPECULAR,
+  });
+  const uniforms = {
+    uStrandId: { value: strandId ?? null },
+    uHairLight: { value: light },
+    uHairDark: { value: dark },
+  };
+  material.userData.hairPigment = pigment;
+  material.userData.hairStrands = uniforms;
+  if (!mask) return material;
+  material.alphaMap = densityMask(mask, true);
+  material.alphaTest = HAIR_ALPHA_TEST;
+  material.alphaToCoverage = true;
+  material.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, uniforms);
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        uniform vec3 uHairLight;
+        uniform vec3 uHairDark;
+        ${strandId ? 'uniform sampler2D uStrandId;' : ''}`,
+      )
+      // Each strand its own shade: the ID map is a random grey per strand.
+      .replace(
+        '#include <map_fragment>',
+        `#include <map_fragment>
+        ${strandId ? 'diffuseColor.rgb = mix(uHairLight, uHairDark, texture2D(uStrandId, vAlphaMapUv).r);' : ''}`,
+      )
+      .replace(
+        '#include <alphamap_fragment>',
+        `#ifdef USE_ALPHAMAP
+          diffuseColor.a *= texture2D(alphaMap, vAlphaMapUv).r;
+        #endif`,
+      );
+  };
+  material.customProgramCacheKey = () => `fw-hair${strandId ? '-id' : ''}`;
+  return material;
+}
+
+type HairParams = Record<string, number | Float32Array>;
+
+/** The lightest and darkest strand of a head of hair: the pigment with its
+ * melanin moved either way by `BaseMelaninVariation`. How far a variation of
+ * one moves it is not in the data; `STRAND_MELANIN_SPREAD` is chosen. */
+function strandColours(params: HairParams): [Color, Color] {
+  const melanin = scalar(params.BaseMelanin, 0.5);
+  const spread = scalar(params.BaseMelaninVariation, 0) * STRAND_MELANIN_SPREAD;
+  const at = (m: number) => hairColour({ ...params, BaseMelanin: Math.min(0.999, Math.max(0, m)) });
+  return [at(melanin - spread), at(melanin + spread)];
+}
+
+/** A mask's density, in both channels of a two-channel texture.
  *
- * The strand mask is red and green over a flat blue, and `hair_31`'s scalp
- * density is grey. But most caps keep their density in **alpha** over white
- * RGB -- the brows', the beards', `m_hair_02_scalp`, all BC3 or BC7 -- and read
- * by red they were solid: an opaque sheet over the forehead, the brows and
- * the jaw. So the first channel is alpha wherever alpha varies, else red.
- * Two channels rather than one because three.js's shadow pass reads an alpha
- * map's green, and with a single channel the hair would cast no shadow. */
-function twoChannel(texture: Texture): Texture {
+ * The strand mask is red and green over a flat blue -- two strand sets, of
+ * which the first is drawn -- and `hair_31`'s scalp density is grey. But most
+ * caps keep their density in **alpha** over white RGB -- the brows', the
+ * beards', `m_hair_02_scalp`, all BC3 or BC7 -- and read by red they were
+ * solid: an opaque sheet over the forehead, the brows and the jaw. So density
+ * is alpha wherever alpha varies, else red. It goes in both channels because
+ * three.js's shadow pass reads an alpha map's green.
+ *
+ * **A strand mask's mips keep its coverage** (`strands`). The strands are
+ * authored 1.25-2 px wide at 4096; box-filtered down to the mip a head on
+ * screen samples, a strand is a faint smear, and an alpha test turned the
+ * smears into clumps -- the scratches on an undercut's sides, the lumps under
+ * a beard. The flat 1.6x lift that stood in for this made every mip about
+ * twice as dense as the strands are. Instead each level is scaled so the
+ * fraction of it that passes the test is its mean opacity -- which box
+ * filtering preserves exactly, and which is the strands' true coverage (8.1%
+ * mean against 8.3% of `texture_6` over half at full size). Castano's
+ * coverage-preserving mipmaps; three.js's alpha to coverage then sharpens each
+ * strand's edge by its screen footprint. */
+function densityMask(texture: Texture, strands: boolean): Texture {
   const image = texture.image as { data?: Uint8Array; width?: number; height?: number } | undefined;
   const data = image?.data;
   if (!data || !image?.width || !image.height) return texture;
   const texels = image.width * image.height;
   let alphaVaries = false;
   for (let i = 0; i < texels && !alphaVaries; i += 1) alphaVaries = data[i * 4 + 3] !== 255;
-  const density = alphaVaries ? 3 : 0;
-  const out = new Uint8Array(texels * 2);
+  const channel = alphaVaries ? 3 : 0;
+  let level = new Float32Array(texels);
   for (let i = 0; i < texels; i += 1) {
-    out[i * 2] = data[i * 4 + density]!;
-    out[i * 2 + 1] = alphaVaries ? data[i * 4 + 3]! : data[i * 4 + 1]!;
+    // Cards draw both strand sets: one alone reads as thinning hair.
+    const v = strands && !alphaVaries ? Math.max(data[i * 4]!, data[i * 4 + 1]!) : data[i * 4 + channel]!;
+    level[i] = v / 255;
   }
-  const mask = new DataTexture(out, image.width, image.height, RGFormat, UnsignedByteType);
+  let width = image.width;
+  let height = image.height;
+  const mipmaps: Array<{ data: Uint8Array<ArrayBuffer>; width: number; height: number }> = [];
+  for (;;) {
+    const scale = strands ? coverageScale(level, HAIR_ALPHA_TEST) : 1;
+    const out = new Uint8Array(width * height * 2);
+    for (let i = 0; i < width * height; i += 1) {
+      const v = Math.min(255, Math.round(level[i]! * scale * 255));
+      out[i * 2] = v;
+      out[i * 2 + 1] = v;
+    }
+    mipmaps.push({ data: out, width, height });
+    if (width === 1 && height === 1) break;
+    const w = Math.max(1, width >> 1);
+    const h = Math.max(1, height >> 1);
+    const next = new Float32Array(w * h);
+    for (let y = 0; y < h; y += 1) {
+      for (let x = 0; x < w; x += 1) {
+        let sum = 0;
+        let n = 0;
+        for (let dy = 0; dy < 2; dy += 1) {
+          for (let dx = 0; dx < 2; dx += 1) {
+            const sx = Math.min(width - 1, x * 2 + dx);
+            const sy = Math.min(height - 1, y * 2 + dy);
+            sum += level[sy * width + sx]!;
+            n += 1;
+          }
+        }
+        next[y * w + x] = sum / n;
+      }
+    }
+    level = next;
+    width = w;
+    height = h;
+  }
+  const mask = new DataTexture(mipmaps[0]!.data, mipmaps[0]!.width, mipmaps[0]!.height, RGFormat, UnsignedByteType);
+  mask.mipmaps = mipmaps;
   mask.colorSpace = NoColorSpace;
   mask.wrapS = RepeatWrapping;
   mask.wrapT = RepeatWrapping;
   mask.anisotropy = texture.anisotropy;
-  mask.generateMipmaps = true;
+  mask.generateMipmaps = false;
   mask.minFilter = LinearMipmapLinearFilter;
   mask.needsUpdate = true;
   return mask;
 }
 
+/** The factor that makes the fraction of `level` passing `threshold` equal
+ * its mean: a 256-bin histogram, read from the top down. */
+export function coverageScale(level: Float32Array, threshold: number): number {
+  const bins = new Uint32Array(256);
+  let sum = 0;
+  for (const v of level) {
+    bins[Math.min(255, Math.floor(v * 255))]! += 1;
+    sum += v;
+  }
+  const target = sum / level.length;
+  if (target <= 0) return 1;
+  let passing = 0;
+  for (let b = 255; b > 0; b -= 1) {
+    passing += bins[b]!;
+    if (passing / level.length >= target) return Math.max(1, threshold / (b / 255));
+  }
+  return 1;
+}
+
 const HAIR_ALPHA_TEST = 0.35;
-/** The glossiest a strand card is drawn; see `hairMaterial`. */
-const HAIR_MIN_ROUGHNESS = 0.75;
-/** How far the strand mask is lifted before the test. CryEngine scales it by
- * mip (`OpacityMipScale`, 3.4 on the hair measured); a flat lift is the cheap
- * version, and keeps a 1024 decode from reading as thinning hair. */
-const HAIR_ALPHA_LIFT = 1.6;
+/** The glossiest a strand card is drawn. The highlight is anisotropic now,
+ * a band across the strands; isotropic, anything glossier than 0.75 spread
+ * into a grey-white sheet over cards that lie flat. */
+const HAIR_MIN_ROUGHNESS = 0.5;
+/** The highlight's strength. At full strength the thin strands glinted white
+ * against dark hair; the game's read "dark with grey highlights". Chosen. */
+const HAIR_SPECULAR = 0.5;
+/** How stretched the highlight is across the strands, 0 to 1. Chosen. */
+const HAIR_ANISOTROPY = 0.85;
+/** Melanin either side of the pigment at a `BaseMelaninVariation` of one.
+ * Chosen: the data says a head varies, not by how much. */
+const STRAND_MELANIN_SPREAD = 0.15;
 
 function scalar(value: number | Float32Array | undefined, fallback: number): number {
   if (typeof value === 'number') return value;
@@ -454,17 +598,18 @@ export function hairColour(params: Record<string, number | Float32Array>): Color
   const k = 5.969 - 0.215 * beta + 2.532 * beta ** 2 - 10.73 * beta ** 3 + 5.574 * beta ** 4 + 0.245 * beta ** 5;
   const tint = vector(params.BaseTintColor) ?? [1, 1, 1];
   let rgb = sigma.map((s, i) => Math.exp(-Math.sqrt(s) * k) * tint[i]!);
-  // The dye mixes over the pigment by `DyeAmount`. **Open**: seven archive
-  // characters, the masculine default and Macken among them, share a brow
-  // preset of black melanin under a `#08049c` dye at amount 1, which this
-  // reading draws as vivid blue. Absorbing instead (colours multiplying, as
-  // Chiang et al. add a dye's absorption to melanin's) draws those black and
-  // darkens `hair_31` from brown to near black. `DyeFadeout` and a second dye
-  // colour point at a root-to-tip ombre a flat colour cannot draw either way;
-  // CHARACTER.md, Phase 2.
+  // The dye absorbs on top of the pigment, as in the model the parameter
+  // names come from -- Chiang et al. add a dye's absorption to melanin's, so
+  // transmittances multiply: `pigment x dye ^ DyeAmount`. Mixing *to* the dye
+  // colour, the first reading, gave seven archive characters vivid blue brows
+  // (black melanin under a `#08049c` dye at amount 1) and Ilucide a grey beard
+  // and white brows, where the game shows them dark with grey highlights: the
+  // `.chf` dyes them `#fefefe`, which absorbs nothing. The highlights are the
+  // strands' specular. `DyeFadeout` is not used: it runs to 14.5 on one beard,
+  // so it is not the fraction it sounds.
   const dye = vector(params.DyeColor);
   const amount = Math.min(1, Math.max(0, scalar(params.DyeAmount, 0)));
-  if (dye && amount > 0) rgb = rgb.map((c, i) => c + (dye[i]! - c) * amount);
+  if (dye && amount > 0) rgb = rgb.map((c, i) => c * Math.max(dye[i]!, 1e-4) ** amount);
   return new Color().setRGB(rgb[0]!, rgb[1]!, rgb[2]!);
 }
 
@@ -592,9 +737,16 @@ export function setIris(material: Material, colour: ArrayLike<number> | null): v
 /** Recolour a hair material from a character's melanin and dye, laid over
  * the material's own parameters; null restores them. */
 export function setHairLooks(material: Material, looks: Record<string, number | Float32Array> | null): void {
-  const pigment = material.userData.hairPigment as Record<string, number | Float32Array> | undefined;
+  const pigment = material.userData.hairPigment as HairParams | undefined;
   if (!pigment || !(material instanceof MeshStandardMaterial)) return;
-  material.color.copy(hairColour(looks ? { ...pigment, ...looks } : pigment));
+  const params = looks ? { ...pigment, ...looks } : pigment;
+  material.color.copy(hairColour(params));
+  const strands = material.userData.hairStrands as { uHairLight: { value: Color }; uHairDark: { value: Color } } | undefined;
+  if (strands) {
+    const [light, dark] = strandColours(params);
+    strands.uHairLight.value.copy(light);
+    strands.uHairDark.value.copy(dark);
+  }
 }
 
 function srgbToLinear(byte: number): number {
@@ -613,6 +765,9 @@ export function texturesWanted(sub: Submaterial): Array<{ path: string; srgb: bo
   // Hair's slot 1 is a mask, not a colour, and an sRGB decode would thin it.
   const hair = sub.shader.toLowerCase().includes('hair');
   if (!sub.tintable && sub.textures.base_color) out.push({ path: sub.textures.base_color, srgb: !hair });
+  // A strand's shade and its direction: data, not colour.
+  if (hair && sub.textures.strand_id) out.push({ path: sub.textures.strand_id, srgb: false });
+  if (hair && sub.textures.strand_direction) out.push({ path: sub.textures.strand_direction, srgb: false });
   return out;
 }
 

@@ -227,12 +227,21 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<SubMaterial>, String> {
             // (`_diff`, `_ddna`, `_spec`) are for.
             let layered = sub.shader.to_ascii_lowercase().contains("layerblend");
             let skin = sub.shader.to_ascii_lowercase().contains("humanskin");
+            let hair_shader = sub.shader.to_ascii_lowercase().contains("hair");
             let mut textures = HashMap::new();
             for binding in &sub.texture_slots {
                 if binding.path.is_empty() {
                     continue;
                 }
-                let role = if skin && binding.slot.eq_ignore_ascii_case("TexSlot7") {
+                let role = if hair_shader && binding.slot.eq_ignore_ascii_case("TexSlot4") {
+                    // `HairPBR`'s strand ID map (`%CARD_ID_MAP`): a random grey
+                    // per strand, which the melanin varies by.
+                    Some("strand_id")
+                } else if hair_shader && binding.slot.eq_ignore_ascii_case("TexSlot6") {
+                    // Its direction map (`%DIRECTION_MAP`): each strand's
+                    // tangent, for the highlight that runs across it.
+                    Some("strand_direction")
+                } else if skin && binding.slot.eq_ignore_ascii_case("TexSlot7") {
                     // Skin's slot 7 is its tone mask, whose green says where
                     // the texture shows and where the flat skin tone does --
                     // black exactly where head and body meet. Read as the
