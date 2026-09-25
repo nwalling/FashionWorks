@@ -341,10 +341,10 @@ function hairMaterial(sub: Submaterial, textures: SurfaceTextures, siblings: rea
   const pigment = params.BaseMelanin !== undefined
     ? params
     : siblings.find((s) => s.params?.BaseMelanin !== undefined)?.params ?? params;
-  return cap ? hairCap(sub, mask, pigment) : hairCards(sub, mask, textures, pigment);
+  return cap ? hairCap(sub, mask, pigment, sub.hair === 'coat' ? 'coat' : 'cap') : hairCards(sub, mask, textures, pigment);
 }
 
-function hairCap(sub: Submaterial, mask: Texture | undefined, pigment: HairParams): Material {
+function hairCap(sub: Submaterial, mask: Texture | undefined, pigment: HairParams, kind: 'cap' | 'coat'): Material {
   const material = new MeshStandardMaterial({
     name: sub.name,
     color: hairColour(pigment),
@@ -356,7 +356,7 @@ function hairCap(sub: Submaterial, mask: Texture | undefined, pigment: HairParam
   // be laid over it (CHARACTER.md Phase 2).
   material.userData.hairPigment = pigment;
   if (!mask) return material;
-  material.alphaMap = densityMask(mask, false);
+  material.alphaMap = densityMask(mask, kind);
   material.transparent = true;
   material.depthWrite = false;
   material.polygonOffset = true;
@@ -406,7 +406,7 @@ function hairCards(
   material.userData.hairPigment = pigment;
   material.userData.hairStrands = uniforms;
   if (!mask) return material;
-  material.alphaMap = densityMask(mask, true);
+  material.alphaMap = densityMask(mask, 'strands');
   material.alphaTest = HAIR_ALPHA_TEST;
   material.alphaToCoverage = true;
   material.onBeforeCompile = (shader) => {
@@ -468,8 +468,18 @@ function strandColours(params: HairParams): [Color, Color] {
  * filtering preserves exactly, and which is the strands' true coverage (8.1%
  * mean against 8.3% of `texture_6` over half at full size). Castano's
  * coverage-preserving mipmaps; three.js's alpha to coverage then sharpens each
- * strand's edge by its screen footprint. */
-function densityMask(texture: Texture, strands: boolean): Texture {
+ * strand's edge by its screen footprint.
+ *
+ * **A cap is read against its own peak.** The scalp shade under a hairstyle
+ * is a soft mask, and most ship peaking far below one: the universal scalp's
+ * `m_hair_02_scalp` at 0.29, the beard's at 0.28, the brows' at 0.44, where
+ * `hair_31`'s reaches 1.0. Taken as absolute, the scalp under a head of hair
+ * took at most 29% of its colour and showed as bare skin between the strands.
+ * The cluster reads as a convention the shader scales, so the peak is drawn
+ * as full shade and the falloff to the hairline keeps its shape. Inferred.
+ * Coats are left as they are: their strands already reach one. */
+function densityMask(texture: Texture, kind: 'strands' | 'cap' | 'coat'): Texture {
+  const strands = kind === 'strands';
   const image = texture.image as { data?: Uint8Array; width?: number; height?: number } | undefined;
   const data = image?.data;
   if (!data || !image?.width || !image.height) return texture;
@@ -482,6 +492,11 @@ function densityMask(texture: Texture, strands: boolean): Texture {
     // Cards draw both strand sets: one alone reads as thinning hair.
     const v = strands && !alphaVaries ? Math.max(data[i * 4]!, data[i * 4 + 1]!) : data[i * 4 + channel]!;
     level[i] = v / 255;
+  }
+  if (kind === 'cap') {
+    let peak = 0;
+    for (const v of level) peak = Math.max(peak, v);
+    if (peak > 0) for (let i = 0; i < texels; i += 1) level[i] = level[i]! / peak;
   }
   let width = image.width;
   let height = image.height;

@@ -1,4 +1,6 @@
 import { createReadStream, readFileSync, statSync } from 'node:fs';
+import { open } from 'node:fs/promises';
+import type { ServerResponse } from 'node:http';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vite';
@@ -53,10 +55,52 @@ function archiveRange(): Plugin {
           'content-length': end - start + 1,
           'accept-ranges': 'bytes',
         });
-        createReadStream(path, { start, end }).pipe(response);
+        void sendRange(path, start, end, response);
       });
     },
   };
+}
+
+/** Send `start..=end` of the archive, a chunk at a time, retrying a chunk
+ * that fails.
+ *
+ * The archive here sits on an SMB share, and a share hands back the odd
+ * `EIO`. Piped straight from a read stream, one such error was an unhandled
+ * `'error'` event that took the whole dev server down -- three times in one
+ * day. A failed chunk is retried; only if it keeps failing does this one
+ * request end early, and the server stays up. */
+async function sendRange(path: string, start: number, end: number, response: ServerResponse): Promise<void> {
+  const CHUNK = 4 * 1024 * 1024;
+  const ATTEMPTS = 4;
+  let file: Awaited<ReturnType<typeof open>> | null = null;
+  try {
+    file = await open(path, 'r');
+    for (let at = start; at <= end; at += CHUNK) {
+      const length = Math.min(CHUNK, end - at + 1);
+      const buffer = Buffer.alloc(length);
+      for (let attempt = 1; ; attempt += 1) {
+        try {
+          let filled = 0;
+          while (filled < length) {
+            const { bytesRead } = await file.read(buffer, filled, length - filled, at + filled);
+            if (bytesRead === 0) throw new Error('unexpected end of archive');
+            filled += bytesRead;
+          }
+          break;
+        } catch (error) {
+          if (attempt >= ATTEMPTS) throw error;
+          await new Promise((r) => setTimeout(r, 200 * attempt));
+        }
+      }
+      if (!response.write(buffer)) await new Promise((r) => response.once('drain', r));
+    }
+    response.end();
+  } catch (error) {
+    console.error(`[fashionworks] range ${start}-${end} failed:`, error);
+    response.destroy();
+  } finally {
+    await file?.close().catch(() => {});
+  }
 }
 
 /** Put the WebAssembly core in the published package.

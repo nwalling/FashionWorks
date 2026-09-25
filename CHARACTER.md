@@ -335,10 +335,17 @@ map** (`%DIRECTION_MAP`) drives an anisotropic highlight across the strands
 (`MeshPhysicalMaterial` anisotropy, tangents from screen derivatives). How far
 a variation of one moves the melanin, the highlight's strength and its
 stretch are chosen (`STRAND_MELANIN_SPREAD`, `HAIR_SPECULAR`,
-`HAIR_ANISOTROPY`), against Noel's "dark with grey highlights". What is left:
-the scalp under the strands shows skin, where the game's coat and cap layers
-shade it; and a card's own edge -- the hairline, the foot of the beard's cap
--- is a hard cut.
+`HAIR_ANISOTROPY`), against Noel's "dark with grey highlights".
+
+**The scalp under the strands is shaded by its cap, read against the cap's
+own peak.** Most cap masks peak far below one -- the universal scalp's
+`m_hair_02_scalp` at 0.29, the beard's at 0.28, the brows' at 0.44, where
+`hair_31`'s reaches 1.0 -- so taken as absolute the scalp under a head of hair
+took at most 29% of its colour and showed as bare skin between the strands.
+The cluster reads as a convention the shader scales, so the peak is drawn as
+full shade and the falloff keeps its shape. **Inferred.** Coats already reach
+one and are unchanged. What is left is a card's own edge: the foot of the
+beard's cap under the jaw is a hard cut.
 
 **The outfit decides what shows, by the character's own ports.** An item is
 hidden when something worn hides its port or the head; hair also under any
