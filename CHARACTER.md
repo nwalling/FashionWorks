@@ -389,7 +389,8 @@ from matching angles, measured as ratios against the skin in the same image
   capture's hair is a dark ash-brown near 7% of the skin's luminance, which
   `hair_75`'s pigment already gives; the darkness was lighting, not colour.
 
-Still off: the captures' hair carries a broad grey sheen ours lacks; the head
+Still off: the captures' hair carries a broader grey sheen than ours, most of
+it their bright overhead light; the head
 mesh's lower neck rim shows as two dark triangles either side of the collar,
 on the default face too; the beard's cap ends in a hard edge under the jaw.
 

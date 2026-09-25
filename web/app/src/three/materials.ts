@@ -658,9 +658,10 @@ const HAIR_SPHERE = 0.8;
  * a band across the strands; isotropic, anything glossier than 0.75 spread
  * into a grey-white sheet over cards that lie flat. */
 const HAIR_MIN_ROUGHNESS = 0.5;
-/** The highlight's strength. At full strength the thin strands glinted white
- * against dark hair; the game's read "dark with grey highlights". Chosen. */
-const HAIR_SPECULAR = 0.5;
+/** The highlight's strength. It was halved once for white glints across the
+ * hair, which turned out to be the per-strand dye misfiring, not the
+ * highlight; at full strength it is the faint grey sheen of the captures. */
+const HAIR_SPECULAR = 1;
 /** How stretched the highlight is across the strands, 0 to 1. Chosen. */
 const HAIR_ANISOTROPY = 0.85;
 /** Melanin either side of the pigment at a `BaseMelaninVariation` of one.
