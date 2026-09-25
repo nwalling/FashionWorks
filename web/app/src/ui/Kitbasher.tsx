@@ -1,13 +1,15 @@
 /** The kitbasher, as the component shows it once the catalogue exists.
  *
- * A listing down the side, the body in the middle, a strip of controls on
- * top. The DOM here is plain and the state comes from `Kitbasher` (the class),
+ * LAYOUT.md. A column down the side holds everything the mode switch
+ * changes: the mode, the slot tiles, the listing, equip set and clear. Over
+ * the body sit two overlays: the scene cluster (body, light, quality, More)
+ * at the top right, and the pose dock at the bottom. The DOM here is plain and the state comes from `Kitbasher` (the class),
  * which owns the scene objects and publishes what it is wearing and carrying.
  *
  * Colours are all tokens through `kitbasher.css`; nothing here has a hex value.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import type { ArchiveClient } from '../archive/client';
 import {
@@ -114,6 +116,27 @@ function rememberFigure(on: boolean): void {
   }
 }
 
+/** The width at and below which the stage sits over the column, the tiles
+ * are chips and the scene controls fold into one button. `kitbasher.css`
+ * uses the same number. */
+const NARROW = '(max-width: 720px)';
+
+/** Whether the page is at `NARROW`, kept current as the window changes. */
+function useNarrow(): boolean {
+  const query = () => typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    && window.matchMedia(NARROW).matches;
+  const [narrow, setNarrow] = useState(query);
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return undefined;
+    const list = window.matchMedia(NARROW);
+    const update = () => setNarrow(list.matches);
+    update();
+    list.addEventListener('change', update);
+    return () => list.removeEventListener('change', update);
+  }, []);
+  return narrow;
+}
+
 /** What each pose button does, which with a weapon includes where it goes. */
 const POSE_TITLES: Record<string, (holding: boolean) => string> = {
   rest: (holding) => `The skeleton's rest pose${holding ? '; the weapon goes back in its holster' : ''}`,
@@ -138,6 +161,31 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
   const [quality, setQuality] = useState<Quality | null>(null);
   const picker = useRef<HTMLInputElement>(null);
   const chfPicker = useRef<HTMLInputElement>(null);
+  const narrow = useNarrow();
+  // The More popover: a disclosure. It closes on Escape, on a click outside,
+  // and on More again -- never on a control inside it being used, since
+  // someone flipping surface wants to see the result and flip it back.
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreId = useId();
+  const moreButton = useRef<HTMLButtonElement>(null);
+  const sceneRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!moreOpen) return undefined;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setMoreOpen(false);
+      moreButton.current?.focus();
+    };
+    const onPointer = (event: PointerEvent) => {
+      if (!sceneRef.current?.contains(event.target as Node)) setMoreOpen(false);
+    };
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('pointerdown', onPointer);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('pointerdown', onPointer);
+    };
+  }, [moreOpen]);
   const slot: WearSlot | GearSlot = mode === 'armour' ? armourSlot : mode === 'clothing' ? clothingSlot : gearSlot;
 
   // The engine is built once the scene exists, and torn down with the view.
@@ -308,260 +356,244 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
     if (next !== 'gear') void engine.current?.setOutfit(next);
   };
 
+  const modeSwitch = (
+    // Armour, clothing or gear: the one control that decides what the slot
+    // tiles and the listing are about, so it heads the column it rewrites.
+    // Armour and clothing are also the outfit on the body, since the game
+    // allows only one.
+    <div className="fw-kit-modes" role="radiogroup" aria-label="What to browse">
+      {(['armour', 'clothing', 'gear'] as const).map((name) => (
+        <button
+          key={name}
+          type="button"
+          role="radio"
+          aria-checked={mode === name}
+          aria-pressed={mode === name}
+          disabled={busy && name !== 'gear' && mode !== name}
+          title={name === 'gear'
+            ? 'Weapons and equipment, into the holsters of what is worn'
+            : `Wear ${name}; the ${name === 'armour' ? 'clothing' : 'armour'} is kept aside`}
+          onClick={() => choose(name)}
+        >
+          {name}
+        </button>
+      ))}
+    </div>
+  );
+
+  // What a tile's second line says: the piece worn in the slot, or for gear
+  // what is carried for it, `+N` when several are (magazines often are).
+  const wornIn = (name: string): { line: string; more: string; full: string } | null => {
+    if (isGearSlot(name)) {
+      const carried = [...carrying.values()].filter((i) => i.slot === name);
+      if (!carried.length) return null;
+      const more = carried.length > 1 ? ` +${carried.length - 1}` : '';
+      return { line: titleOf(carried[0]!), more, full: carried.map(displayName).join(', ') };
+    }
+    const worn = wearing.get(name as WearSlot);
+    return worn ? { line: titleOf(worn), more: '', full: displayName(worn) } : null;
+  };
+
+  const tiles = (
+    // The slots as tiles: each is the tab for its slot and shows what is worn
+    // there, so the whole outfit is readable without looking at the body.
+    <div className="fw-kit-tiles" role="tablist" aria-label="Slot">
+      {tabs.map((name) => {
+        const worn = wornIn(name);
+        const count = countOf(name);
+        return (
+          <button
+            key={name}
+            type="button"
+            role="tab"
+            className="fw-kit-tile"
+            aria-selected={slot === name}
+            aria-label={`${slotLabel(name)}, ${count} ${count === 1 ? 'piece' : 'pieces'}, ${worn ? `wearing ${worn.full}` : 'empty'}`}
+            title={worn?.full}
+            onClick={() => {
+              if (isGearSlot(name)) {
+                setGearSlot(name);
+                setTarget(null);
+              } else if (mode === 'clothing') {
+                setClothingSlot(name as ClothingSlot);
+              } else {
+                setArmourSlot(name as WearSlot);
+              }
+            }}
+          >
+            <span className="fw-kit-tile-head">
+              <span className="fw-kit-tile-slot">{slotLabel(name)}</span>
+              <span className="fw-kit-count">{count}</span>
+            </span>
+            <span className="fw-kit-tile-worn" data-empty={worn ? undefined : ''}>
+              <span className="fw-kit-tile-name">{worn?.line ?? 'empty'}</span>
+              {worn?.more && <span className="fw-kit-tile-more">{worn.more}</span>}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  // The other outfit, kept aside: says what the exclusive-outfit model is
+  // doing better than the mode button's title can.
+  const asideCount = state?.aside.size ?? 0;
+  const asideNote = mode !== 'gear' && asideCount > 0 && (
+    <p className="fw-kit-aside">
+      {mode === 'armour' ? 'clothing' : 'armour'} kept aside: {asideCount} {asideCount === 1 ? 'piece' : 'pieces'}
+    </p>
+  );
+
+  const bodySwitch = (
+    <span className="fw-kit-group" role="group" aria-label="Body">
+      <span className="fw-kit-label">body</span>
+      {(['male', 'female'] as const).map((body) => (
+        <button
+          key={body}
+          type="button"
+          aria-pressed={(state?.body ?? 'male') === body}
+          disabled={busy}
+          title={`Dress the ${body} body`}
+          onClick={() => void engine.current?.setBody(body)}
+        >
+          {body}
+        </button>
+      ))}
+    </span>
+  );
+
+  const lightSelect = lighting.length > 0 && (
+    <span className="fw-kit-group">
+      <span className="fw-kit-label">light</span>
+      <select
+        className="fw-kit-select"
+        aria-label="Lighting"
+        value={state?.lighting ?? ''}
+        onChange={(event) => {
+          const id = event.target.value;
+          rememberLighting(id);
+          void engine.current?.setLighting(id);
+        }}
+      >
+        {lighting.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
+      </select>
+    </span>
+  );
+
+  const qualitySelect = quality && (
+    <span className="fw-kit-group">
+      <span className="fw-kit-label">quality</span>
+      <select
+        className="fw-kit-select"
+        aria-label="Render quality"
+        title="Low draws straight to the screen; medium and high add ambient occlusion; the percentages draw more pixels than the display has"
+        value={quality}
+        onChange={(event) => {
+          const next = event.target.value as Quality;
+          viewer.current?.setQuality(next);
+          setQuality(next);
+          void engine.current?.setSurfaceMode(next === 'low' ? 'baked' : 'live');
+        }}
+      >
+        {QUALITIES.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
+      </select>
+    </span>
+  );
+
+  // Set once, if ever: behind More.
+  const moreRows = (
+    <>
+      <div className="fw-kit-more-row">
+        <span className="fw-kit-label">figure</span>
+        <button
+          type="button"
+          aria-pressed={state?.figure ?? true}
+          title="Draw the body and head under what is worn, or what is worn alone"
+          onClick={() => {
+            const next = !(state?.figure ?? true);
+            rememberFigure(next);
+            engine.current?.setFigure(next);
+          }}
+        >
+          figure
+        </button>
+      </div>
+      <div className="fw-kit-more-row">
+        <span className="fw-kit-label">character</span>
+        {/* A player's own face, from the file the game's customizer saves.
+            It is read here, in the browser, and goes nowhere. */}
+        <button
+          type="button"
+          aria-pressed={Boolean(state?.character)}
+          disabled={busy}
+          title={state?.character
+            ? `${state.character}: load another character`
+            : 'Load your character: the .chf the game saves in StarCitizen/LIVE/user/client/0/CustomCharacters. It stays in this browser.'}
+          onClick={() => chfPicker.current?.click()}
+        >
+          {state?.character ?? 'character…'}
+        </button>
+        {state?.character && (
+          <button
+            type="button"
+            aria-label="Back to the default face"
+            title="Back to the default face"
+            disabled={busy}
+            onClick={() => void engine.current?.clearCharacter()}
+          >
+            ×
+          </button>
+        )}
+        <input
+          ref={chfPicker}
+          type="file"
+          accept=".chf"
+          hidden
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = '';
+            if (!file) return;
+            void file.arrayBuffer().then((buffer) => engine.current?.loadCharacter(
+              new Uint8Array(buffer),
+              file.name.replace(/\.chf$/i, ''),
+            ));
+          }}
+        />
+      </div>
+      <div className="fw-kit-more-row">
+        <span className="fw-kit-label">surface</span>
+        <button
+          type="button"
+          aria-pressed={state?.wear ?? true}
+          disabled={busy}
+          title="Worn in, or as it left the factory"
+          onClick={() => void engine.current?.setWear(!(state?.wear ?? true))}
+        >
+          {state?.wear === false ? 'factory' : 'worn'}
+        </button>
+      </div>
+      <div className="fw-kit-more-row">
+        <span className="fw-kit-label">backdrop</span>
+        <button type="button" onClick={() => picker.current?.click()}>choose…</button>
+        <button type="button" disabled={!backdrop} onClick={clearBackdrop}>none</button>
+        <input
+          ref={picker}
+          type="file"
+          accept="image/*"
+          hidden
+          onChange={(event) => chooseBackdrop(event.target.files?.[0])}
+        />
+      </div>
+    </>
+  );
+
   return (
     <div className="fw-kit" data-fashionworks-kitbasher="">
-      <div className="fw-kit-bar" role="toolbar" aria-label="Slot, body, pose, surface, set and backdrop">
-        {/* Armour, clothing or gear: the one control that decides what the
-            slot tabs and the listing are about. Armour and clothing are also
-            the outfit on the body, since the game allows only one. */}
-        <span className="fw-kit-group" role="radiogroup" aria-label="What to browse">
-          {(['armour', 'clothing', 'gear'] as const).map((name) => (
-            <button
-              key={name}
-              type="button"
-              role="radio"
-              aria-checked={mode === name}
-              aria-pressed={mode === name}
-              disabled={busy && name !== 'gear' && mode !== name}
-              title={name === 'gear'
-                ? 'Weapons and equipment, into the holsters of what is worn'
-                : `Wear ${name}; the ${name === 'armour' ? 'clothing' : 'armour'} is kept aside`}
-              onClick={() => choose(name)}
-            >
-              {name}
-            </button>
-          ))}
-        </span>
-        {/* The slots live up here rather than in the sidebar: six chips took
-            three rows of a narrow column, and that column's height is what the
-            listing needs. The toolbar already wraps. */}
-        <span className="fw-kit-group fw-kit-slots" role="tablist" aria-label="Slot">
-          {tabs.map((name) => (
-            <button
-              key={name}
-              type="button"
-              role="tab"
-              aria-selected={slot === name}
-              onClick={() => {
-                if (isGearSlot(name)) {
-                  setGearSlot(name);
-                  setTarget(null);
-                } else if (mode === 'clothing') {
-                  setClothingSlot(name as ClothingSlot);
-                } else {
-                  setArmourSlot(name as WearSlot);
-                }
-              }}
-            >
-              {slotLabel(name)} <span className="fw-kit-count">{countOf(name)}</span>
-            </button>
-          ))}
-        </span>
-        <span className="fw-kit-group">
-          <span className="fw-kit-label">body</span>
-          {(['male', 'female'] as const).map((body) => (
-            <button
-              key={body}
-              type="button"
-              aria-pressed={(state?.body ?? 'male') === body}
-              disabled={busy}
-              title={`Dress the ${body} body`}
-              onClick={() => void engine.current?.setBody(body)}
-            >
-              {body}
-            </button>
-          ))}
-          <button
-            type="button"
-            aria-pressed={state?.figure ?? true}
-            title="Draw the body and head under what is worn, or what is worn alone"
-            onClick={() => {
-              const next = !(state?.figure ?? true);
-              rememberFigure(next);
-              engine.current?.setFigure(next);
-            }}
-          >
-            figure
-          </button>
-          {/* A player's own face, from the file the game's customizer saves.
-              It is read here, in the browser, and goes nowhere. */}
-          <button
-            type="button"
-            aria-pressed={Boolean(state?.character)}
-            disabled={busy}
-            title={state?.character
-              ? `${state.character}: load another character`
-              : 'Load your character: the .chf the game saves in StarCitizen/LIVE/user/client/0/CustomCharacters. It stays in this browser.'}
-            onClick={() => chfPicker.current?.click()}
-          >
-            {state?.character ?? 'character…'}
-          </button>
-          {state?.character && (
-            <button
-              type="button"
-              aria-label="Back to the default face"
-              title="Back to the default face"
-              disabled={busy}
-              onClick={() => void engine.current?.clearCharacter()}
-            >
-              ×
-            </button>
-          )}
-          <input
-            ref={chfPicker}
-            type="file"
-            accept=".chf"
-            hidden
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              event.target.value = '';
-              if (!file) return;
-              void file.arrayBuffer().then((buffer) => engine.current?.loadCharacter(
-                new Uint8Array(buffer),
-                file.name.replace(/\.chf$/i, ''),
-              ));
-            }}
-          />
-        </span>
-        <span className="fw-kit-group">
-          <span className="fw-kit-label">pose</span>
-          {poses.map((pose) => (
-            <button
-              key={pose}
-              type="button"
-              aria-pressed={state?.pose === pose}
-              disabled={busy}
-              title={POSE_TITLES[pose]?.(Boolean(state?.holding))}
-              onClick={() => void engine.current?.setPose(pose)}
-            >
-              {pose}
-            </button>
-          ))}
-          <button
-            type="button"
-            aria-pressed={state?.animated ?? false}
-            disabled={!state || state.pose === 'rest'}
-            title="Play the pose as a loop: the character customizer's idle standing at ease, breathing otherwise"
-            onClick={() => void engine.current?.setAnimated(!(state?.animated ?? false))}
-          >
-            animate
-          </button>
-        </span>
-        {quality && (
-          <span className="fw-kit-group">
-            <span className="fw-kit-label">quality</span>
-            <select
-              className="fw-kit-select"
-              aria-label="Render quality"
-              title="Low draws straight to the screen; medium and high add ambient occlusion; the percentages draw more pixels than the display has"
-              value={quality}
-              onChange={(event) => {
-                const next = event.target.value as Quality;
-                viewer.current?.setQuality(next);
-                setQuality(next);
-                void engine.current?.setSurfaceMode(next === 'low' ? 'baked' : 'live');
-              }}
-            >
-              {QUALITIES.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
-            </select>
-          </span>
-        )}
-        {lighting.length > 0 && (
-          <span className="fw-kit-group">
-            <span className="fw-kit-label">light</span>
-            <select
-              className="fw-kit-select"
-              aria-label="Lighting"
-              value={state?.lighting ?? ''}
-              onChange={(event) => {
-                const id = event.target.value;
-                rememberLighting(id);
-                void engine.current?.setLighting(id);
-              }}
-            >
-              {lighting.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
-            </select>
-          </span>
-        )}
-        {holdable.length > 0 && (
-          <span className="fw-kit-group" role="radiogroup" aria-label="In hand">
-            <span className="fw-kit-label">hold</span>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={!state?.holding}
-              aria-pressed={!state?.holding}
-              disabled={busy}
-              onClick={() => void engine.current?.hold(null)}
-            >
-              {carrying.has(HAND) ? 'put down' : 'nothing'}
-            </button>
-            {holdable.map(([port, item]) => (
-              <button
-                key={port}
-                type="button"
-                role="radio"
-                aria-checked={state?.holding === port}
-                aria-pressed={state?.holding === port}
-                disabled={busy}
-                title={port === HAND
-                  ? `The ${displayName(item)}, in the hand: nothing worn holsters it`
-                  : `Hold the ${displayName(item)}, from the ${portLabel(state!.ports.get(port)!.port)} holster`}
-                onClick={() => void engine.current?.hold(port)}
-              >
-                {titleOf(item)}
-              </button>
-            ))}
-          </span>
-        )}
-        <span className="fw-kit-group">
-          <span className="fw-kit-label">surface</span>
-          <button
-            type="button"
-            aria-pressed={state?.wear ?? true}
-            disabled={busy}
-            title="Worn in, or as it left the factory"
-            onClick={() => void engine.current?.setWear(!(state?.wear ?? true))}
-          >
-            {state?.wear === false ? 'factory' : 'worn'}
-          </button>
-        </span>
-        <span className="fw-kit-group">
-          <button
-            type="button"
-            disabled={busy || wearing.size === 0}
-            title={mode === 'clothing'
-              ? 'Fill the empty slots from the same clothing line'
-              : 'Fill the empty slots to match the piece on the torso'}
-            onClick={() => void engine.current?.equipSet()}
-          >
-            equip set
-          </button>
-          <button
-            type="button"
-            disabled={mode === 'gear' ? carrying.size === 0 : wearing.size === 0}
-            title={mode === 'gear' ? 'Take all gear off' : `Take all ${mode} off`}
-            onClick={() => (mode === 'gear' ? engine.current?.clearGear() : engine.current?.undress())}
-          >
-            clear
-          </button>
-        </span>
-        <span className="fw-kit-group">
-          <span className="fw-kit-label">backdrop</span>
-          <button type="button" onClick={() => picker.current?.click()}>choose…</button>
-          <button type="button" disabled={!backdrop} onClick={clearBackdrop}>none</button>
-          <input
-            ref={picker}
-            type="file"
-            accept="image/*"
-            hidden
-            onChange={(event) => chooseBackdrop(event.target.files?.[0])}
-          />
-        </span>
-      </div>
-
       <div className="fw-kit-body">
         <aside className="fw-kit-side">
+          {modeSwitch}
+          {tiles}
+          {asideNote}
           <input
             className="fw-kit-search"
             type="search"
@@ -676,10 +708,126 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
               <p className="fw-kit-empty">…and {pool.length - MAX_ROWS} more; search to narrow</p>
             )}
           </div>
+          <div className="fw-kit-foot">
+            <button
+              type="button"
+              disabled={busy || wearing.size === 0}
+              title={mode === 'clothing'
+                ? 'Fill the empty slots from the same clothing line'
+                : 'Fill the empty slots to match the piece on the torso'}
+              onClick={() => void engine.current?.equipSet()}
+            >
+              equip set
+            </button>
+            <button
+              type="button"
+              disabled={mode === 'gear' ? carrying.size === 0 : wearing.size === 0}
+              title={mode === 'gear' ? 'Take all gear off' : `Take all ${mode} off`}
+              onClick={() => (mode === 'gear' ? engine.current?.clearGear() : engine.current?.undress())}
+            >
+              clear
+            </button>
+          </div>
         </aside>
 
         <div className="fw-kit-stage">
-          <Viewer tokens={tokens} onScene={onScene} className="fw-view fw-kit-view" />
+          <div className="fw-kit-canvas">
+            <Viewer tokens={tokens} onScene={onScene} className="fw-view fw-kit-view" />
+            {/* Overlays over the canvas. Their containers let the pointer
+                through, so a drag or wheel in any gap still orbits and zooms;
+                only the controls themselves take it. */}
+            <div className="fw-kit-scene" ref={sceneRef}>
+              {!narrow && bodySwitch}
+              {!narrow && lightSelect}
+              {!narrow && qualitySelect}
+              <button
+                type="button"
+                ref={moreButton}
+                className="fw-kit-more-button"
+                aria-expanded={moreOpen}
+                aria-controls={moreId}
+                onClick={() => setMoreOpen((open) => !open)}
+              >
+                {narrow ? 'Scene' : 'More'}
+              </button>
+              {/* Rendered closed too, and hidden, so the file inputs it holds
+                  stay in the page for their pickers. */}
+              <div
+                id={moreId}
+                className="fw-kit-more"
+                role="group"
+                aria-label={narrow ? 'Scene' : 'More'}
+                hidden={!moreOpen}
+              >
+                {narrow && (
+                  <>
+                    <div className="fw-kit-more-row">{bodySwitch}</div>
+                    {lightSelect && <div className="fw-kit-more-row">{lightSelect}</div>}
+                    {qualitySelect && <div className="fw-kit-more-row">{qualitySelect}</div>}
+                  </>
+                )}
+                {moreRows}
+              </div>
+            </div>
+            <div className="fw-kit-dock">
+              <span className="fw-kit-group" role="group" aria-label="Pose">
+                {poses.map((pose) => (
+                  <button
+                    key={pose}
+                    type="button"
+                    aria-pressed={state?.pose === pose}
+                    disabled={busy}
+                    title={POSE_TITLES[pose]?.(Boolean(state?.holding))}
+                    onClick={() => void engine.current?.setPose(pose)}
+                  >
+                    {pose}
+                  </button>
+                ))}
+              </span>
+              <span className="fw-kit-group">
+                <button
+                  type="button"
+                  aria-pressed={state?.animated ?? false}
+                  disabled={!state || state.pose === 'rest'}
+                  title="Play the pose as a loop: the character customizer's idle standing at ease, breathing otherwise"
+                  onClick={() => void engine.current?.setAnimated(!(state?.animated ?? false))}
+                >
+                  animate
+                </button>
+              </span>
+              {holdable.length > 0 && (
+                <span className="fw-kit-group" role="radiogroup" aria-label="In hand">
+                  <span className="fw-kit-label">hold</span>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={!state?.holding}
+                    aria-pressed={!state?.holding}
+                    disabled={busy}
+                    onClick={() => void engine.current?.hold(null)}
+                  >
+                    {carrying.has(HAND) ? 'put down' : 'nothing'}
+                  </button>
+                  {holdable.map(([port, item]) => (
+                    <button
+                      key={port}
+                      type="button"
+                      role="radio"
+                      aria-checked={state?.holding === port}
+                      aria-pressed={state?.holding === port}
+                      disabled={busy}
+                      title={port === HAND
+                        ? `The ${displayName(item)}, in the hand: nothing worn holsters it`
+                        : `Hold the ${displayName(item)}, from the ${portLabel(state!.ports.get(port)!.port)} holster`}
+                      onClick={() => void engine.current?.hold(port)}
+                    >
+                      {titleOf(item)}
+                    </button>
+                  ))}
+                </span>
+              )}
+            </div>
+          </div>
           <p className="fw-kit-status">
             <span aria-live="polite">{state?.status ?? 'starting…'}</span>
             {/* The host's fan-site notice sits above the tool, and the tool now

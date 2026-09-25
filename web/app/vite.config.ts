@@ -72,10 +72,14 @@ function archiveRange(): Plugin {
 async function sendRange(path: string, start: number, end: number, response: ServerResponse): Promise<void> {
   const CHUNK = 4 * 1024 * 1024;
   const ATTEMPTS = 4;
+  // A browser that has what it needs drops the connection mid-range. Waiting
+  // on 'drain' then waits forever, the handle is never closed, and Node
+  // kills the process when the garbage collector finds it open.
+  const closed = new Promise<void>((resolve) => response.once('close', () => resolve()));
   let file: Awaited<ReturnType<typeof open>> | null = null;
   try {
     file = await open(path, 'r');
-    for (let at = start; at <= end; at += CHUNK) {
+    for (let at = start; at <= end && !response.destroyed; at += CHUNK) {
       const length = Math.min(CHUNK, end - at + 1);
       const buffer = Buffer.alloc(length);
       for (let attempt = 1; ; attempt += 1) {
@@ -92,9 +96,12 @@ async function sendRange(path: string, start: number, end: number, response: Ser
           await new Promise((r) => setTimeout(r, 200 * attempt));
         }
       }
-      if (!response.write(buffer)) await new Promise((r) => response.once('drain', r));
+      if (response.destroyed) break;
+      if (!response.write(buffer)) {
+        await Promise.race([new Promise<void>((resolve) => response.once('drain', () => resolve())), closed]);
+      }
     }
-    response.end();
+    if (!response.destroyed) response.end();
   } catch (error) {
     console.error(`[fashionworks] range ${start}-${end} failed:`, error);
     response.destroy();

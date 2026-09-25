@@ -16,16 +16,6 @@
   overflow: hidden;
 }
 
-.fw-kit-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 14px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--sc-border);
-  font-size: 13px;
-}
-
 .fw-kit-group {
   display: inline-flex;
   align-items: center;
@@ -121,7 +111,7 @@
 .fw-kit-body {
   flex: 1 1 auto;
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr);
+  grid-template-columns: 300px minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
   min-height: 0;
 }
@@ -157,11 +147,97 @@
   gap: 8px;
 }
 
-/* In the toolbar now, so it wraps with everything else rather than stacking
- * three rows deep in a 260px column. */
-.fw-kit-slots {
-  flex-wrap: wrap;
+/* The mode switch heads the column it rewrites: three equal segments. */
+.fw-kit-modes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 4px;
+  flex: 0 0 auto;
+}
+
+/* The slots as tiles, two to a row: the slot and its count, then what is
+ * worn there. About 42px each; eight tiles are four rows. */
+.fw-kit-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+/* No lonely half-row. */
+.fw-kit-tiles > .fw-kit-tile:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+
+.fw-kit .fw-kit-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.fw-kit-tile-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.fw-kit-tile-worn {
+  display: flex;
+  min-width: 0;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* The title clips; the `+N` after it never does. */
+.fw-kit-tile-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fw-kit-tile-more {
+  flex: 0 0 auto;
+}
+
+.fw-kit-tile-worn[data-empty] {
+  color: var(--sc-subtle);
+}
+
+/* Selected: an accent outline over a faint accent wash, not the solid accent
+ * the toolbar tabs used. A solid block behind two lines reads as a warning,
+ * and the subtle second line fails contrast on it. */
+.fw-kit button.fw-kit-tile[aria-selected="true"] {
+  background: color-mix(in srgb, var(--sc-accent) 14%, var(--sc-field));
+  color: var(--sc-text);
+  border-color: var(--sc-accent, var(--sc-text));
+  box-shadow: inset 0 0 0 1px var(--sc-accent, var(--sc-text));
+}
+
+.fw-kit button.fw-kit-tile[aria-selected="true"] .fw-kit-count {
+  color: var(--sc-subtle);
+  opacity: 1;
+}
+
+.fw-kit-aside {
+  margin: 0;
+  flex: 0 0 auto;
+  color: var(--sc-subtle);
+  font-size: 11px;
+}
+
+/* Equip set and clear, pinned under the listing. */
+.fw-kit-foot {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  flex: 0 0 auto;
+  padding-top: 8px;
+  border-top: 1px solid var(--sc-border);
 }
 
 .fw-kit-search {
@@ -257,6 +333,14 @@
   min-width: 0;
 }
 
+.fw-kit-canvas {
+  position: relative;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .fw-kit-view {
   flex: 1 1 auto;
   min-height: 0;
@@ -345,4 +429,129 @@
 
 .fw-kit .fw-kit-port-remove {
   color: var(--sc-text);
+}
+
+/* The overlays over the canvas.
+ *
+ * OrbitControls listens on the canvas, so anything over it steals drag and
+ * wheel. Each overlay lets the pointer through and only its controls take it:
+ * a drag starting in any gap still orbits, a wheel still zooms.
+ *
+ * Their surface is 88% of the card, not glassier: the host's contrast test
+ * composites backgrounds up the DOM chain and cannot see the canvas, so it
+ * measures overlay text against the card. Mostly opaque keeps the real
+ * contrast close to that over any lighting or backdrop. No backdrop-filter:
+ * blurring a live canvas costs the GPU every frame. */
+.fw-kit-scene,
+.fw-kit-dock {
+  position: absolute;
+  pointer-events: none;
+  font-size: 13px;
+}
+
+.fw-kit-scene button,
+.fw-kit-scene select,
+.fw-kit-dock button,
+.fw-kit-more {
+  pointer-events: auto;
+}
+
+.fw-kit-scene > .fw-kit-group,
+.fw-kit-more,
+.fw-kit-dock {
+  background: color-mix(in srgb, var(--sc-card) 88%, transparent);
+  border: 1px solid var(--sc-border);
+  border-radius: 10px;
+}
+
+.fw-kit-scene {
+  top: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fw-kit-scene > .fw-kit-group {
+  padding: 4px 6px;
+}
+
+.fw-kit-more {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 240px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+}
+
+.fw-kit-more[hidden] {
+  display: none;
+}
+
+.fw-kit-more-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.fw-kit-more-row > .fw-kit-label {
+  flex: 0 0 64px;
+}
+
+/* The popover's own rows need no second surface. */
+.fw-kit-more .fw-kit-group {
+  padding: 0;
+}
+
+.fw-kit-dock {
+  bottom: 14px;
+  /* Centred by auto margins between both edges, not by left: 50%, which
+   * leaves an absolutely placed box only half the stage to grow into. */
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  width: fit-content;
+  max-width: calc(100% - 24px);
+  box-sizing: border-box;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 6px 8px;
+}
+
+/* Dividers between poses, animate and hold. */
+.fw-kit-dock > * + * {
+  border-left: 1px solid var(--sc-border);
+  padding-left: 8px;
+}
+
+/* Narrow: the tiles drop their second line and wrap as chips, since at 45%
+ * of a phone's height four rows of tall tiles would leave no listing. The
+ * scene controls fold into one button (`Kitbasher.tsx`, `NARROW`). */
+@media (max-width: 720px) {
+  .fw-kit-tiles {
+    display: flex;
+    flex-wrap: wrap;
+  }
+
+  .fw-kit .fw-kit-tile {
+    flex-direction: row;
+    padding: 5px 10px;
+  }
+
+  .fw-kit-tile-worn {
+    display: none;
+  }
+
+  .fw-kit-tile-head {
+    gap: 4px;
+    font-size: 13px;
+  }
 }

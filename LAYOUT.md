@@ -16,10 +16,10 @@ arrangement, not as a pixel spec.
 
 | phase | state | exit test |
 | --- | --- | --- |
-| 1: the column | not started | Toolbar gone. Mode switch, slot tiles, listing and equip-set/clear all in the left column. All three modes, both bodies, driven through the real UI. |
-| 2: the overlays | not started | Scene cluster (top right), More popover and pose dock (bottom centre) on the viewport. Orbit and zoom still work in every gap between overlay controls. |
-| 3: narrow | not started | At 720px and below, stage over column still holds. Tiles become chips, the cluster folds into one Scene button, the dock wraps. Nothing scrolls sideways. |
-| 4: verified in the host | not started | `npm run check` green here. The host's `test-fashionworks-theme.mjs` finds no AA failures in any theme. The canvas keeps its size when the mode changes and when the hold group appears. |
+| 1: the column | done | Toolbar gone. Mode switch, slot tiles, listing and equip-set/clear all in the left column. All three modes, both bodies, driven through the real UI. |
+| 2: the overlays | done | Scene cluster (top right), More popover and pose dock (bottom centre) on the viewport. Orbit and zoom still work in every gap between overlay controls. |
+| 3: narrow | done | At 720px and below, stage over column still holds. Tiles become chips, the cluster folds into one Scene button, the dock wraps. Nothing scrolls sideways. |
+| 4: verified in the host | here: done. host: waits on the release | `npm run check` green here. The host's `test-fashionworks-theme.mjs` finds no AA failures in any theme. The canvas keeps its size when the mode changes and when the hold group appears. |
 
 ## Why
 
@@ -275,3 +275,69 @@ results in this file under "Phase N, as run":
 Then release as a minor version, install it in the Hangarworks site, and run
 its `scripts/test-fashionworks-theme.mjs` (AA contrast across themes, with no
 reload) and `scripts/test-fashionworks-archive.mjs`. Both must pass unchanged.
+
+## Phases 1-4, as run (2026-09-25)
+
+Built first on top of `character`, then rebuilt from `main` to ship on its
+own: the character row of the More popover exists only with the character
+work, so it is left out here and joins More when `character` lands (kept on
+the `layout-character` branch). Everything below was measured with it in.
+
+Driven headless through the real UI at 1280x800 on build 4.10.193.11644.
+
+**Canvas stability, before and after.** `.fw-kit-view` as x, y, w, h:
+
+| state | before | after |
+| --- | --- | --- |
+| on load (armour) | 260, 79, 1020, 690 | 300, 0, 980, 769 |
+| gear | 260, 79, 1020, 690 | 300, 0, 980, 769 |
+| clothing | 260, 79, 1020, 690 | 300, 0, 980, 769 |
+| armour, hold group showing | **260, 112, 1020, 657** | 300, 0, 980, 769 |
+
+The first weapon used to push the canvas down 33 px; nothing moves it now.
+The canvas is 79 px taller, since the toolbar is gone.
+
+**The listing keeps 8 rows** at 1280x800 in armour and gear, 9 in clothing
+(12-14 before, when the tiles were a toolbar row). That is the brief's floor.
+Tiles measure 44 px against the budgeted 42, so this is the number behind the
+colour-strip follow-up.
+
+**Tiles.** Armour shows its eight, hat and eyewear included; clothing shows
+the eight slots with stock and omits the accessory. Gear, with a rifle and two
+magazines carried: the primary tile reads the rifle, the magazine tile
+`A03 Sniper Rifle M… +1` -- the `+N` is its own span, so the ellipsis never
+eats it. Accessible names read `magazine, 59 pieces, wearing …` (and `1
+piece`, singular). The selected tile is an accent outline over a 14% accent
+wash on the field colour, since the theme has no `--sc-accent-soft`.
+
+**Overlays.** A real mouse drag starting between the first two dock buttons
+orbits the camera, and a wheel over the gap between the cluster's groups
+zooms. More opens, stays open through two surface toggles, and closes on
+Escape with focus back on More. Two things the brief did not say, found by
+building it: the popover needs `[hidden] { display: none }` because its
+`display: flex` overrides the attribute, and the dock is centred by auto
+margins between `left: 0` and `right: 0` -- at `left: 50%` an absolutely
+placed box can only grow into half the stage, and the dock wrapped for no
+reason.
+
+**Narrow.** At 720 and 390: no horizontal scroll in the page or the
+component, and the attribution fully on screen (380-708 of 720, 74-378 of
+390). Tiles are one-line chips; the cluster is one "Scene" button whose
+popover holds body, light, quality, figure, character, surface, backdrop,
+inside the screen (138-378 of 390). Narrowness is read with `matchMedia` at
+the stylesheet's own 720px, so the controls are rendered once, not twice.
+
+**Framing, for a follow-up.** The default camera frames the figure to the
+bottom of the canvas, so the dock covers the lower legs: the shins at
+1280x800, the knees on a phone. Left alone here, as the brief says -- the
+framing is measured work.
+
+**Checks.** `npm run check` green (143 tests, stylelint). `npm run harness`
+runs through the new UI; its figures are render measures, unchanged in kind.
+`studio.html`'s own fixed `#log` overlaps the attribution at the bottom
+right on that dev page only -- it was there before, and it is not part of the
+component.
+
+**Not done here, by the brief's own order:** the minor release, and the
+host's `test-fashionworks-theme.mjs` and `test-fashionworks-archive.mjs`.
+
