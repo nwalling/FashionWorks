@@ -115,6 +115,12 @@ export interface OutfitView {
   readonly hideHead: boolean;
   /** The hair variant a drawn piece asks for, if any: `hatHair` for a cap. */
   readonly hairTag?: string;
+  /** Every geometry tag a drawn piece adds -- what a character's head items
+   * choose their variants by (`hatHair`, `maskFacialHair`). */
+  readonly tags: ReadonlySet<string>;
+  /** Every port something worn hides, lowercased, for a character's head
+   * items, which each name their own. */
+  readonly hiddenPorts: ReadonlySet<string>;
 }
 
 /** Hair variants, most specific first: a hat that asks for both wants the
@@ -139,6 +145,7 @@ export function viewOf(wearing: ReadonlyMap<WearSlot, CatalogueItem>): OutfitVie
   const chunks = [...wearing]
     .filter(([slot]) => !hiddenSlots.has(slot))
     .flatMap(([, item]) => item.chunks ?? []);
+  const tags = [...wearing].filter(([slot]) => !hiddenSlots.has(slot)).flatMap(([, item]) => addedTags(item));
   return {
     hiddenSlots,
     chunks,
@@ -148,9 +155,9 @@ export function viewOf(wearing: ReadonlyMap<WearSlot, CatalogueItem>): OutfitVie
     // hairstyle pokes through every shell.
     hideHair: portHidden(HAIR_PORT, hidden) || wearing.has('helmet'),
     hideHead: portHidden(HEAD_PORT, hidden),
-    hairTag: hairTagOf(
-      [...wearing].filter(([slot]) => !hiddenSlots.has(slot)).flatMap(([, item]) => addedTags(item)),
-    ),
+    hairTag: hairTagOf(tags),
+    tags: new Set(tags),
+    hiddenPorts: hidden,
   };
 }
 

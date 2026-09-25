@@ -39,6 +39,7 @@ import {
   type Texture,
   UnsignedByteType,
   Vector2,
+  Vector3,
 } from 'three';
 
 import type { MaterialPayload } from '../worker/archive.worker';
@@ -295,6 +296,8 @@ export function plainMaterial(sub: Submaterial, textures: SurfaceTextures, sibli
       material.roughness = 1;
     }
   }
+  if (isSkin(sub)) withSkinTone(material, sub, textures);
+  if (shader.includes('eye') && diffuseMap) withIris(material, sub, diffuseMap);
   const emissive = sub.emissive ? Math.max(sub.emissive[0]!, sub.emissive[1]!, sub.emissive[2]!) : 0;
   if (sub.glow > 0 || emissive > 0) {
     material.emissive = emissive > 0 ? linear(sub.emissive, 0) : linear(sub.diffuse, 0);
@@ -324,9 +327,12 @@ export function plainMaterial(sub: Submaterial, textures: SurfaceTextures, sibli
  * cap is the same colour blended over the skin through its density mask. */
 function hairMaterial(sub: Submaterial, mask: Texture | undefined, siblings: readonly Submaterial[]): Material {
   const params = sub.params ?? {};
-  // `%HAIR_CAP` is in the shader's flags, which the payload does not carry;
-  // the cards' mask is the one named `_opac`.
-  const cap = !/_opac\b/i.test(sub.textures.base_color ?? '');
+  // Cards are alpha-tested strands; a cap (`%HAIR_CAP`) or a coat
+  // (`%HAIR_COAT`, a buzz cut's short hair) is blended over the skin through
+  // its mask. The flags say which; a core too old to send them leaves the
+  // name, where the cards' mask is the one named `_opac` -- which a coat's
+  // (`hair_02_shaved_opac`) is too, drawn as a solid band on the forehead.
+  const cap = sub.hair ? sub.hair !== 'cards' : !/_opac\b/i.test(sub.textures.base_color ?? '');
   const smoothness = scalar(params.Smoothness, 0.5);
   // The cap declares only smoothness and specular; its colour is the hair's.
   const pigment = params.BaseMelanin !== undefined
@@ -335,10 +341,17 @@ function hairMaterial(sub: Submaterial, mask: Texture | undefined, siblings: rea
   const material = new MeshStandardMaterial({
     name: sub.name,
     color: hairColour(pigment),
-    roughness: cap ? 1 : Math.min(1, Math.max(0.3, 1 - smoothness)),
+    // Hair's highlight is anisotropic, a thin band along each strand. Drawn
+    // isotropic at `1 - Smoothness` it spread into a sheet across cards that
+    // lie flat, and `hair_75`'s short back and sides shone grey-white; from
+    // 0.75 up it is gone. A cap or coat is matte: it is shade on the skin.
+    roughness: cap ? 1 : Math.min(1, Math.max(HAIR_MIN_ROUGHNESS, 1 - smoothness)),
     metalness: 0,
     side: DoubleSide,
   });
+  // What the colour was made from, so a character's own melanin and dye can
+  // be laid over it (CHARACTER.md Phase 2).
+  material.userData.hairPigment = pigment;
   if (!mask) return material;
   material.alphaMap = twoChannel(mask);
   if (cap) {
@@ -365,21 +378,27 @@ function hairMaterial(sub: Submaterial, mask: Texture | undefined, siblings: rea
   return material;
 }
 
-/** A mask's red and green only, at half an RGBA's memory.
+/** A mask's density and green only, at half an RGBA's memory.
  *
- * The strand mask is red and green over a flat blue, and the scalp's density
- * is grey; neither uses blue or alpha. Two channels rather than one because
- * three.js's shadow pass reads an alpha map's green, and with a single channel
- * the hair would cast no shadow at all. */
+ * The strand mask is red and green over a flat blue, and `hair_31`'s scalp
+ * density is grey. But most caps keep their density in **alpha** over white
+ * RGB -- the brows', the beards', `m_hair_02_scalp`, all BC3 or BC7 -- and read
+ * by red they were solid: an opaque sheet over the forehead, the brows and
+ * the jaw. So the first channel is alpha wherever alpha varies, else red.
+ * Two channels rather than one because three.js's shadow pass reads an alpha
+ * map's green, and with a single channel the hair would cast no shadow. */
 function twoChannel(texture: Texture): Texture {
   const image = texture.image as { data?: Uint8Array; width?: number; height?: number } | undefined;
   const data = image?.data;
   if (!data || !image?.width || !image.height) return texture;
   const texels = image.width * image.height;
+  let alphaVaries = false;
+  for (let i = 0; i < texels && !alphaVaries; i += 1) alphaVaries = data[i * 4 + 3] !== 255;
+  const density = alphaVaries ? 3 : 0;
   const out = new Uint8Array(texels * 2);
   for (let i = 0; i < texels; i += 1) {
-    out[i * 2] = data[i * 4]!;
-    out[i * 2 + 1] = data[i * 4 + 1]!;
+    out[i * 2] = data[i * 4 + density]!;
+    out[i * 2 + 1] = alphaVaries ? data[i * 4 + 3]! : data[i * 4 + 1]!;
   }
   const mask = new DataTexture(out, image.width, image.height, RGFormat, UnsignedByteType);
   mask.colorSpace = NoColorSpace;
@@ -393,6 +412,8 @@ function twoChannel(texture: Texture): Texture {
 }
 
 const HAIR_ALPHA_TEST = 0.35;
+/** The glossiest a strand card is drawn; see `hairMaterial`. */
+const HAIR_MIN_ROUGHNESS = 0.75;
 /** How far the strand mask is lifted before the test. CryEngine scales it by
  * mip (`OpacityMipScale`, 3.4 on the hair measured); a flat lift is the cheap
  * version, and keeps a 1024 decode from reading as thinning hair. */
@@ -433,10 +454,152 @@ export function hairColour(params: Record<string, number | Float32Array>): Color
   const k = 5.969 - 0.215 * beta + 2.532 * beta ** 2 - 10.73 * beta ** 3 + 5.574 * beta ** 4 + 0.245 * beta ** 5;
   const tint = vector(params.BaseTintColor) ?? [1, 1, 1];
   let rgb = sigma.map((s, i) => Math.exp(-Math.sqrt(s) * k) * tint[i]!);
+  // The dye mixes over the pigment by `DyeAmount`. **Open**: seven archive
+  // characters, the masculine default and Macken among them, share a brow
+  // preset of black melanin under a `#08049c` dye at amount 1, which this
+  // reading draws as vivid blue. Absorbing instead (colours multiplying, as
+  // Chiang et al. add a dye's absorption to melanin's) draws those black and
+  // darkens `hair_31` from brown to near black. `DyeFadeout` and a second dye
+  // colour point at a root-to-tip ombre a flat colour cannot draw either way;
+  // CHARACTER.md, Phase 2.
   const dye = vector(params.DyeColor);
   const amount = Math.min(1, Math.max(0, scalar(params.DyeAmount, 0)));
   if (dye && amount > 0) rgb = rgb.map((c, i) => c + (dye[i]! - c) * amount);
   return new Color().setRGB(rgb[0]!, rgb[1]!, rgb[2]!);
+}
+
+/** `HumanSkin_V2`'s tone adjustment: the skin texture recoloured from its
+ * own average to one target, and the flat target where the tone mask says.
+ *
+ * Every skin material declares `SourceAverageColor`, its texture's average,
+ * and `FinalSkinTone`, the tone to draw -- which a character's `BodyColor`
+ * sets for head and body alike. So a texel becomes `texel x Final / Source`,
+ * and the head and body, drawn from different textures, arrive at one skin.
+ *
+ * **The mask decides where the texture shows at all.** Slot 7's green is white
+ * over nearly all of both textures and black in exactly one place on each:
+ * the lower neck on the head, the collar on the body -- where the two meshes
+ * meet. Even recoloured, the textures disagree there (the male head reads a
+ * fifth lighter than the body at the 45 vertices they share), so both fall to
+ * the flat target and the seam goes. That is the mask's reading here, and it
+ * is inferred: the shader is compiled into the engine. The multiply is
+ * inferred too; `CalibrationPower` is 1 and `CalibrationSlope` 0 on every
+ * skin material in the archive, which is what makes it the plain ratio. */
+function withSkinTone(material: MeshStandardMaterial, sub: Submaterial, textures: SurfaceTextures): void {
+  const source = vector(sub.params?.SourceAverageColor);
+  if (!source || !material.map) return;
+  const final = vector(sub.params?.FinalSkinTone) ?? source;
+  const mask = sub.textures.tone_mask ? textures.byPath.get(sub.textures.tone_mask) : undefined;
+  const uniforms = {
+    uToneSource: { value: new Vector3(...source) },
+    uToneFinal: { value: new Vector3(...final) },
+    uToneMask: { value: mask ?? null },
+  };
+  material.userData.skinTone = { own: new Vector3(...final), final: uniforms.uToneFinal };
+  material.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, uniforms);
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        uniform vec3 uToneSource;
+        uniform vec3 uToneFinal;
+        ${mask ? 'uniform sampler2D uToneMask;' : ''}`,
+      )
+      .replace(
+        '#include <map_fragment>',
+        `#include <map_fragment>
+        {
+          vec3 toned = diffuseColor.rgb * uToneFinal / max(uToneSource, vec3(1e-4));
+          float keep = ${mask ? 'texture2D(uToneMask, vMapUv).g' : '1.0'};
+          diffuseColor.rgb = mix(uToneFinal, toned, keep);
+        }`,
+      );
+  };
+  material.customProgramCacheKey = () => (mask ? 'fw-skin-tone-mask' : 'fw-skin-tone');
+}
+
+/** Set a skin material's tone: `BodyColor`, linear. A material without the
+ * tone adjustment is left alone. */
+export function setSkinTone(material: Material, tone: ArrayLike<number> | null): void {
+  const found = material.userData.skinTone as { own: Vector3; final: { value: Vector3 } } | undefined;
+  if (!found) return;
+  if (tone) found.final.value.set(tone[0]!, tone[1]!, tone[2]!);
+  else found.final.value.copy(found.own);
+}
+
+/** The skin tone a material draws with unless told otherwise, or null. */
+export function ownSkinTone(material: Material): Vector3 | null {
+  return (material.userData.skinTone as { own: Vector3 } | undefined)?.own ?? null;
+}
+
+/** The `Eye` shader's iris colour, for a character that sets one.
+ *
+ * The diffuse's alpha is the iris: 255 across it, 0 on the white. The
+ * customizer's own eye (`human_white_eye_diff`) has a pale patterned iris for
+ * `IrisColor` to colour -- `EyeColor` in the `.chf`, exactly. Inside the mask
+ * the texel becomes `IrisColor` scaled by its brightness over the iris's
+ * mean, which keeps the pattern and the dark pupil and puts the average on
+ * the colour asked for. Off until set, so an eye texture that is already
+ * coloured -- the protos head's brown one -- draws as it always has. */
+function withIris(material: MeshStandardMaterial, sub: Submaterial, diffuse: Texture): void {
+  const image = diffuse.image as { data?: Uint8Array; width?: number; height?: number } | undefined;
+  const data = image?.data;
+  if (!data) return;
+  let weight = 0;
+  let sum = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    const a = data[i + 3]! / 255;
+    if (a <= 0) continue;
+    const lum = 0.2126 * srgbToLinear(data[i]!) + 0.7152 * srgbToLinear(data[i + 1]!) + 0.0722 * srgbToLinear(data[i + 2]!);
+    sum += lum * a;
+    weight += a;
+  }
+  if (weight <= 0) return;
+  const own = vector(sub.params?.IrisColor) ?? [0.25, 0.25, 0.25];
+  const uniforms = {
+    uIris: { value: new Vector3(...own) },
+    uIrisMean: { value: Math.max(1e-3, sum / weight) },
+    uIrisOn: { value: 0 },
+  };
+  material.userData.iris = uniforms;
+  material.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, uniforms);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform vec3 uIris;\nuniform float uIrisMean;\nuniform float uIrisOn;')
+      .replace(
+        '#include <map_fragment>',
+        `#include <map_fragment>
+        {
+          float lum = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+          vec3 iris = uIris * lum / uIrisMean;
+          diffuseColor.rgb = mix(diffuseColor.rgb, iris, sampledDiffuseColor.a * uIrisOn);
+          diffuseColor.a = 1.0;
+        }`,
+      );
+  };
+  material.customProgramCacheKey = () => 'fw-iris';
+}
+
+/** Colour an eye's iris, linear; null puts the texture's own back. */
+export function setIris(material: Material, colour: ArrayLike<number> | null): void {
+  const found = material.userData.iris as { uIris: { value: Vector3 }; uIrisOn: { value: number } } | undefined;
+  if (!found) return;
+  if (colour) found.uIris.value.set(colour[0]!, colour[1]!, colour[2]!);
+  found.uIrisOn.value = colour ? 1 : 0;
+}
+
+/** Recolour a hair material from a character's melanin and dye, laid over
+ * the material's own parameters; null restores them. */
+export function setHairLooks(material: Material, looks: Record<string, number | Float32Array> | null): void {
+  const pigment = material.userData.hairPigment as Record<string, number | Float32Array> | undefined;
+  if (!pigment || !(material instanceof MeshStandardMaterial)) return;
+  material.color.copy(hairColour(looks ? { ...pigment, ...looks } : pigment));
+}
+
+function srgbToLinear(byte: number): number {
+  const c = byte / 255;
+  return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
 }
 
 /** Which of a submaterial's textures the renderer needs, and in what space. */
@@ -445,6 +608,8 @@ export function texturesWanted(sub: Submaterial): Array<{ path: string; srgb: bo
   // Skin's gloss lives in its normal map's smoothness stream, as armour
   // layers' does; the plain decode leaves that stream out.
   if (sub.textures.normal) out.push({ path: sub.textures.normal, srgb: false, alpha: isSkin(sub) });
+  // Skin's tone mask: data, not colour.
+  if (isSkin(sub) && sub.textures.tone_mask) out.push({ path: sub.textures.tone_mask, srgb: false });
   // Hair's slot 1 is a mask, not a colour, and an sRGB decode would thin it.
   const hair = sub.shader.toLowerCase().includes('hair');
   if (!sub.tintable && sub.textures.base_color) out.push({ path: sub.textures.base_color, srgb: !hair });

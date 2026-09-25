@@ -2117,6 +2117,34 @@ Two things that are easy to get wrong here:
   Boots Dark Red" is Toughlife), and that list is read only for clothing slots,
   so it cannot move an armour key.
 
+### A player's character: what the `.chf` points at (CHARACTER.md)
+
+**A `.chf`'s material GUIDs are not records.** They are keys in one record's
+table, `SCharacterGenerationParams.DefaultCharacterGenerationParams`
+`.materialLookupTable`: 94 materials and 40 textures by GUID. The head
+material names the skin a face is drawn with -- `male36_t1` for Ilucide -- and
+all 40 archive files resolve. The worker reads it, with the 299 head items
+under `entities/scitem/characters/human/head/`, while the catalogue is built
+(`appearance::Library`), because the DataCore is not kept afterwards.
+
+**Some `.chf` names are not CRC32C.** `Head Material`, `HairDyeMaterial`,
+`BodyColor`, `EyeColor`, `HairDyeColor1` and others are stored under hashes
+StarBreaker maps by hand. Compare through `NameHash::name()`, not
+`NameHash::from_string`, or every colour reads as absent.
+
+**Skin joins at the neck through its tone mask, not a fudge factor.** Head and
+body recolour from `SourceAverageColor` to `FinalSkinTone` (the `.chf`'s
+`BodyColor`), and slot 7's green -- black exactly where the meshes meet --
+takes both to the flat target there. `SourceAverageColor` is a picked swatch,
+not its texture's mean, so recoloured regions land near the target, not on it.
+The figure's body is `m_body_character_customizer.mtl` because `m_body_cau`
+declares no tone.
+
+**Hair kind is a shader flag, and a cap's density is in alpha.** `%HAIR_CARDS`,
+`%HAIR_CAP`, `%HAIR_COAT` (`SubMaterial::hair`); guessing from `_opac` in the
+file name misreads a buzz cut's coat. Most caps are white RGB over an alpha
+density; read by red they draw as opaque sheets.
+
 ### Still unverified
 
 - Only one set has been converted end to end. `scx convert` has not been run

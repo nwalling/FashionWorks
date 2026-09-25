@@ -57,6 +57,7 @@ import type { GearSlot } from '../archive/catalogue';
 import type {
   AttachmentOverride,
   CharacterFace,
+  CharacterItem,
   ClipPayload,
   GearPayload,
   MaterialPayload,
@@ -76,13 +77,22 @@ import {
   withHand,
   type OwnedPort,
 } from '../gear/ports';
-import { meshTexture, plainMaterial, surfaceMaterial, texturesWanted } from './materials';
+import {
+  meshTexture,
+  ownSkinTone,
+  plainMaterial,
+  setHairLooks,
+  setIris,
+  setSkinTone,
+  surfaceMaterial,
+  texturesWanted,
+} from './materials';
 import { DEFAULT_PRESET, LIGHT_PRESETS, StudioLighting } from './lighting';
 import { ClipLoop, FADE_SECONDS, type LoopMode, smooth } from './idle';
 import { hasEight, padEight, skinEight } from './skin8';
 import { decalRoughness, padDecalUvs, withDecal } from './decal';
 import { showUncovered } from './zones';
-import { layerOf, outfitFor, outfitSlots, viewOf } from './outfit';
+import { HAIR_TAGS, layerOf, outfitFor, outfitSlots, portHidden, viewOf, type OutfitView } from './outfit';
 import { LIVE_DEFAULTS, liveSurfaces, releaseAfterUpload, takesS3tc } from './live';
 import { applyClip, bonePosition, boneRotation, buildRig, mountMatrix, type BuiltRig } from './rig';
 import { compositeSurfaces, dataTexture, type CompositeGeometry, type PaletteEntry } from './surface';
@@ -128,8 +138,12 @@ export const DONORS = SKELETONS.male.donors;
  * RENDERING.md Phase 4. The body is what `body_01_noMagicPocket` -- the body
  * the character customizer's default loadout names -- actually binds: one
  * whole-body `.skin` per sex (12,356 vertices for the male, 30 bone-parented
- * regions) with `m_body_cau.mtl` / `f_body_cau.mtl`. **Not `m_body.cdf`**,
- * whose `m_body_torso.skin` and friends are not in the archive at all. The
+ * regions). **Not `m_body.cdf`**, whose `m_body_torso.skin` and friends are
+ * not in the archive at all. Its material is the customizer's,
+ * `m_body_character_customizer.mtl` -- the one a `.chf`'s body material GUID
+ * resolves to -- because it declares the skin tone adjustment that makes head
+ * and body one skin (`materials.withSkinTone`); `m_body_cau.mtl` declares
+ * none, and needed a hand-tuned multiplier to meet the head. The
  * head and eyes are `PU_Protos_Head`'s, unmorphed: the DNA string that shapes
  * a face is left out. Their facial bones are not in the rig and inherit the
  * head's. The eye details -- wet, occlusion and caruncle overlays the engine
@@ -148,13 +162,13 @@ export const DONORS = SKELETONS.male.donors;
  * the first time something asks for it (CLOTHING.md Phase 4).
  */
 const HEADS = 'Objects/Characters/Human/heads';
-type FigurePart = 'body' | 'head' | 'hair';
+/** `worn` is something a player's character wears on its head: brows, lashes,
+ * beard, a piercing, and its own hair in place of the figure's. */
+type FigurePart = 'body' | 'head' | 'hair' | 'worn';
 interface FigureSpec {
   readonly mesh: string;
   readonly material: string;
   readonly part: FigurePart;
-  /** A linear multiplier on the part's skin, to meet the head at the neck. */
-  readonly skinMatch?: readonly [number, number, number];
   /** The largest mip its textures decode at. The face is what people look
    * at; the body is mostly under armour and the eyes are a few pixels. */
   readonly textureSize: number;
@@ -169,22 +183,30 @@ interface FigurePartState {
   readonly part: FigurePart;
   readonly mesh: string;
   readonly tag?: string;
+  /** The head item a `worn` part is, for its port and its variants. */
+  readonly item?: CharacterItem;
 }
 
-/** The body's skin against the head's, measured at the neck.
- *
- * The head and body are separate meshes on separate textures, and in the
- * archive they do not agree where they meet: sampled at the 45 vertices the
- * two meshes share, the male head reads sRGB (189,120,100) against the body's
- * (167,105,85), the female (194,152,122) against (189,135,106). The game hides
- * that under whatever the character wears; a bare figure showed a collar line.
- * The body moves rather than the head, since the body is hidden under any full
- * undersuit and the face never is. */
-const MALE_SKIN_MATCH = [1.32, 1.33, 1.4] as const;
-const FEMALE_SKIN_MATCH = [1.06, 1.3, 1.35] as const;
+/** Texture size for what a character wears: hair is looked at as closely as
+ * the face; brows, lashes and piercings are a few pixels. */
+const WORN_TEXTURE_SIZE: Readonly<Record<string, number>> = {
+  Char_Head_Hair: 1024,
+  Char_Head_Beard: 1024,
+};
+const WORN_TEXTURE_DEFAULT = 512;
+
+/** Which of the `.chf`'s hair colours a head item takes. */
+const WORN_LOOKS: Readonly<Record<string, 'hair' | 'beard' | 'eyebrows'>> = {
+  Char_Head_Hair: 'hair',
+  Char_Hair_Color: 'hair',
+  Char_Head_Beard: 'beard',
+  Char_Head_Stubble: 'beard',
+  Char_Head_Eyebrow: 'eyebrows',
+};
+
 export const FIGURE: Record<Body, readonly FigureSpec[]> = {
   male: [
-    { part: 'body', mesh: 'Objects/Characters/Human/male_v7/body/m_body.skin', material: 'Objects/Characters/Human/male_v7/body/m_body_cau.mtl', skinMatch: MALE_SKIN_MATCH, textureSize: 512 },
+    { part: 'body', mesh: 'Objects/Characters/Human/male_v7/body/m_body.skin', material: 'Objects/Characters/Human/male_v7/body/m_body_character_customizer.mtl', textureSize: 512 },
     { part: 'head', mesh: `${HEADS}/male/pu/protos_human_male_face_t1_pu/protos_human_male_face_t1_pu_head.skin`, material: `${HEADS}/male/pu/protos_human_male_face_t1_pu/protos_human_male_face_t1_pu_head_material.mtl`, textureSize: 1024 },
     { part: 'head', mesh: `${HEADS}/male/pu/protos_human_male_face_t1_pu/protos_human_male_face_t1_pu_eyes.skin`, material: `${HEADS}/male/pu/protos_human_male_face_t1_pu/protos_human_male_face_t1_pu_eyes_material.mtl`, textureSize: 256 },
     { part: 'hair', mesh: `${HEADS}/shared/hair_v2/sc/male/m_hair_31.skin`, material: `${HEADS}/shared/hair_v2/sc/male/m_hair_31.mtl`, textureSize: 1024 },
@@ -192,7 +214,7 @@ export const FIGURE: Record<Body, readonly FigureSpec[]> = {
     { part: 'hair', tag: 'hatHair_mask', mesh: `${HEADS}/shared/hair_v2/sc/male/m_hair_31_mask.skin`, material: `${HEADS}/shared/hair_v2/sc/male/m_hair_31.mtl`, textureSize: 1024 },
   ],
   female: [
-    { part: 'body', mesh: 'Objects/Characters/Human/female_v2/body/f_body.skin', material: 'Objects/Characters/Human/female_v2/body/f_body_cau.mtl', skinMatch: FEMALE_SKIN_MATCH, textureSize: 512 },
+    { part: 'body', mesh: 'Objects/Characters/Human/female_v2/body/f_body.skin', material: 'Objects/Characters/Human/female_v2/body/f_body_character_customizer.mtl', textureSize: 512 },
     { part: 'head', mesh: `${HEADS}/female/pu/protos_human_female_face_t1_pu/protos_human_female_face_t1_pu_head.skin`, material: `${HEADS}/female/pu/protos_human_female_face_t1_pu/protos_human_female_face_t1_pu_head_material.mtl`, textureSize: 1024 },
     { part: 'head', mesh: `${HEADS}/female/pu/protos_human_female_face_t1_pu/protos_human_female_face_t1_pu_eyes.skin`, material: `${HEADS}/female/pu/protos_human_female_face_t1_pu/protos_human_female_face_t1_pu_eyes_material.mtl`, textureSize: 256 },
     { part: 'hair', mesh: `${HEADS}/shared/hair_v2/sc/female/f_hair_31.skin`, material: `${HEADS}/shared/hair_v2/sc/female/f_hair_31.mtl`, textureSize: 1024 },
@@ -1067,10 +1089,18 @@ export class Kitbasher {
     for (const carried of this.carried.values()) this.mountCarried(carried);
     await this.setPose(this.poseOptions().includes(this.state.pose) ? this.state.pose : 'rest');
 
+    // A character belongs to its own body. On the other one the figure wears
+    // the default face -- a male face is not bent onto a female head -- and
+    // the character comes back with its body.
+    const character = this.character;
+    const face = !character ? ''
+      : character.face.body === body ? ` · ${character.name}`
+        : ` · ${character.name} is ${character.face.body}: default face`;
     this.publish({
       busy: false,
       status: `${body} body · ${this.state.catalogue.items.length.toLocaleString()} pieces`
-        + (worn.length ? ` · ${restored} of ${worn.length} carried over` : ''),
+        + (worn.length ? ` · ${restored} of ${worn.length} carried over` : '')
+        + face,
     });
   }
 
@@ -1182,14 +1212,9 @@ export class Kitbasher {
       }
     }
     if (this.disposed || this.rig !== rig || this.state.body !== body) return;
-    for (const { loaded } of parts) {
-      for (const object of loaded.objects) {
-        this.view.scene.add(object);
-        if (object instanceof SkinnedMesh) object.bind(rig.skeleton, object.matrixWorld);
-      }
-      this.refineLater(loaded);
-    }
+    for (const { loaded } of parts) this.mountFigurePart(loaded, rig);
     this.figure = { body, parts };
+    this.applyLooks();
     this.applyOutfit();
     // A character loaded for this body puts its face back on.
     if (this.character?.face.body === body) await this.applyCharacter();
@@ -1209,6 +1234,10 @@ export class Kitbasher {
 
   /** Bumped per load, so a slow blend that has been superseded is dropped. */
   private characterTicket = 0;
+
+  /** Bumped per dressing, so two that overlap -- a figure rebuilt while a
+   * character goes on -- do not both put their items on. */
+  private wornTicket = 0;
 
   /** Put a player's face on the figure, from the bytes of their `.chf`.
    *
@@ -1237,23 +1266,31 @@ export class Kitbasher {
       // is busy, and it is busy with exactly this.
       this.publish({ busy: false });
       await this.setBody(face.body);
+      // The switch is done but the face is still going on: busy until it is.
+      this.publish({ busy: true, status: `${name}: dressing the face…` });
       await this.figureReady;
     } else {
       await this.applyCharacter();
     }
+    if (ticket !== this.characterTicket) return false;
     const missing = face.missing.length ? ` · no mesh for ${face.missing.join(', ')}` : '';
     const blend = face.heads.length === 1
       ? `library head ${face.heads[0]}`
       : `a blend of ${face.heads.length} library heads`;
-    this.publish({ busy: false, character: name, status: `${name} · ${face.body} · ${blend}${missing}` });
+    const worn = face.items?.length ? ` · ${face.items.map(shortItemName).join(', ')}` : '';
+    this.publish({ busy: false, character: name, status: `${name} · ${face.body} · ${blend}${worn}${missing}` });
     return true;
   }
 
   /** Back to the default face. */
   async clearCharacter(): Promise<void> {
     this.characterTicket += 1;
+    this.wornTicket += 1;
     this.character = null;
+    this.dropWorn();
     await this.swapFace(null);
+    this.applyLooks();
+    this.applyOutfit();
     this.publish({ character: null, status: 'default face' });
   }
 
@@ -1261,6 +1298,147 @@ export class Kitbasher {
     const character = this.character;
     if (!character || character.face.body !== this.figure?.body) return;
     await this.swapFace(character);
+    await this.wearItems(character);
+    this.applyLooks();
+    this.applyOutfit();
+  }
+
+  /** Skin tone and iris, for whoever is on the figure.
+   *
+   * With no character the head's own tone is the target for head and body
+   * both -- that is what joins them at the neck -- and the eyes keep their
+   * texture. A character's `BodyColor` and `EyeColor` replace both. */
+  private applyLooks(): void {
+    const figure = this.figure;
+    if (!figure) return;
+    const looks = this.character?.face.body === figure.body ? this.character.face.looks : undefined;
+    const head = figure.parts.find((p) => p.part === 'head' && p.mesh.endsWith('_head.skin'));
+    const headTone = head ? materialsOf(head.loaded).map(ownSkinTone).find((t) => t) : null;
+    const tone = looks?.skin ?? (headTone ? headTone.toArray() : null);
+    for (const { loaded } of figure.parts) {
+      for (const material of materialsOf(loaded)) {
+        setSkinTone(material, tone);
+        setIris(material, looks?.iris ?? null);
+      }
+    }
+  }
+
+  /** Take off what a character wore. */
+  private dropWorn(): void {
+    const figure = this.figure;
+    if (!figure) return;
+    for (const { loaded } of figure.parts.filter((p) => p.part === 'worn')) {
+      for (const object of loaded.objects) object.removeFromParent();
+    }
+    figure.parts = figure.parts.filter((p) => p.part !== 'worn');
+  }
+
+  /** Put on what a character wears on its head: its own hair, brows, lashes,
+   * beard and piercings, each fitted to its face by the core. Variants for a
+   * hat load when something worn asks for them. CHARACTER.md Phase 3. */
+  private async wearItems(character: { key: string; face: CharacterFace }): Promise<void> {
+    const figure = this.figure;
+    const rig = this.rig;
+    if (!figure || !rig) return;
+    const ticket = ++this.wornTicket;
+    this.dropWorn();
+    for (const item of character.face.items ?? []) {
+      let loaded: Loaded | null = null;
+      try {
+        loaded = await this.loadWorn(character, item);
+      } catch {
+        // One item that will not load leaves the rest of the character.
+      }
+      if (this.disposed || ticket !== this.wornTicket || this.figure !== figure || this.rig !== rig
+        || this.character?.key !== character.key) return;
+      if (!loaded) continue;
+      this.mountFigurePart(loaded, rig);
+      figure.parts.push({ loaded, part: 'worn', mesh: item.mesh, item });
+    }
+    this.evict();
+  }
+
+  /** One head item, or one of its variants, as a figure part. */
+  private async loadWorn(
+    character: { key: string; face: CharacterFace },
+    item: CharacterItem,
+    tag?: string,
+  ): Promise<Loaded | null> {
+    const variant = tag ? item.variants.find((v) => v.tag === tag) : undefined;
+    const mesh = variant ? variant.mesh : item.mesh;
+    const material = (variant?.material ?? null) ?? item.material;
+    if (!mesh || !material) return null;
+    const key = `figure:${mesh}:${this.surfaceMode}:${character.key}`;
+    const hit = this.cache.get(key);
+    if (hit) return hit;
+    const payload = (await this.client.characterMesh(mesh)).mesh;
+    const loaded = await this.buildFigurePart(
+      key,
+      mesh,
+      payload,
+      material,
+      WORN_TEXTURE_SIZE[item.kind] ?? WORN_TEXTURE_DEFAULT,
+    );
+    const which = WORN_LOOKS[item.kind];
+    const looks = which ? character.face.looks?.[which] : undefined;
+    if (looks) for (const m of materialsOf(loaded)) setHairLooks(m, looks);
+    return loaded;
+  }
+
+  /** A worn item's variant, loaded the first time the outfit asks for it. */
+  private async loadWornVariant(item: CharacterItem, tag: string): Promise<void> {
+    const figure = this.figure;
+    const rig = this.rig;
+    const character = this.character;
+    const key = `worn:${character?.key}:${item.className}:${tag}`;
+    if (!figure || !rig || !character || this.figureLoading.has(key)) return;
+    this.figureLoading.add(key);
+    try {
+      const loaded = await this.loadWorn(character, item, tag);
+      if (!loaded || this.disposed || this.figure !== figure || this.rig !== rig || this.character !== character) return;
+      for (const object of loaded.objects) object.visible = false;
+      this.mountFigurePart(loaded, rig);
+      figure.parts.push({ loaded, part: 'worn', mesh: loaded.key, item, tag });
+      this.applyLooks();
+      this.applyOutfit();
+    } catch {
+      // No variant: the plain item goes on standing in.
+    } finally {
+      this.figureLoading.delete(key);
+    }
+  }
+
+  /** Add a figure part's objects to the scene, bound to the rig. */
+  private mountFigurePart(loaded: Loaded, rig: BuiltRig): void {
+    for (const object of loaded.objects) {
+      this.view.scene.add(object);
+      if (object instanceof SkinnedMesh) object.bind(rig.skeleton, object.matrixWorld);
+    }
+    this.refineLater(loaded);
+  }
+
+  /** Whether a worn part is drawn under this outfit.
+   *
+   * The item's own port decides first -- a helmet that hides the head or the
+   * port hides it -- then, for hair, every helmet, as for the figure's own.
+   * Then its variants: the first tag the outfit asks for that the item offers
+   * picks the variant, and a variant with no mesh means the item is not drawn
+   * at all under that piece (`hair_75`'s `hatHair_mask`). */
+  private wornVisible(part: FigurePartState, parts: readonly FigurePartState[], view: OutfitView): boolean {
+    const item = part.item;
+    if (!item) return false;
+    if (view.hideHead || portHidden(item.port, view.hiddenPorts)) return false;
+    if (item.kind === 'Char_Head_Hair' && view.hideHair) return false;
+    const offered = [...HAIR_TAGS, ...item.variants.map((v) => v.tag)];
+    const chosen = offered.find((t) => view.tags.has(t) && item.variants.some((v) => v.tag === t));
+    if (!chosen) return part.tag === undefined;
+    const variant = item.variants.find((v) => v.tag === chosen)!;
+    if (!variant.mesh) return false;
+    if (!parts.some((p) => p.item === item && p.tag === chosen)) {
+      void this.loadWornVariant(item, chosen);
+      return part.tag === undefined;
+    }
+    return part.tag === chosen;
   }
 
   /** Replace the figure's head and eyes with a character's, or with the
@@ -1269,26 +1447,28 @@ export class Kitbasher {
     const figure = this.figure;
     const rig = this.rig;
     if (!figure || !rig) return;
-    const roles: Array<[string, MeshPayload | undefined]> = [
-      ['_head.skin', character?.face.head],
-      ['_eyes.skin', character?.face.eyes],
+    // The face wears the skin its head material names, and the eyes the
+    // customizer's white eye, which takes the character's iris colour.
+    const roles: Array<[string, MeshPayload | undefined, string | undefined]> = [
+      ['_head.skin', character?.face.head, character?.face.headMaterial],
+      ['_eyes.skin', character?.face.eyes, character?.face.eyesMaterial],
     ];
-    for (const [suffix, mesh] of roles) {
+    for (const [suffix, mesh, material] of roles) {
       const index = figure.parts.findIndex((p) => p.part === 'head' && p.mesh.endsWith(suffix));
       const spec = FIGURE[figure.body].find((f) => f.mesh === figure.parts[index]?.mesh);
       if (index < 0 || !spec) continue;
-      const loaded = await this.loadFigurePart(spec, mesh && character ? { key: character.key, mesh } : undefined);
+      const loaded = await this.loadFigurePart(
+        material ? { ...spec, material } : spec,
+        mesh && character ? { key: character.key, mesh } : undefined,
+      );
       if (this.disposed || this.figure !== figure || this.rig !== rig) return;
       const previous = figure.parts[index]!.loaded;
       if (previous === loaded) continue;
       for (const object of previous.objects) object.removeFromParent();
-      for (const object of loaded.objects) {
-        this.view.scene.add(object);
-        if (object instanceof SkinnedMesh) object.bind(rig.skeleton, object.matrixWorld);
-      }
+      this.mountFigurePart(loaded, rig);
       figure.parts[index] = { ...figure.parts[index]!, loaded };
-      this.refineLater(loaded);
     }
+    this.applyLooks();
     this.applyOutfit();
     this.evict();
   }
@@ -1297,31 +1477,34 @@ export class Kitbasher {
    * blended mesh of the same topology, cached under the character's key. */
   private async loadFigurePart(spec: FigureSpec, face?: { key: string; mesh: MeshPayload }): Promise<Loaded> {
     const meshPath = spec.mesh;
-    const key = `figure:${meshPath}:${this.surfaceMode}${face ? `:${face.key}` : ''}`;
+    // The material is in the key: a character's face wears its own skin.
+    const key = `figure:${meshPath}:${spec.material}:${this.surfaceMode}${face ? `:${face.key}` : ''}`;
     const hit = this.cache.get(key);
     if (hit) return hit;
     const payload = face?.mesh ?? (await this.client.mesh(meshPath)).mesh;
-    const material: MaterialPayload = (await this.client.material(spec.material)).material;
+    return this.buildFigurePart(key, meshPath, payload, spec.material, spec.textureSize);
+  }
+
+  /** A figure part from a mesh already in hand, cached under `key`. */
+  private async buildFigurePart(
+    key: string,
+    meshPath: string,
+    payload: MeshPayload,
+    materialPath: string,
+    textureSize: number,
+  ): Promise<Loaded> {
+    const material: MaterialPayload = (await this.client.material(materialPath)).material;
     const count = Math.max(1, material.submaterials.length);
     const { materials, refine } = await this.materialsFor(
       FIGURE_ITEM,
       material,
       [{ uvs: payload.uvs, indices: payload.indices, submeshes: payload.submeshes }],
-      spec.textureSize >= 1024 ? 'weapon' : 'small',
-      spec.textureSize,
+      textureSize >= 1024 ? 'weapon' : 'small',
+      textureSize,
     );
     // Nothing reads a figure texture back, so its CPU copy goes once it is on
     // the GPU: about 40% of what the figure held.
     for (const texture of textureSlots(materials)) releaseAfterUpload(texture);
-    if (spec.skinMatch) {
-      const [r, g, b] = spec.skinMatch;
-      material.submaterials.forEach((sub, i) => {
-        const skin = materials[i];
-        if (sub.shader.toLowerCase().includes('humanskin') && skin instanceof MeshStandardMaterial) {
-          skin.color.multiply(new Color(r, g, b));
-        }
-      });
-    }
     const object = new SkinnedMesh(drawnOnly(buildGeometry(payload, count).geometry, materials), materials);
     object.frustumCulled = false;
     eightWhereNeeded([object]);
@@ -1360,12 +1543,18 @@ export class Kitbasher {
     // the plain hair stands in rather than none at all.
     const parts = this.figure?.parts ?? [];
     const asked = view.hairTag;
-    const hairTag = asked && parts.some((p) => p.tag === asked) ? asked : undefined;
+    const hairTag = asked && parts.some((p) => p.part === 'hair' && p.tag === asked) ? asked : undefined;
     if (asked && !hairTag) void this.loadFigureVariant(asked);
-    for (const { loaded, part, tag } of parts) {
-      const hidden = (part === 'body' && this.undersuitCovers)
-        || (part === 'hair' && (view.hideHair || tag !== hairTag))
-        || (part === 'head' && view.hideHead);
+    // A character's own hair replaces the figure's -- and a character with
+    // none is bald, so the figure's goes either way.
+    const characterOn = this.character !== null && this.character.face.body === this.figure?.body;
+    for (const state of parts) {
+      const { loaded, part, tag } = state;
+      const hidden = part === 'worn'
+        ? !this.wornVisible(state, parts, view)
+        : (part === 'body' && this.undersuitCovers)
+          || (part === 'hair' && (view.hideHair || tag !== hairTag || characterOn))
+          || (part === 'head' && view.hideHead);
       const visible = this.showFigure && !hidden;
       for (const object of loaded.objects) object.visible = visible;
       if (visible) zoned(loaded.objects, 0);
@@ -1384,13 +1573,10 @@ export class Kitbasher {
     try {
       const loaded = await this.loadFigurePart(spec);
       if (this.disposed || this.figure !== figure || this.rig !== rig) return;
-      for (const object of loaded.objects) {
-        object.visible = false;
-        this.view.scene.add(object);
-        if (object instanceof SkinnedMesh) object.bind(rig.skeleton, object.matrixWorld);
-      }
+      for (const object of loaded.objects) object.visible = false;
+      this.mountFigurePart(loaded, rig);
       figure.parts.push({ loaded, part: spec.part, mesh: spec.mesh, tag });
-      this.refineLater(loaded);
+      this.applyLooks();
       this.applyOutfit();
     } catch {
       // No variant: the plain part goes on standing in.
@@ -2652,3 +2838,19 @@ function measure(
   };
 }
 
+/** Every material a loaded piece draws with. */
+function materialsOf(loaded: Loaded): Material[] {
+  const out: Material[] = [];
+  for (const root of loaded.objects) {
+    root.traverse((o) => {
+      const mesh = o as Mesh;
+      if (mesh.isMesh) out.push(...([] as Material[]).concat(mesh.material));
+    });
+  }
+  return out;
+}
+
+/** An item's class name as a status line shows it: `hair_75`, `brows_002`. */
+function shortItemName(item: CharacterItem): string {
+  return item.className;
+}

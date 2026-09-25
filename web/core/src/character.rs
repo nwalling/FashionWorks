@@ -21,8 +21,8 @@ use std::collections::BTreeSet;
 use starbreaker_chf::ChfFile;
 use starbreaker_common::NameHash;
 
-/// A `.chf`'s face, reduced to what the blend needs.
-#[derive(Debug, Clone, PartialEq)]
+/// A `.chf`'s face, reduced to what the blend needs, and what it wears.
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Character {
     /// The protos head its DNA is written against:
     /// `protos_human_male_face_t1_pu` or `protos_human_female_face_t1_pu`.
@@ -31,6 +31,10 @@ pub struct Character {
     /// the weights normalised to sum to one. Version 7 files stop at 12 parts;
     /// the thirteenth, the neck, is then the protos head's own.
     pub parts: Vec<[(u16, f32); 4]>,
+    /// Skin, eye and hair colour, and the head material. Phase 2.
+    pub looks: crate::appearance::Looks,
+    /// Every item in the port tree, as (port, record GUID). Phase 3.
+    pub items: Vec<(String, String)>,
 }
 
 pub const MALE_HEAD: &str = "protos_human_male_face_t1_pu";
@@ -78,7 +82,12 @@ pub fn read_chf(bytes: &[u8]) -> Result<Character, String> {
             out
         })
         .collect();
-    Ok(Character { head: head.to_string(), parts })
+    Ok(Character {
+        head: head.to_string(),
+        parts,
+        looks: crate::appearance::read_looks(&data),
+        items: crate::appearance::read_items(&data),
+    })
 }
 
 /// What the protos head's `.dna` says about its library: the heads' names in
@@ -397,6 +406,103 @@ pub fn renormalise(normals: &mut [f32]) {
     }
 }
 
+/// Carry the face's change of shape onto something worn on it: brows, lashes,
+/// beard, hair, piercings.
+///
+/// These meshes are authored against the protos head and the game fits them
+/// to the blended one at runtime -- their records name `WD_Elastic`,
+/// `WD_ElasticDQSkinning` and `WD_ElasticNUScaling` deformers, where the head
+/// and body name `Standard`. What those do exactly is compiled into the
+/// engine, so this is the plain version of a wrap, and **inferred**: each
+/// point moves by the displacement of the protos-head vertices nearest it,
+/// weighted by inverse distance. A point on the brow ridge moves with the brow
+/// ridge; a hair tip moves with the scalp it hangs from.
+pub fn wrap(protos: &[f32], blended: &[f32], points: &mut [f32]) {
+    let count = protos.len() / 3;
+    if count == 0 || blended.len() != protos.len() {
+        return;
+    }
+    let tree = KdTree::new(protos);
+    for p in points.chunks_exact_mut(3) {
+        let near = tree.nearest(protos, [p[0], p[1], p[2]], WRAP_NEIGHBOURS);
+        let mut total = 0.0f32;
+        let mut shift = [0.0f32; 3];
+        for (v, d2) in near {
+            let w = 1.0 / (d2.sqrt() + WRAP_SOFTEN);
+            total += w;
+            for c in 0..3 {
+                shift[c] += w * (blended[v * 3 + c] - protos[v * 3 + c]);
+            }
+        }
+        if total > 0.0 {
+            for c in 0..3 {
+                p[c] += shift[c] / total;
+            }
+        }
+    }
+}
+
+/// How many head vertices a worn point follows.
+const WRAP_NEIGHBOURS: usize = 4;
+/// Metres added to each distance, so a point sitting exactly on a vertex does
+/// not take that vertex alone and the weights stay finite.
+const WRAP_SOFTEN: f32 = 0.001;
+
+/// A k-d tree over a point cloud, for nearest-neighbour queries. The head has
+/// 5,584 vertices and a hair mesh tens of thousands of points, which is too
+/// many pairs to compare directly.
+struct KdTree {
+    /// Point indices, arranged so each subtree is a contiguous range whose
+    /// middle element splits it.
+    order: Vec<usize>,
+}
+
+impl KdTree {
+    fn new(points: &[f32]) -> KdTree {
+        let mut order: Vec<usize> = (0..points.len() / 3).collect();
+        fn build(points: &[f32], order: &mut [usize], depth: usize) {
+            if order.len() <= 1 {
+                return;
+            }
+            let axis = depth % 3;
+            let mid = order.len() / 2;
+            order.select_nth_unstable_by(mid, |a, b| points[a * 3 + axis].total_cmp(&points[b * 3 + axis]));
+            let (left, right) = order.split_at_mut(mid);
+            build(points, left, depth + 1);
+            build(points, &mut right[1..], depth + 1);
+        }
+        build(points, &mut order, 0);
+        KdTree { order }
+    }
+
+    /// The `k` nearest points to `q`, as (index, squared distance).
+    fn nearest(&self, points: &[f32], q: [f32; 3], k: usize) -> Vec<(usize, f32)> {
+        let mut best: Vec<(usize, f32)> = Vec::with_capacity(k + 1);
+        fn search(points: &[f32], order: &[usize], depth: usize, q: [f32; 3], k: usize, best: &mut Vec<(usize, f32)>) {
+            if order.is_empty() {
+                return;
+            }
+            let mid = order.len() / 2;
+            let i = order[mid];
+            let d2: f32 = (0..3).map(|c| (points[i * 3 + c] - q[c]).powi(2)).sum();
+            if best.len() < k || d2 < best[best.len() - 1].1 {
+                let at = best.partition_point(|&(_, d)| d <= d2);
+                best.insert(at, (i, d2));
+                best.truncate(k);
+            }
+            let axis = depth % 3;
+            let delta = q[axis] - points[i * 3 + axis];
+            let (near, far) = if delta < 0.0 { (&order[..mid], &order[mid + 1..]) } else { (&order[mid + 1..], &order[..mid]) };
+            search(points, near, depth + 1, q, k, best);
+            if best.len() < k || delta * delta < best[best.len() - 1].1 {
+                search(points, far, depth + 1, q, k, best);
+            }
+        }
+        search(points, &self.order, 0, q, k, &mut best);
+        best
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -415,6 +521,7 @@ mod tests {
                 [(1, 1.0), (0, 0.0), (0, 0.0), (0, 0.0)],
                 [(2, 0.5), (0, 0.5), (0, 0.0), (0, 0.0)],
             ],
+            ..Default::default()
         };
         let shapes = [vec![0.0f32, 0.0], vec![10.0, 10.0], vec![20.0, 20.0]];
         let out = blend_head(&character, &lib, 1, &|id| shapes.get(usize::from(id)).map(|s| &s[..]));
@@ -470,6 +577,7 @@ mod tests {
         let character = Character {
             head: MALE_HEAD.into(),
             parts: vec![[(1, 1.0), (0, 0.0), (0, 0.0), (0, 0.0)], [(2, 1.0), (0, 0.0), (0, 0.0), (0, 0.0)]],
+            ..Default::default()
         };
         let shapes = [vec![0.0f32; 3], vec![10.0, 10.0, 10.0], vec![20.0, 20.0, 20.0]];
         let out = blend_head(&character, &lib, 1, &|id| shapes.get(usize::from(id)).map(|s| &s[..]));
@@ -513,10 +621,45 @@ mod tests {
         let character = Character {
             head: MALE_HEAD.into(),
             parts: vec![[(0, 1.0); 4], [(0, 1.0); 4], [(1, 0.25), (2, 0.75), (0, 0.0), (0, 0.0)]],
+            ..Default::default()
         };
         let shapes = [vec![0.0f32; 2], vec![4.0, 4.0], vec![8.0, 8.0]];
         let mut out = vec![-1.0f32; 2];
         blend_part(&character, EYE_LEFT, &[1], 1, &mut out, &|id| shapes.get(usize::from(id)).map(|s| &s[..]));
         assert_eq!(out, vec![-1.0, 7.0], "only the listed vertices move");
+    }
+
+    #[test]
+    fn the_k_d_tree_finds_what_a_scan_finds() {
+        let mut points = Vec::new();
+        let mut seed = 7u32;
+        let mut next = || {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (seed >> 8) as f32 / (1u32 << 24) as f32
+        };
+        for _ in 0..500 {
+            points.extend([next(), next(), next()]);
+        }
+        let tree = KdTree::new(&points);
+        for _ in 0..50 {
+            let q = [next(), next(), next()];
+            let mut scan: Vec<(usize, f32)> = (0..500)
+                .map(|i| (i, (0..3).map(|c| (points[i * 3 + c] - q[c]).powi(2)).sum()))
+                .collect();
+            scan.sort_by(|a, b| a.1.total_cmp(&b.1));
+            let found = tree.nearest(&points, q, 4);
+            assert_eq!(found.iter().map(|f| f.0).collect::<Vec<_>>(), scan[..4].iter().map(|s| s.0).collect::<Vec<_>>());
+        }
+    }
+
+    #[test]
+    fn a_worn_point_moves_with_the_face_under_it() {
+        // Two head vertices a metre apart; the left one moves up 1 cm.
+        let protos = [0.0f32, 0.0, 0.0, 1.0, 0.0, 0.0];
+        let blended = [0.0f32, 0.01, 0.0, 1.0, 0.0, 0.0];
+        let mut points = [0.0f32, 0.0, 0.002, 1.0, 0.0, 0.002];
+        wrap(&protos, &blended, &mut points);
+        assert!((points[1] - 0.01).abs() < 0.0002, "the brow over the moved vertex moves with it: {}", points[1]);
+        assert!(points[4].abs() < 0.0002, "the one over the still vertex stays: {}", points[4]);
     }
 }

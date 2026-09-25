@@ -166,6 +166,13 @@ pub struct SubMaterial {
     /// `%DECALS`. Placed by the UV set the mesh packs into its vertex colour
     /// (`mesh::decal_uv`). None where the material has no decals.
     pub decal_sheet: Option<String>,
+    /// How a `HairPBR` surface is drawn, from its shader flags: `cards` for
+    /// strands (`%HAIR_CARDS`), `cap` for the shadow a hairline casts on the
+    /// skin (`%HAIR_CAP`), `coat` for short hair laid over the scalp
+    /// (`%HAIR_COAT`). None for anything else. Names cannot say it: a buzz
+    /// cut's coat is `hair_02_shaved_opac`, and `_opac` read as cards drew it
+    /// as a solid band across the forehead.
+    pub hair: Option<&'static str>,
 }
 
 impl SubMaterial {
@@ -219,12 +226,19 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<SubMaterial>, String> {
             // trusts the file name first -- which is what CIG's own suffixes
             // (`_diff`, `_ddna`, `_spec`) are for.
             let layered = sub.shader.to_ascii_lowercase().contains("layerblend");
+            let skin = sub.shader.to_ascii_lowercase().contains("humanskin");
             let mut textures = HashMap::new();
             for binding in &sub.texture_slots {
                 if binding.path.is_empty() {
                     continue;
                 }
-                let role = if layered {
+                let role = if skin && binding.slot.eq_ignore_ascii_case("TexSlot7") {
+                    // Skin's slot 7 is its tone mask, whose green says where
+                    // the texture shows and where the flat skin tone does --
+                    // black exactly where head and body meet. Read as the
+                    // decal slot it would be drawn as a sticker sheet.
+                    Some("tone_mask")
+                } else if layered {
                     slot_role(&binding.slot).or_else(|| suffix_role(&binding.path))
                 } else {
                     suffix_role(&binding.path).or_else(|| slot_role(&binding.slot))
@@ -263,6 +277,19 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<SubMaterial>, String> {
                             .map(|b| b.path.clone())
                     })
                     .flatten(),
+                hair: {
+                    let flags: Vec<&str> = sub.string_gen_mask.split('%').collect();
+                    let has = |f: &str| flags.iter().any(|t| t.eq_ignore_ascii_case(f));
+                    if has("HAIR_CARDS") {
+                        Some("cards")
+                    } else if has("HAIR_CAP") {
+                        Some("cap")
+                    } else if has("HAIR_COAT") {
+                        Some("coat")
+                    } else {
+                        None
+                    }
+                },
                 params: if layered {
                     numeric_params(&sub.public_params)
                         .into_iter()

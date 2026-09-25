@@ -208,10 +208,12 @@ stream, as an armour layer's does. Roughness is `1 - alpha x shininess`.
 the two meshes share, the male head reads sRGB (189,120,100) against the body's
 (167,105,85), the female (194,152,122) against (189,135,106) -- a collar line
 on a bare figure, which the game never shows because something is always worn.
-The body is multiplied to meet the head (`skinMatch`), not the other way
+The body was multiplied to meet the head (`skinMatch`), not the other way
 round: the body hides under any full undersuit and the face never does. The
-female uses `f_body_cau.mtl`, the counterpart of the male's `m_body_cau.mtl`;
-`f_body_01` was further off.
+female used `f_body_cau.mtl`, the counterpart of the male's `m_body_cau.mtl`;
+`f_body_01` was further off. **Superseded by CHARACTER.md Phase 2:** the
+figure now wears the customizer's body material, and the shader's own tone
+adjustment and tone mask join the neck with no multiplier.
 
 **Hair has no colour texture.** `HairPBR`'s slot 1 is an opacity mask -- two
 strand sets in red and green over a flat blue -- and drawn as a colour map it

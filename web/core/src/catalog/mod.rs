@@ -17,13 +17,13 @@ use serde_json::Value;
 
 pub mod build;
 pub mod db;
-mod fields;
+pub(crate) mod fields;
 pub mod gear;
 mod flags;
 pub mod localization;
 pub mod sets;
 pub mod tint;
-mod geometry;
+pub(crate) mod geometry;
 
 pub use fields::{component, first, record_body};
 pub use flags::{flags_for, PLACEHOLDER_NAME};

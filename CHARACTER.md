@@ -17,6 +17,10 @@ player's machine; `.chr` is the skeleton format this project already reads.
 | --- | --- | --- |
 | research | done | The `.chf` fully parsed; every item it names resolves to a record the catalogue already exports; the face is a per-region blend of library heads that ship as ordinary meshes of the protos head's topology; the skin colour is the shader's own tone target. See below. |
 | 0 -- the face | done, awaiting the in-game comparison | Head id *k* is name *k*, proven on the archive's own characters; a one-head character reproduces its head to 0.0002 mm. Faces blend in the browser in 3.3 s cold, 1.7 s warm, with the eyes following their sockets. Three things the data did not say had to be settled on the way -- seams, shading, rough masks. See "Phase 0, as run". |
+| 1 -- the face in the core | done | All 38 characters among the archive's 40 `.chf` files blend, 24 male and 14 female, v7 and v8; the other two are a tattoo overlay and a hair colour, and fail with a message. |
+| 2 -- colour | done; the dye reading is open | The `.chf`'s head material resolves through one record's lookup table; head and body recolour to `BodyColor` and meet at the neck with the fudge factors gone; the iris takes `EyeColor`; hair, beard and brows take their melanin and dye. Freckles and sun spots are not drawn. See "Phases 1-4, as run". |
+| 3 -- the player's items | done | Hair, brows, lashes, beard, stubble, scalp and piercings, fitted to the face; the hair swaps under a cap and goes under a mask or helmet. |
+| 4 -- UI | done | The character stays on through outfits, belongs to its own body, and a share link of its outfit opens on the default figure. |
 
 ## What the data says
 
@@ -39,10 +43,11 @@ masculine and feminine defaults, mission givers, NPCs) plus Ilucide: versions
 same ports every time -- body, head, eyes, hair, eyebrows, eyelashes, scalp,
 with beard, stubble and five piercing ports where used.
 
-### Every item it names is already catalogued
+### Every item it names is a record
 
 Resolved against the DataCore export, all eight of Ilucide's items are records
-under `entities/scitem/characters/human/`, the same tree the catalogue reads:
+under `entities/scitem/characters/human/`, the tree the catalogue reads -- but
+under `head/`, which it does not catalogue. Phase 3 takes them out separately:
 
 | port | record |
 | --- | --- |
@@ -103,9 +108,10 @@ masks summing to 1 -- so one reader serves both bodies.
 `HumanSkin_V2` parameter `FinalSkinTone` written in sRGB: the masculine
 default's `#513428` is linear (0.0823, 0.0343, 0.0212), the value
 `MasculineDefault.xml` -- the same character as XML -- gives `FinalSkinTone`. Each skin material also declares
-`SourceAverageColor`, its own texture's average, under `%TONE_ADJUSTMENT`: the
-shader recolours each texture from its own average to the one target, which is
-how the head and the body meet at the neck in the game.
+`SourceAverageColor` under `%TONE_ADJUSTMENT`, which stands for its texture's
+average: the shader recolours each texture from it to the one target, which is
+how the head and the body meet at the neck in the game. (It is a picked
+swatch, not a measurement -- see Phase 2 as run.)
 
 That explains the figure's hand-tuned `MALE_SKIN_MATCH` (RENDERING.md Phase 4):
 the head and body textures have different averages, and a single target
@@ -121,22 +127,22 @@ tiling). Eyes carry one `EyeColor`. Hair, beard and eyebrows each carry
 `DyeShift`, `DyeFadeout` and two dye colours -- the parameters
 `materials.hairColour` already reads off the hair `.mtl`.
 
-### What is not resolved
+### What was not resolved, and how it was
 
-- **Texture overrides.** Materials name textures by GUID -- slot 4 on 39 of the
-  40 archive files, slots 8-14 on a few (makeup and tattoo masks, most likely)
-  -- and no DataCore record carries those GUIDs. Without them a character's
-  makeup and tattoo patterns cannot be drawn; everything else can.
-- **The head's own textures.** Every character's head uses the protos
-  material, which points at `male02`'s albedo, tone-adjusted. The masculine
-  default's XML names `male17`'s instead; which one a given character gets, and
-  why, is open.
-- **Eyes, eyelashes and brows following the face.** They are separate meshes,
-  and where eye sockets move between library heads the eyes must move with
-  them. The per-library eye meshes probably settle it the same way the heads
-  do; the facial joints in the `.dna` are the other candidate.
-- **`imperator_t1`**, male library head 19, has no mesh. A blend that names it needs
-  a fallback -- renormalising the other three is the obvious one.
+All four were settled in Phases 0-3; kept here with the answers.
+
+- **Texture overrides.** Materials name textures by GUID, and no DataCore
+  *record* carries those GUIDs -- but one record's *field* does: the lookup
+  table under Phase 2. Slot 4 is the blemish mask on every file; slots 8-14
+  are makeup and tattoo sheets. Drawing them is not done.
+- **The head's own textures.** Not the protos material's: the `.chf`'s head
+  material GUID names one of 94 `maleNN`/`femaleNN` head materials through the
+  same table. Ilucide wears `male36_t1`'s; the masculine default `male17_t1`'s.
+- **Eyes, eyelashes and brows following the face.** The eyes blend from the
+  library's own eye meshes (Phase 0). Lashes, brows, beard, hair and piercings
+  are fitted to the blended head by a wrap (Phase 3).
+- **`imperator_t1`**, male library head 19, has no mesh; a blend that names it
+  renormalises the other three (Phase 1, `character::usable`).
 
 ## Phase 0, as run
 
@@ -206,6 +212,125 @@ Checked on Ilucide, Macken, Intersec Tobin, the DefenseCon NPCs and both
 defaults (male); Recco Battaglia and Meg (female).
 `examples/character_probe.rs` reproduces the measurements from extracted
 files.
+
+## Phases 1-4, as run
+
+**Phase 1 is Phase 0's core, run across the archive.** All 38 characters in
+the 40 `.chf` files blend with their seams shut, male and female, v7 and v8.
+`regen_boss_hair_color.chf` and `Ninetails_Body_Tattoo.chf` are not characters
+-- a hair colour and a tattoo overlay the generator layers onto others -- and
+say so.
+
+### Phase 2: the head material, the tone, the iris, the hair
+
+**A `.chf`'s material GUIDs are keys in one record's table.**
+`SCharacterGenerationParams.DefaultCharacterGenerationParams` holds a
+`materialLookupTable`: 94 material GUIDs and 40 texture GUIDs, each with a
+file path. The body material is `m_body_character_customizer.mtl` (female
+`f_...`) on every file; the head material is one of the `maleNN`/`femaleNN`
+head materials -- 40 of 40 resolve. The core takes the table out while the
+catalogue is built (`appearance::Library`), since the DataCore is not kept.
+
+**The body the figure wears is the customizer's.** `m_body_cau.mtl` declares
+no tone adjustment; `m_body_character_customizer.mtl` does, with the same
+submaterials. `MALE_SKIN_MATCH` and `FEMALE_SKIN_MATCH` are gone.
+
+**The tone mask is what joins the neck.** Recoloured by `Final / Source`, the
+textures still disagree where the meshes meet: the male head reads a fifth
+lighter than the body across the 45 vertices they share. The skin materials'
+slot 7 (`head_mask`, `m_body_mask`) settles it: its green is white nearly
+everywhere and black in one band on each texture -- the lower neck on the
+head, the collar on the body -- exactly where they meet. Drawn as "the flat
+target where the mask is black, the recoloured texture where it is white",
+the seam goes on every head tried. **Inferred**: the shader is compiled into
+the engine. The multiply is inferred too; `CalibrationPower` 1 and
+`CalibrationSlope` 0 on every skin material make it the plain ratio.
+
+**`SourceAverageColor` is a swatch, not a statistic.** Against its own
+texture it is 1.37 times the linear mean on `m_body_01`, 0.83 on `male02`,
+1.06 on `male36`, and no mean, median or sRGB average fits them all. The
+values are colour-picker picks -- 0.3515 is sRGB 160 -- and `female01`'s is
+the female body's, copied. So a recoloured region lands near the target, not
+on it, and where the mask fades from flat to texture below the collar there
+is a soft step. That is the mask's own falloff.
+
+**The iris.** `EyeColor` is the `Eye` shader's `IrisColor` in sRGB, exactly
+(the masculine default's `#37110a`). The eyes item wears the customizer's
+white eye, whose diffuse alpha is the iris mask over a pale patterned iris;
+inside it the texel becomes `IrisColor` scaled by its brightness over the
+iris's mean. The protos head's own brown eye is untouched.
+
+**Hair.** `HairDyeColor1` is `DyeColor` in sRGB, exactly (`#89756b` is
+`hair_31`'s), and the melanin and dye parameters match by name. **Open:** how
+the dye combines. Mixed toward the dye colour by `DyeAmount` -- the reading
+`materials.hairColour` has always used -- seven archive characters get vivid
+blue brows: the masculine default, Macken and five more share a preset of
+black melanin under a `#08049c` dye at amount 1. Absorbed instead (colours
+multiplying, as Chiang et al. add a dye's absorption to melanin's) those brows
+are black, but `hair_31`'s own dye then darkens the figure's hair from brown
+to near black. `DyeFadeout` (up to 14.5) and a second dye colour suggest a
+root-to-tip ombre that a flat colour draws neither way. The mix stays; Ilucide
+settles it -- the `.chf` dyes the beard and brows `#fefefe` at 0.71 and 0.91,
+so under the mix they are light grey.
+
+**Not drawn:** freckles and sun spots (the blemish masks are resolved, the
+shader's use of them is not), makeup and tattoos.
+
+**Names are not always CRC32C.** The `.chf` stores `Head Material`,
+`HairDyeMaterial`, `BodyColor`, `EyeColor`, `HairDyeColor1` and other names
+under hashes StarBreaker maps by hand; comparing against `crc32c(name)` read
+every colour as absent.
+
+### Phase 3: what the character wears
+
+**299 head items**, read out of the DataCore with the table. A `.chf` names
+eight to ten: body, head, eyes, hair, brows, lashes, scalp, and beard,
+stubble and piercings where used. Each resolves by one rule: the node tagged
+with the body (`Male`, `Female`) carries the mesh -- for the eyes, the one
+under `Protos_head` -- and its material is the node's own, else the item's
+`SMaterialNodeParams`, else the `.mtl` beside the mesh. A tagged material
+variant that matches more than the body's tag wins over the node's: `hair_75`
+asserts `$$scalpVHair_75++`, which is how the universal scalp would pick its
+material -- and the scalp ships no `scalpVHair_75`, so it keeps `m_hair_02`,
+which is what the data says. `examples/character_looks.rs` resolves any file.
+
+**Worn things are wrapped onto the face.** Brows, lashes, beard, hair and
+piercings are authored on the protos head; their records name `WD_Elastic`,
+`WD_ElasticDQSkinning` and `WD_ElasticNUScaling` deformers where the head and
+body name `Standard`. The engine's deformer is compiled in, so the core's is
+the plain version, **inferred**: each point moves by the inverse-distance
+blend of the displacement of the four protos-head vertices nearest it
+(`character::wrap`, a k-d tree). The core keeps the last face for it and
+`characterMesh` fits anything loaded afterwards, so a hat's variant loads
+fitted too.
+
+**Hair comes in three kinds, and the shader flags say which.** `%HAIR_CARDS`
+is strands, alpha-tested; `%HAIR_CAP` is the shadow a hairline casts on the
+skin; `%HAIR_COAT` is short hair laid over the scalp. The viewer used to guess
+from the mask's name (`_opac` meant cards), and a buzz cut's coat is
+`hair_02_shaved_opac`. **Most caps keep their density in alpha** over white
+RGB -- the brows', the beards', `m_hair_02_scalp` -- and read by red they were
+solid: an opaque sheet over the forehead, the brows and the jaw. And strands
+are drawn no glossier than roughness 0.75: hair's highlight is a thin
+anisotropic band, and an isotropic one at `1 - Smoothness` spread across
+`hair_75`'s flat back and sides as a grey-white sheet.
+
+**The outfit decides what shows, by the character's own ports.** An item is
+hidden when something worn hides its port or the head; hair also under any
+helmet, as the figure's own. Its variant is the first geometry tag a worn
+piece asserts that it offers: under the Aegis cap `hair_75` wears its
+`hatHair` cut; under the Katla mask, which asks `hatHair_mask`, it wears
+nothing, because that variant has no mesh. The figure's own hair goes
+whenever a character is on -- a character with none is bald.
+
+### Phase 4: the file, the body, the link
+
+The character belongs to its body. Loading one switches to it; switching away
+puts the default face on the other body ("Ilucide is male: default face"),
+and switching back puts the character back. Items go on under one ticket, so a
+figure rebuilt while a character is dressing cannot dress it twice. A share
+link carries the outfit only: reopened, the jacket was on and the face was the
+default.
 
 ## Phases
 

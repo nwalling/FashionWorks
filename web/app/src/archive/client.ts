@@ -285,6 +285,11 @@ export class ArchiveClient {
     return (await this.request('character', { type: 'character', chf })).face;
   }
 
+  /** Something the last character wears, fitted to its face. */
+  async characterMesh(path: string) {
+    return this.request('mesh', { type: 'characterMesh', path });
+  }
+
   async material(path: string) {
     return this.request('material', { type: 'material', path });
   }

@@ -11,6 +11,7 @@
 //! See `WEB.md` for the architecture and `WEB-INTEGRATION.md` for the contract
 //! the Hangarworks site consumes.
 
+pub mod appearance;
 pub mod armature;
 pub mod audit;
 pub mod blend;
@@ -65,6 +66,12 @@ pub struct Archive {
     /// Every file under `heads/`, by lowercased file name. The library heads
     /// are named in the DNA without a folder, and live in several.
     heads: std::cell::OnceCell<std::collections::HashMap<String, usize>>,
+    /// The customizer's material table and head items, taken from the
+    /// DataCore while the catalogue is built. See [`appearance`].
+    looks: std::cell::RefCell<Option<std::rc::Rc<appearance::Library>>>,
+    /// The last character's head, protos and blended, for fitting what it
+    /// wears to its face.
+    face: std::cell::RefCell<Option<std::rc::Rc<(Vec<f32>, Vec<f32>)>>>,
 }
 
 #[wasm_bindgen]
@@ -86,6 +93,8 @@ impl Archive {
             mtls: std::cell::OnceCell::new(),
             dna: std::cell::RefCell::new(std::collections::HashMap::new()),
             heads: std::cell::OnceCell::new(),
+            looks: std::cell::RefCell::new(None),
+            face: std::cell::RefCell::new(None),
         })
     }
 
@@ -432,6 +441,19 @@ impl Archive {
         Ok(out)
     }
 
+    /// Take the customizer's tables out of the DataCore: the lookup that
+    /// resolves a `.chf`'s head material, and every head item. Called with the
+    /// bytes the catalogue was built from, since the worker does not keep
+    /// them. Returns how many head items it found.
+    #[wasm_bindgen(js_name = loadCharacterLibrary)]
+    pub fn load_character_library(&self, dcb: &[u8]) -> Result<usize, JsValue> {
+        let database = catalog::db::open(dcb).map_err(|e| JsValue::from_str(&e))?;
+        let library = appearance::Library::build(&database);
+        let count = library.items.len();
+        *self.looks.borrow_mut() = Some(std::rc::Rc::new(library));
+        Ok(count)
+    }
+
     /// A player's face, from the `.chf` the game's customizer saved.
     /// CHARACTER.md.
     ///
@@ -439,6 +461,13 @@ impl Archive {
     /// with every vertex blended from the library heads the character names,
     /// plus `body` (`male` or `female`), the `heads` it drew on and any it
     /// wanted that this build ships no mesh for.
+    ///
+    /// With the character library loaded it also returns what the face is
+    /// drawn with and wears: `headMaterial` (the skin its GUID resolves to),
+    /// `eyesMaterial`, `looks` (skin, iris and hair colours, linear) and
+    /// `items`, each with the mesh and material it puts on this body. Those
+    /// meshes are fetched with [`Archive::character_mesh`], which fits them to
+    /// the face.
     #[wasm_bindgen(js_name = characterFace)]
     pub fn character_face(&self, chf: &[u8]) -> Result<JsValue, JsValue> {
         let js = |e: String| JsValue::from_str(&e);
@@ -497,6 +526,7 @@ impl Archive {
         let side = character::left_eye_side(&library, &head.positions);
         let blended = character::blend_head(&face, &library, 3, &|id| heads.get(&id).map(|s| &s.0[..]));
         head.normals = character::reshade(&head.indices, &head.positions, &head.normals, &blended);
+        *self.face.borrow_mut() = Some(std::rc::Rc::new((head.positions.clone(), blended.clone())));
         head.positions = blended;
 
         // Each eyeball follows its own eye part. Left is whichever side the
@@ -526,7 +556,131 @@ impl Archive {
         let names = |list: &[String]| list.iter().map(|n| JsValue::from_str(n)).collect::<js_sys::Array>();
         set("heads", &names(&used).into())?;
         set("missing", &names(&missing).into())?;
+        self.character_looks(&face, &out)?;
         Ok(out.into())
+    }
+
+    /// The `.chf`'s colours, head material and items, onto `out`. Nothing is
+    /// added without the character library: the face still blends.
+    fn character_looks(&self, face: &character::Character, out: &js_sys::Object) -> Result<(), JsValue> {
+        let set = |target: &js_sys::Object, key: &str, value: &JsValue| {
+            js_sys::Reflect::set(target, &key.into(), value).map(|_| ())
+        };
+        let colour = |c: &[f32]| JsValue::from(js_sys::Float32Array::from(c));
+        let params = |list: &appearance::HairParams| -> Result<JsValue, JsValue> {
+            let object = js_sys::Object::new();
+            for (name, value) in list {
+                let v = if value.len() == 1 { JsValue::from_f64(f64::from(value[0])) } else { colour(value) };
+                set(&object, name, &v)?;
+            }
+            Ok(object.into())
+        };
+        let looks = js_sys::Object::new();
+        if let Some(skin) = face.looks.skin {
+            set(&looks, "skin", &colour(&skin))?;
+        }
+        if let Some(iris) = face.looks.iris {
+            set(&looks, "iris", &colour(&iris))?;
+        }
+        set(&looks, "hair", &params(&face.looks.hair)?)?;
+        set(&looks, "beard", &params(&face.looks.beard)?)?;
+        set(&looks, "eyebrows", &params(&face.looks.eyebrows)?)?;
+        let head = js_sys::Object::new();
+        for (name, value) in &face.looks.head {
+            set(&head, name, &JsValue::from_f64(f64::from(*value)))?;
+        }
+        set(&looks, "head", &head.into())?;
+        set(out, "looks", &looks.into())?;
+
+        let Some(library) = self.looks.borrow().clone() else {
+            return Ok(());
+        };
+        if let Some(path) = face.looks.head_material.as_deref().and_then(|g| library.material(g)) {
+            set(out, "headMaterial", &path.into())?;
+        }
+        let body = if face.is_female() { "Female" } else { "Male" };
+        let asserted: Vec<String> = face
+            .items
+            .iter()
+            .filter_map(|(_, guid)| library.item(guid))
+            .flat_map(|item| item.asserts.iter().cloned())
+            .collect();
+        let items = js_sys::Array::new();
+        let mut unknown = Vec::new();
+        for (port, guid) in &face.items {
+            let Some(item) = library.item(guid) else {
+                // The body is not a head item; anything else unknown is.
+                if !port.eq_ignore_ascii_case("body_itemport") {
+                    unknown.push(port.clone());
+                }
+                continue;
+            };
+            let Some(worn) = item.worn(body, &asserted) else {
+                unknown.push(item.class_name.clone());
+                continue;
+            };
+            let material = worn.material.clone().or_else(|| self.material_beside(&worn.mesh, &item.class_name));
+            if item.kind.eq_ignore_ascii_case("Char_Head_Eyes") {
+                if let Some(material) = &material {
+                    set(out, "eyesMaterial", &material.into())?;
+                }
+                continue;
+            }
+            // The body and head are the figure's own; the face is blended.
+            if item.kind.eq_ignore_ascii_case("Char_Head") || item.kind.eq_ignore_ascii_case("Char_Body") {
+                continue;
+            }
+            let entry = js_sys::Object::new();
+            set(&entry, "port", &port.into())?;
+            set(&entry, "className", &item.class_name.as_str().into())?;
+            set(&entry, "kind", &item.kind.as_str().into())?;
+            set(&entry, "mesh", &worn.mesh.as_str().into())?;
+            set(&entry, "material", &material.map(JsValue::from).unwrap_or(JsValue::NULL))?;
+            let variants = js_sys::Array::new();
+            for (tag, mesh, variant_material) in &worn.variants {
+                let variant = js_sys::Object::new();
+                set(&variant, "tag", &tag.into())?;
+                set(&variant, "mesh", &mesh.clone().map(JsValue::from).unwrap_or(JsValue::NULL))?;
+                let variant_material = variant_material
+                    .clone()
+                    .or_else(|| mesh.as_deref().and_then(|m| self.material_beside(m, &item.class_name)));
+                set(&variant, "material", &variant_material.map(JsValue::from).unwrap_or(JsValue::NULL))?;
+                variants.push(&variant);
+            }
+            set(&entry, "variants", &variants.into())?;
+            items.push(&entry);
+        }
+        set(out, "items", &items.into())?;
+        let unknown: js_sys::Array = unknown.iter().map(|n| JsValue::from_str(n)).collect();
+        set(out, "unknownItems", &unknown.into())?;
+        Ok(())
+    }
+
+    /// The `.mtl` a head item's mesh wears when its record names none: the
+    /// one beside it under the same stem (`m_hair_75.skin`, `m_hair_75.mtl`),
+    /// else whatever [`discover`] finds.
+    fn material_beside(&self, mesh: &str, class_name: &str) -> Option<String> {
+        let stem = mesh.rsplit_once('.').map(|(s, _)| s).unwrap_or(mesh);
+        let beside = format!("{stem}.mtl");
+        if self.find_asset(&beside).is_some() {
+            return Some(beside);
+        }
+        self.discover_material(class_name, mesh, None)
+    }
+
+    /// Something a character wears on its head -- hair, brows, lashes, beard,
+    /// a piercing -- loaded as [`Archive::load_mesh`] loads anything, then
+    /// fitted to the last character's face with [`character::wrap`]. Without a
+    /// character it is the mesh as authored, on the protos head.
+    #[wasm_bindgen(js_name = characterMesh)]
+    pub fn character_mesh(&self, path: &str) -> Result<JsValue, JsValue> {
+        let (mut loaded, report, skin) = self.load_rebound(path)?;
+        if let Some(face) = self.face.borrow().clone() {
+            character::wrap(&face.0, &face.1, &mut loaded.positions);
+        }
+        let out = mesh_to_js(&loaded, report.as_ref())?;
+        js_sys::Reflect::set(&out, &"overrides".into(), &overrides_to_js(&skin)?.into())?;
+        Ok(out)
     }
 
     /// A mesh loaded and, with a rig, rebound to it; and its header half.
@@ -985,6 +1139,9 @@ impl Archive {
             js_sys::Reflect::set(&entry, &"opacity".into(), &sub.opacity.into())?;
             js_sys::Reflect::set(&entry, &"alphaTest".into(), &sub.alpha_test.into())?;
             js_sys::Reflect::set(&entry, &"shininess".into(), &sub.shininess.into())?;
+            if let Some(hair) = sub.hair {
+                js_sys::Reflect::set(&entry, &"hair".into(), &hair.into())?;
+            }
             let params = js_sys::Object::new();
             for (name, values) in &sub.params {
                 let value: JsValue = if values.len() == 1 {

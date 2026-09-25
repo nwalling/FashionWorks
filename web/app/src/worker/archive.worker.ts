@@ -73,6 +73,8 @@ export type ToWorker = (
   /** A player's face from their `.chf`: the protos head and eyes, blended from
    * the library heads it names. CHARACTER.md. */
   | { type: 'character'; chf: Uint8Array }
+  /** Something the last character wears on its head, fitted to its face. */
+  | { type: 'characterMesh'; path: string }
   /** Build the canonical armature before any mesh is loaded. */
   | { type: 'rig'; base: string; donors: string[] }
   /** Resolve a `.mtl` and its whole layer library. */
@@ -172,6 +174,9 @@ export interface MaterialPayload {
     params?: Record<string, number | Float32Array>;
     /** `TexSlot9` where the shader is compiled with `%DECALS`, else null. */
     decalSheet?: string | null;
+    /** A `HairPBR` surface's kind, from its shader flags: strand `cards`, the
+     * scalp `cap` a hairline shades the skin with, or a short-hair `coat`. */
+    hair?: 'cards' | 'cap' | 'coat';
   }>;
   /** Every distinct detail layer the piece references, by lowercased path. */
   library: Record<string, LayerMaterial>;
@@ -232,6 +237,46 @@ export interface CharacterFace {
    * ships no mesh for. */
   readonly heads: string[];
   readonly missing: string[];
+  /** The skin the `.chf`'s head material GUID resolves to -- one of the
+   * `maleNN`/`femaleNN` head materials -- where the character library knows
+   * it. Absent on older cores and without the library. */
+  readonly headMaterial?: string;
+  /** The eyes item's material: the customizer's white eye, for the iris to
+   * take `looks.iris`. */
+  readonly eyesMaterial?: string;
+  readonly looks?: CharacterLooks;
+  /** Everything else the character wears on its head, as worn on its body. */
+  readonly items?: CharacterItem[];
+  /** Ports whose item the library does not know, or has no mesh for this body. */
+  readonly unknownItems?: string[];
+}
+
+/** A `.chf`'s colours, all linear. CHARACTER.md Phase 2. */
+export interface CharacterLooks {
+  /** `BodyColor`: the tone head and body are recoloured to. */
+  readonly skin?: Float32Array;
+  /** `EyeColor`: the `Eye` shader's `IrisColor`. */
+  readonly iris?: Float32Array;
+  /** `HairPBR` parameters for the hair, beard and brows: melanin and dye,
+   * `DyeColor` among them. */
+  readonly hair: Record<string, number | Float32Array>;
+  readonly beard: Record<string, number | Float32Array>;
+  readonly eyebrows: Record<string, number | Float32Array>;
+  /** Freckles and sun spots. */
+  readonly head: Record<string, number>;
+}
+
+/** A head item a character wears, resolved for its body. CHARACTER.md Phase 3. */
+export interface CharacterItem {
+  readonly port: string;
+  readonly className: string;
+  /** `Char_Head_Hair`, `Char_Head_Beard`, `Char_Head_Eyebrow`, ... */
+  readonly kind: string;
+  readonly mesh: string;
+  readonly material: string | null;
+  /** Meshes by geometry tag -- `hatHair` under a cap. A null mesh means the
+   * part is not drawn while that tag is asked for. */
+  readonly variants: Array<{ tag: string; mesh: string | null; material: string | null }>;
 }
 
 export interface MeshPayload {
@@ -405,6 +450,8 @@ let opened: {
     cubeHdr(path: string, maxSize: number): [number, Float32Array];
     lightRig(socpak: string, group: string): string;
     characterFace(chf: Uint8Array): unknown;
+    characterMesh(path: string): unknown;
+    loadCharacterLibrary?(dcb: Uint8Array): number;
   };
   /** Built catalogues, by body type.
    *
@@ -456,6 +503,13 @@ function reportCatalogue(
   progress('item names', 0.4);
 
   const json = wasm.buildCatalogue(dcb, ini, skeleton);
+  // The customizer's tables come out of the same DataCore, which is not kept:
+  // a player's `.chf` names its head material and items against them.
+  try {
+    archive.loadCharacterLibrary?.(dcb);
+  } catch {
+    // A character still blends without it; it just wears nothing.
+  }
   const itemCount = (JSON.parse(json) as { items: unknown[] }).items.length;
   cache?.set(skeleton, { json, itemCount });
   progress('skeleton and poses', 1);
@@ -632,6 +686,16 @@ async function run(message: ToWorker): Promise<void> {
     const started = performance.now();
     const face = opened.archive.characterFace(message.chf) as CharacterFace;
     reply({ type: 'character', face, ms: performance.now() - started });
+    return;
+  }
+  if (message.type === 'characterMesh') {
+    if (!opened) {
+      reply({ type: 'failed', message: 'no archive is open' });
+      return;
+    }
+    const started = performance.now();
+    const mesh = opened.archive.characterMesh(message.path) as MeshPayload;
+    reply({ type: 'mesh', path: message.path, mesh, ms: performance.now() - started });
     return;
   }
   if (message.type === 'mesh') {
