@@ -27,6 +27,8 @@ heads, the skin tone, eyes and hair colour, and the head items it names.
 `RENDERING.md` is the plan for closing the gap to a studio render -- tone
 mapping, the game's own probes as IBL, per-pixel LayerBlend, a body -- with
 the archive measurements it rests on and the boundaries it keeps.
+`LAYOUT.md` is the plan for rearranging the kitbasher's controls: the toolbar
+folded into the left column and two overlays on the viewport, layout only.
 
 `PLAN.md` is the design document. This file is the operational one: what is
 decided, what is verified, and what to run. When the two disagree, this file wins
