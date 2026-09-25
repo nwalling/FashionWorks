@@ -345,9 +345,15 @@ function hairMaterial(sub: Submaterial, textures: SurfaceTextures, siblings: rea
 }
 
 function hairCap(sub: Submaterial, mask: Texture | undefined, pigment: HairParams, kind: 'cap' | 'coat'): Material {
+  // A cap's `Diffuse` is black on every one in the archive -- the brows', the
+  // beard's, the scalps' -- and a coat's white: a cap is shadow on the skin,
+  // not hair colour. Drawn in the hair's colour, a white-dyed beard's cap
+  // painted the jaw grey; drawn black it is the dark base the game shows
+  // under a salt-and-pepper beard, and the dark of the brows.
+  const tint: [number, number, number] = sub.diffuse ? [sub.diffuse[0]!, sub.diffuse[1]!, sub.diffuse[2]!] : [1, 1, 1];
   const material = new MeshStandardMaterial({
     name: sub.name,
-    color: hairColour(pigment),
+    color: hairColour(pigment).multiply(new Color(tint[0], tint[1], tint[2])),
     roughness: 1,
     metalness: 0,
     side: DoubleSide,
@@ -355,6 +361,7 @@ function hairCap(sub: Submaterial, mask: Texture | undefined, pigment: HairParam
   // What the colour was made from, so a character's own melanin and dye can
   // be laid over it (CHARACTER.md Phase 2).
   material.userData.hairPigment = pigment;
+  material.userData.hairTint = tint;
   if (!mask) return material;
   material.alphaMap = densityMask(mask, kind);
   material.transparent = true;
@@ -383,7 +390,7 @@ function hairCards(
   const smoothness = scalar(sub.params?.Smoothness, 0.5);
   const strandId = sub.textures.strand_id ? textures.byPath.get(sub.textures.strand_id) : undefined;
   const direction = sub.textures.strand_direction ? textures.byPath.get(sub.textures.strand_direction) : undefined;
-  const [light, dark] = strandColours(pigment);
+  const strands = strandLooks(pigment);
   const material = new MeshPhysicalMaterial({
     name: sub.name,
     color: hairColour(pigment),
@@ -400,30 +407,75 @@ function hairCards(
   });
   const uniforms = {
     uStrandId: { value: strandId ?? null },
-    uHairLight: { value: light },
-    uHairDark: { value: dark },
+    uHairLight: { value: strands.light },
+    uHairDark: { value: strands.dark },
+    uDye: { value: strands.dye },
+    uDyeAmount: { value: strands.amount },
+    uDyeSoft: { value: strands.soft },
+    // Where the head is, in the mesh's own space, and how far the cards'
+    // normals bend toward it. Set by the caller once the mesh is built
+    // (`setHairVolume`); zero bend until then.
+    uHairCentre: { value: new Vector3() },
+    uHairSphere: { value: 0 },
   };
   material.userData.hairPigment = pigment;
   material.userData.hairStrands = uniforms;
   if (!mask) return material;
-  material.alphaMap = densityMask(mask, 'strands');
+  material.alphaMap = densityMask(mask, 'strands', Math.max(1, scalar(sub.params?.OpacityMipScale, 1)));
   material.alphaTest = HAIR_ALPHA_TEST;
   material.alphaToCoverage = true;
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
+    // Hair cards lie every which way, and lit by their own normals a head of
+    // them averaged a fraction of the light: Ilucide's hair read a quarter as
+    // bright against his skin as in game (0.016 against 0.068). Bent toward a
+    // sphere round the head, before skinning so the pose carries it, the mass
+    // shades as one volume, and the highlight becomes a band across it -- the
+    // grey sheen of the captures.
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>
+        uniform vec3 uHairCentre;
+        uniform float uHairSphere;`)
+      .replace('#include <beginnormal_vertex>', `#include <beginnormal_vertex>
+        objectNormal = normalize(mix(objectNormal, normalize(position - uHairCentre), uHairSphere));`);
     shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <normal_fragment_begin>',
+        // Both faces of a card face out from the head.
+        `#include <normal_fragment_begin>
+        #ifdef DOUBLE_SIDED
+          normal = normalize(mix(normal, normal * faceDirection, uHairSphere));
+        #endif`,
+      )
       .replace(
         '#include <common>',
         `#include <common>
+        uniform float uHairSphere;
         uniform vec3 uHairLight;
         uniform vec3 uHairDark;
+        uniform vec3 uDye;
+        uniform float uDyeAmount;
+        uniform float uDyeSoft;
         ${strandId ? 'uniform sampler2D uStrandId;' : ''}`,
       )
-      // Each strand its own shade: the ID map is a random grey per strand.
+      // Each strand its own shade, and its own dye: the ID map is a random
+      // grey per strand. The melanin varies by it; whether the strand takes
+      // the dye is a second draw from it, so the dyed strands are not simply
+      // the palest ones.
       .replace(
         '#include <map_fragment>',
         `#include <map_fragment>
-        ${strandId ? 'diffuseColor.rgb = mix(uHairLight, uHairDark, texture2D(uStrandId, vAlphaMapUv).r);' : ''}`,
+        ${strandId ? `{
+          float id = texture2D(uStrandId, vAlphaMapUv).r;
+          vec3 natural = mix(uHairLight, uHairDark, id);
+          // Held clear of both ends by the softness, so an amount of 0 dyes
+          // no strand and 1 every strand. Unheld, the softening reached below
+          // zero and dyed 8% of strands at amount 0: white specks all over
+          // Ilucide's hair.
+          float draw = uDyeSoft + fract(id * 7.31 + 0.137) * (1.0 - 2.0 * uDyeSoft);
+          float dyed = smoothstep(draw - uDyeSoft, draw + uDyeSoft, uDyeAmount);
+          diffuseColor.rgb = mix(natural, uDye, dyed);
+        }` : ''}`,
       )
       .replace(
         '#include <alphamap_fragment>',
@@ -438,14 +490,30 @@ function hairCards(
 
 type HairParams = Record<string, number | Float32Array>;
 
-/** The lightest and darkest strand of a head of hair: the pigment with its
- * melanin moved either way by `BaseMelaninVariation`. How far a variation of
- * one moves it is not in the data; `STRAND_MELANIN_SPREAD` is chosen. */
-function strandColours(params: HairParams): [Color, Color] {
+/** What a head of strands is made of: the lightest and darkest natural
+ * strand -- the pigment with its melanin moved either way by
+ * `BaseMelaninVariation` -- and the dye, which a strand takes or does not.
+ *
+ * **Dye is per strand.** `DyeAmount` is the share of strands that take the
+ * `DyeColor`, and `DyePigmentVariation` how soft that choice is. Ilucide's
+ * beard is black melanin with a near-white dye at 0.71, and in game it is
+ * salt and pepper: a dark beard with many white strands. A flat mix painted
+ * it grey, a flat absorption black; strand by strand it is both. How far a
+ * variation of one moves the melanin is not in the data
+ * (`STRAND_MELANIN_SPREAD`, chosen). */
+function strandLooks(params: HairParams): { light: Color; dark: Color; dye: Color; amount: number; soft: number } {
   const melanin = scalar(params.BaseMelanin, 0.5);
   const spread = scalar(params.BaseMelaninVariation, 0) * STRAND_MELANIN_SPREAD;
-  const at = (m: number) => hairColour({ ...params, BaseMelanin: Math.min(0.999, Math.max(0, m)) });
-  return [at(melanin - spread), at(melanin + spread)];
+  const natural = { ...params, DyeAmount: 0 };
+  const at = (m: number) => hairColour({ ...natural, BaseMelanin: Math.min(0.999, Math.max(0, m)) });
+  const dye = vector(params.DyeColor) ?? [1, 1, 1];
+  return {
+    light: at(melanin - spread),
+    dark: at(melanin + spread),
+    dye: new Color().setRGB(dye[0] * DYE_ALBEDO, dye[1] * DYE_ALBEDO, dye[2] * DYE_ALBEDO),
+    amount: Math.min(1, Math.max(0, scalar(params.DyeAmount, 0))) * DYE_SHARE,
+    soft: 0.02 + 0.25 * Math.min(1, Math.max(0, scalar(params.DyePigmentVariation, 0))),
+  };
 }
 
 /** A mask's density, in both channels of a two-channel texture.
@@ -478,7 +546,7 @@ function strandColours(params: HairParams): [Color, Color] {
  * The cluster reads as a convention the shader scales, so the peak is drawn
  * as full shade and the falloff to the hairline keeps its shape. Inferred.
  * Coats are left as they are: their strands already reach one. */
-function densityMask(texture: Texture, kind: 'strands' | 'cap' | 'coat'): Texture {
+function densityMask(texture: Texture, kind: 'strands' | 'cap' | 'coat', density = 1): Texture {
   const strands = kind === 'strands';
   const image = texture.image as { data?: Uint8Array; width?: number; height?: number } | undefined;
   const data = image?.data;
@@ -498,11 +566,20 @@ function densityMask(texture: Texture, kind: 'strands' | 'cap' | 'coat'): Textur
     for (const v of level) peak = Math.max(peak, v);
     if (peak > 0) for (let i = 0; i < texels; i += 1) level[i] = level[i]! / peak;
   }
+  // A coat is short hair laid over the scalp, fine strands within a region.
+  // Averaged down to the mip a head on screen samples, the region reads a
+  // third opaque and the back of an undercut showed bare skin, where the game
+  // draws it solid. Each level is read against its own dense part.
+  const coatScale = (values: Float32Array) => {
+    const inside = [...values].filter((v) => v > 0.02).sort((a, b) => a - b);
+    if (inside.length < 16) return 1;
+    return 1 / Math.max(0.05, inside[Math.floor(inside.length * 0.5)]!);
+  };
   let width = image.width;
   let height = image.height;
   const mipmaps: Array<{ data: Uint8Array<ArrayBuffer>; width: number; height: number }> = [];
   for (;;) {
-    const scale = strands ? coverageScale(level, HAIR_ALPHA_TEST) : 1;
+    const scale = strands ? coverageScale(level, HAIR_ALPHA_TEST, density) : kind === 'coat' ? coatScale(level) : 1;
     const out = new Uint8Array(width * height * 2);
     for (let i = 0; i < width * height; i += 1) {
       const v = Math.min(255, Math.round(level[i]! * scale * 255));
@@ -547,14 +624,14 @@ function densityMask(texture: Texture, kind: 'strands' | 'cap' | 'coat'): Textur
 
 /** The factor that makes the fraction of `level` passing `threshold` equal
  * its mean: a 256-bin histogram, read from the top down. */
-export function coverageScale(level: Float32Array, threshold: number): number {
+export function coverageScale(level: Float32Array, threshold: number, density = 1): number {
   const bins = new Uint32Array(256);
   let sum = 0;
   for (const v of level) {
     bins[Math.min(255, Math.floor(v * 255))]! += 1;
     sum += v;
   }
-  const target = sum / level.length;
+  const target = Math.min(0.95, (sum / level.length) * density);
   if (target <= 0) return 1;
   let passing = 0;
   for (let b = 255; b > 0; b -= 1) {
@@ -565,6 +642,18 @@ export function coverageScale(level: Float32Array, threshold: number): number {
 }
 
 const HAIR_ALPHA_TEST = 0.35;
+/** The share of strands a dye reaches at a `DyeAmount` of one, and how bright
+ * a dyed strand is against its dye colour. Neither is in the data; both are
+ * calibrated on Ilucide's chin, the most-dyed part of his beard in the
+ * captures: 29% of it reads bright, and its brightest strands at 0.6 of the
+ * skin. Drawn at the full amount and the dye colour as paint, 72% read bright
+ * at 4.5 times the skin. A white strand is not white paint: the game's hair
+ * shading takes it well below the dye colour. */
+const DYE_SHARE = 0.45;
+const DYE_ALBEDO = 0.3;
+/** How far a hair card's normal bends toward the head's sphere. Chosen
+ * against the captures' hair-to-skin brightness. */
+const HAIR_SPHERE = 0.8;
 /** The glossiest a strand card is drawn. The highlight is anisotropic now,
  * a band across the strands; isotropic, anything glossier than 0.75 spread
  * into a grey-white sheet over cards that lie flat. */
@@ -613,18 +702,15 @@ export function hairColour(params: Record<string, number | Float32Array>): Color
   const k = 5.969 - 0.215 * beta + 2.532 * beta ** 2 - 10.73 * beta ** 3 + 5.574 * beta ** 4 + 0.245 * beta ** 5;
   const tint = vector(params.BaseTintColor) ?? [1, 1, 1];
   let rgb = sigma.map((s, i) => Math.exp(-Math.sqrt(s) * k) * tint[i]!);
-  // The dye absorbs on top of the pigment, as in the model the parameter
-  // names come from -- Chiang et al. add a dye's absorption to melanin's, so
-  // transmittances multiply: `pigment x dye ^ DyeAmount`. Mixing *to* the dye
-  // colour, the first reading, gave seven archive characters vivid blue brows
-  // (black melanin under a `#08049c` dye at amount 1) and Ilucide a grey beard
-  // and white brows, where the game shows them dark with grey highlights: the
-  // `.chf` dyes them `#fefefe`, which absorbs nothing. The highlights are the
-  // strands' specular. `DyeFadeout` is not used: it runs to 14.5 on one beard,
-  // so it is not the fraction it sounds.
+  // The flat colour of a head of hair: the dye mixed in by `DyeAmount`, which
+  // is the share of strands that take it (`strandLooks`). Strand cards draw
+  // each strand dyed or not; this is their average, for everything drawn as
+  // one colour. Absorbing instead -- `pigment x dye ^ amount`, tried -- turned
+  // a near-white dye into nothing, where the game shows Ilucide's beard as
+  // black and white strands together.
   const dye = vector(params.DyeColor);
   const amount = Math.min(1, Math.max(0, scalar(params.DyeAmount, 0)));
-  if (dye && amount > 0) rgb = rgb.map((c, i) => c * Math.max(dye[i]!, 1e-4) ** amount);
+  if (dye && amount > 0) rgb = rgb.map((c, i) => c + (dye[i]! * DYE_ALBEDO - c) * amount * DYE_SHARE);
   return new Color().setRGB(rgb[0]!, rgb[1]!, rgb[2]!);
 }
 
@@ -751,16 +837,32 @@ export function setIris(material: Material, colour: ArrayLike<number> | null): v
 
 /** Recolour a hair material from a character's melanin and dye, laid over
  * the material's own parameters; null restores them. */
+/** Point a hair card material's normals at the head: `centre` in the
+ * mesh's own space, the middle of its bounds. */
+export function setHairVolume(material: Material, centre: Vector3): void {
+  const strands = material.userData.hairStrands as { uHairCentre: { value: Vector3 }; uHairSphere: { value: number } } | undefined;
+  if (!strands) return;
+  strands.uHairCentre.value.copy(centre);
+  strands.uHairSphere.value = HAIR_SPHERE;
+}
+
 export function setHairLooks(material: Material, looks: Record<string, number | Float32Array> | null): void {
   const pigment = material.userData.hairPigment as HairParams | undefined;
   if (!pigment || !(material instanceof MeshStandardMaterial)) return;
   const params = looks ? { ...pigment, ...looks } : pigment;
-  material.color.copy(hairColour(params));
-  const strands = material.userData.hairStrands as { uHairLight: { value: Color }; uHairDark: { value: Color } } | undefined;
+  const tint = (material.userData.hairTint as [number, number, number] | undefined) ?? [1, 1, 1];
+  material.color.copy(hairColour(params)).multiply(new Color(tint[0], tint[1], tint[2]));
+  const strands = material.userData.hairStrands as {
+    uHairLight: { value: Color }; uHairDark: { value: Color }; uDye: { value: Color };
+    uDyeAmount: { value: number }; uDyeSoft: { value: number };
+  } | undefined;
   if (strands) {
-    const [light, dark] = strandColours(params);
-    strands.uHairLight.value.copy(light);
-    strands.uHairDark.value.copy(dark);
+    const next = strandLooks(params);
+    strands.uHairLight.value.copy(next.light);
+    strands.uHairDark.value.copy(next.dark);
+    strands.uDye.value.copy(next.dye);
+    strands.uDyeAmount.value = next.amount;
+    strands.uDyeSoft.value = next.soft;
   }
 }
 

@@ -82,6 +82,7 @@ import {
   ownSkinTone,
   plainMaterial,
   setHairLooks,
+  setHairVolume,
   setIris,
   setSkinTone,
   surfaceMaterial,
@@ -1507,6 +1508,10 @@ export class Kitbasher {
     for (const texture of textureSlots(materials)) releaseAfterUpload(texture);
     const object = new SkinnedMesh(drawnOnly(buildGeometry(payload, count).geometry, materials), materials);
     object.frustumCulled = false;
+    // Hair cards shade as a volume round the head (`setHairVolume`).
+    object.geometry.computeBoundingBox();
+    const centre = object.geometry.boundingBox?.getCenter(new Vector3());
+    if (centre) for (const m of materials) setHairVolume(m, centre);
     eightWhereNeeded([object]);
     decalsWhereNeeded([object]);
     object.name = meshPath.split('/').pop() ?? meshPath;

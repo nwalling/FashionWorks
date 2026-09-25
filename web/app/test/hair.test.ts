@@ -23,28 +23,21 @@ describe('hairColour', () => {
     expect(red.r / red.g).toBeGreaterThan(plain.r / plain.g);
   });
 
-  it('absorbs: a full dye multiplies the pigment by the dye colour', () => {
-    const base = hairColour({ BaseMelanin: 0.3 });
-    const c = hairColour({ BaseMelanin: 0.3, DyeColor: new Float32Array([0.2, 0.1, 0.05]), DyeAmount: 1 });
-    expect(c.r).toBeCloseTo(base.r * 0.2, 6);
-    expect(c.g).toBeCloseTo(base.g * 0.1, 6);
-    expect(c.b).toBeCloseTo(base.b * 0.05, 6);
+  it('mixes toward the dye by the share of strands it reaches', () => {
+    // A full amount reaches 45% of strands, each drawn at 30% of the dye
+    // colour: the average over a head of hair.
+    const base = hairColour({ BaseMelanin: 0.7 });
+    const c = hairColour({ BaseMelanin: 0.7, DyeColor: new Float32Array([1, 1, 1]), DyeAmount: 1 });
+    expect(c.r).toBeCloseTo(base.r + (0.3 - base.r) * 0.45, 5);
   });
 
-  it('leaves black hair black under a coloured dye', () => {
-    // The brow preset seven archive characters share: black melanin, a blue
-    // dye at full amount. Mixed to the dye, every one of them had blue brows.
-    const c = hairColour({ BaseMelanin: 0.9995, DyeColor: new Float32Array([0.0024, 0.0012, 0.332]), DyeAmount: 1 });
-    expect(Math.max(c.r, c.g, c.b)).toBeLessThan(0.001);
+  it('leaves no dye at amount zero', () => {
+    const base = hairColour({ BaseMelanin: 0.7 });
+    const c = hairColour({ BaseMelanin: 0.7, DyeColor: new Float32Array([1, 1, 1]), DyeAmount: 0 });
+    expect(c.getHexString()).toBe(base.getHexString());
   });
 
-  it('leaves a beard dark under a near-white dye, as Ilucide wears it in game', () => {
-    const plain = hairColour({ BaseMelanin: 1 });
-    const dyed = hairColour({ BaseMelanin: 1, DyeColor: new Float32Array([0.991, 0.991, 0.991]), DyeAmount: 0.707 });
-    expect(dyed.r).toBeLessThanOrEqual(plain.r);
-  });
-
-  it('gives hair_31 its near-black brown', () => {
+  it('gives hair_31 its dark brown', () => {
     // m_hair_31.mtl's own parameters.
     const c = hairColour({
       BaseMelanin: 0.69207001,
@@ -53,7 +46,7 @@ describe('hairColour', () => {
       DyeAmount: 0.40782699,
       BaseTintColor: new Float32Array([1, 1, 1]),
     });
-    expect(c.getHexString()).toBe('100400');
+    expect(c.getHexString()).toBe('24160b');
   });
 });
 

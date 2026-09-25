@@ -355,6 +355,44 @@ piece asserts that it offers: under the Aegis cap `hair_75` wears its
 nothing, because that variant has no mesh. The figure's own hair goes
 whenever a character is on -- a character with none is bald.
 
+### Against the captures (2026-09-26)
+
+Noel supplied five in-game captures of Ilucide (front, both three-quarters,
+back, profile; kept in the gitignored `data/reference/ilucide/`). Compared
+from matching angles, measured as ratios against the skin in the same image
+-- the hangar's green light defeats absolute colour. What they settled:
+
+- **Caps are black.** Every cap's `Diffuse` is `0,0,0` and every coat's
+  white. Drawn in the hair's colour, a white-dyed beard's cap painted the jaw
+  grey; drawn as its own colour, the cap is the dark base under the beard and
+  the dark of the brows the captures show.
+- **Dye is per strand.** The beard in game is salt and pepper: black melanin,
+  with white strands, lightest on the moustache and chin. Neither a flat mix
+  (grey) nor absorption (black) draws that. `DyeAmount` is the share of
+  strands the dye reaches, chosen by a second draw from the strand ID map,
+  softened by `DyePigmentVariation`; the flat colour is their average. The
+  share and a dyed strand's brightness are not in the data and are
+  calibrated on the chin (`DYE_SHARE` 0.45, `DYE_ALBEDO` 0.3): 36% of it reads
+  bright against the capture's 29%, median 0.154 of the skin against 0.126.
+  A first version let the softening reach below zero and dyed 8% of strands
+  at amount 0 -- white specks through the hair, found by reading the canvas.
+- **Strand density follows `OpacityMipScale`.** Coverage equal to mean
+  opacity is the physics of one card; the captures show hair solid, and the
+  materials carry `OpacityMipScale` (3.2 on `hair_75`, 2.7 on the beard), the
+  game scaling strand opacity up the mips. Each mip's coverage is its mean
+  opacity times that. Coats are read against the dense half of each level.
+- **Hair cards shade as a volume.** Lit by their own normals, which point
+  every which way, the hair read a quarter as bright against the skin as in
+  game. Normals bend 80% toward a sphere round the hair mesh's centre, before
+  skinning, and both faces face out.
+- **The melanin curve was right.** Corrected for the hangar's cast, the
+  capture's hair is a dark ash-brown near 7% of the skin's luminance, which
+  `hair_75`'s pigment already gives; the darkness was lighting, not colour.
+
+Still off: the captures' hair carries a broad grey sheen ours lacks; the head
+mesh's lower neck rim shows as two dark triangles either side of the collar,
+on the default face too; the beard's cap ends in a hard edge under the jaw.
+
 ### Phase 4: the file, the body, the link
 
 The character belongs to its body. Loading one switches to it; switching away
