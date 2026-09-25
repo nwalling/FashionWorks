@@ -20,6 +20,11 @@ starbreaker-chunks = { path = "../../tools/src/StarBreaker/crates/starbreaker-ch
 starbreaker-3d = { path = "../../tools/src/StarBreaker/crates/starbreaker-3d", default-features = false }
 starbreaker-datacore = { path = "../../tools/src/StarBreaker/crates/starbreaker-datacore" }
 starbreaker-cryxml = { path = "../../tools/src/StarBreaker/crates/starbreaker-cryxml" }
+# A player's character file (CHARACTER.md). Pure Rust: ruzstd and crc32c.
+starbreaker-chf = { path = "../../tools/src/StarBreaker/crates/starbreaker-chf" }
+# The head's DNA library is zstd in the archive, and only its first 22 MB of 76
+# are wanted, so it is streamed rather than inflated whole.
+ruzstd = "0.8"
 zerocopy = { version = "0.8", features = ["derive"] }
 wasm-bindgen = "0.2"
 js-sys = "0.3"

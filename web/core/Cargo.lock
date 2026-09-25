@@ -357,8 +357,10 @@ dependencies = [
  "crc32fast",
  "image",
  "js-sys",
+ "ruzstd",
  "serde_json",
  "starbreaker-3d",
+ "starbreaker-chf",
  "starbreaker-chunks",
  "starbreaker-common",
  "starbreaker-cryxml",
@@ -1272,6 +1274,19 @@ dependencies = [
  "starbreaker-datacore",
  "starbreaker-dds",
  "starbreaker-p4k",
+ "thiserror",
+ "zerocopy",
+]
+
+[[package]]
+name = "starbreaker-chf"
+version = "0.3.2"
+dependencies = [
+ "crc32c",
+ "ruzstd",
+ "serde",
+ "serde_json",
+ "starbreaker-common",
  "thiserror",
  "zerocopy",
 ]

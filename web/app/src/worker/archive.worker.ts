@@ -70,6 +70,9 @@ export type ToWorker = (
   | { type: 'catalogue'; skeleton: 'male' | 'female' }
   /** Load one mesh from the already-open archive. */
   | { type: 'mesh'; path: string }
+  /** A player's face from their `.chf`: the protos head and eyes, blended from
+   * the library heads it names. CHARACTER.md. */
+  | { type: 'character'; chf: Uint8Array }
   /** Build the canonical armature before any mesh is loaded. */
   | { type: 'rig'; base: string; donors: string[] }
   /** Resolve a `.mtl` and its whole layer library. */
@@ -218,6 +221,19 @@ export interface PropPayload extends MeshPayload {
   helperTransforms?: Record<string, Float32Array>;
 }
 
+/** A player's face, blended. CHARACTER.md. */
+export interface CharacterFace {
+  readonly body: 'male' | 'female';
+  /** The protos head and eyes, skinned as the figure's, with every vertex
+   * blended from the library. */
+  readonly head: MeshPayload;
+  readonly eyes: MeshPayload;
+  /** The library heads the face drew on, and any it wanted that this build
+   * ships no mesh for. */
+  readonly heads: string[];
+  readonly missing: string[];
+}
+
 export interface MeshPayload {
   positions: Float32Array;
   normals: Float32Array;
@@ -270,6 +286,7 @@ export type FromWorker = (
   | { type: 'catalogue'; json: string; itemCount: number; ms: number }
   | { type: 'stats'; reads: number; fetched: number }
   | { type: 'mesh'; path: string; mesh: MeshPayload; ms: number }
+  | { type: 'character'; face: CharacterFace; ms: number }
   | { type: 'rig'; summary: RigSummary; bones: RigBone[]; ms: number }
   | { type: 'material'; path: string; material: MaterialPayload; ms: number }
   | { type: 'texture'; texture: TexturePayload | null; ms: number; reads: number; fetched: number }
@@ -387,6 +404,7 @@ let opened: {
     loadGear(path: string, locator: string): unknown;
     cubeHdr(path: string, maxSize: number): [number, Float32Array];
     lightRig(socpak: string, group: string): string;
+    characterFace(chf: Uint8Array): unknown;
   };
   /** Built catalogues, by body type.
    *
@@ -606,6 +624,16 @@ async function run(message: ToWorker): Promise<void> {
     return;
   }
 
+  if (message.type === 'character') {
+    if (!opened) {
+      reply({ type: 'failed', message: 'no archive is open' });
+      return;
+    }
+    const started = performance.now();
+    const face = opened.archive.characterFace(message.chf) as CharacterFace;
+    reply({ type: 'character', face, ms: performance.now() - started });
+    return;
+  }
   if (message.type === 'mesh') {
     if (!opened) {
       reply({ type: 'failed', message: 'no archive is open' });

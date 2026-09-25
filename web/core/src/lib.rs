@@ -15,6 +15,7 @@ pub mod armature;
 pub mod audit;
 pub mod blend;
 pub mod catalog;
+pub mod character;
 pub mod clips;
 pub mod composite;
 pub mod discover;
@@ -58,6 +59,12 @@ pub struct Archive {
     /// Every character `.mtl`, by stem and by directory, for items that name
     /// no material of their own. Built on first use.
     mtls: std::cell::OnceCell<discover::MtlIndex>,
+    /// Each protos head's DNA library, once read: 22 MB of a 76 MB file is
+    /// streamed for it, so a second character on the same body costs nothing.
+    dna: std::cell::RefCell<std::collections::HashMap<String, std::rc::Rc<character::DnaLibrary>>>,
+    /// Every file under `heads/`, by lowercased file name. The library heads
+    /// are named in the DNA without a folder, and live in several.
+    heads: std::cell::OnceCell<std::collections::HashMap<String, usize>>,
 }
 
 #[wasm_bindgen]
@@ -77,6 +84,8 @@ impl Archive {
             rig: None,
             by_path: std::cell::OnceCell::new(),
             mtls: std::cell::OnceCell::new(),
+            dna: std::cell::RefCell::new(std::collections::HashMap::new()),
+            heads: std::cell::OnceCell::new(),
         })
     }
 
@@ -417,6 +426,114 @@ impl Archive {
     /// bytes.
     #[wasm_bindgen(js_name = loadMesh)]
     pub fn load_mesh(&self, path: &str) -> Result<JsValue, JsValue> {
+        let (loaded, report, skin) = self.load_rebound(path)?;
+        let out = mesh_to_js(&loaded, report.as_ref())?;
+        js_sys::Reflect::set(&out, &"overrides".into(), &overrides_to_js(&skin)?.into())?;
+        Ok(out)
+    }
+
+    /// A player's face, from the `.chf` the game's customizer saved.
+    /// CHARACTER.md.
+    ///
+    /// Returns the protos head and eyes -- skinned exactly as the figure's --
+    /// with every vertex blended from the library heads the character names,
+    /// plus `body` (`male` or `female`), the `heads` it drew on and any it
+    /// wanted that this build ships no mesh for.
+    #[wasm_bindgen(js_name = characterFace)]
+    pub fn character_face(&self, chf: &[u8]) -> Result<JsValue, JsValue> {
+        let js = |e: String| JsValue::from_str(&e);
+        let face = character::read_chf(chf).map_err(js)?;
+        let library = self.dna_library(&face.head)?;
+        let sex = if face.is_female() { "female" } else { "male" };
+        let protos = format!("{}_head.skin", face.head);
+        let protos_eyes = format!("{}_eyes.skin", face.head);
+
+        // The library's meshes, head and eyes, for every head the face uses.
+        // The protos head is id 0 and stands in wherever a blend falls through.
+        let named = face.heads();
+        let mut ids = named.clone();
+        ids.insert(0);
+        let mut heads: std::collections::HashMap<u16, (Vec<f32>, Vec<f32>, Vec<u32>)> = Default::default();
+        let mut eyes: std::collections::HashMap<u16, (Vec<f32>, Vec<f32>, Vec<u32>)> = Default::default();
+        let mut used = Vec::new();
+        let mut missing = Vec::new();
+        for id in ids {
+            let Some(name) = library.heads.get(usize::from(id)) else {
+                missing.push(format!("#{id}"));
+                continue;
+            };
+            let head_file = if id == 0 { protos.clone() } else { format!("{name}_head.skin") };
+            let eyes_file = if id == 0 { protos_eyes.clone() } else { format!("{name}_eyes.skin") };
+            match self.head_shape(&head_file) {
+                Some(shape) if shape.0.len() == library.vertices * 3 => {
+                    heads.insert(id, shape);
+                    // The protos head is loaded as the fallback either way;
+                    // it counts only where the face names it.
+                    if named.contains(&id) {
+                        used.push(name.clone());
+                    }
+                }
+                _ => {
+                    missing.push(name.clone());
+                    continue;
+                }
+            }
+            if let Some(shape) = self.head_shape(&eyes_file) {
+                eyes.insert(id, shape);
+            }
+        }
+
+        let (mut head, head_report, _) = self.load_rebound(&format!(
+            "Objects/Characters/Human/heads/{sex}/pu/{0}/{protos}",
+            face.head
+        ))?;
+        if head.vertex_count() != library.vertices {
+            return Err(js(format!(
+                "the protos head has {} vertices and its DNA {}",
+                head.vertex_count(),
+                library.vertices
+            )));
+        }
+        let side = character::left_eye_side(&library, &head.positions);
+        let blended = character::blend_head(&face, &library, 3, &|id| heads.get(&id).map(|s| &s.0[..]));
+        head.normals = character::reshade(&head.indices, &head.positions, &head.normals, &blended);
+        head.positions = blended;
+
+        // Each eyeball follows its own eye part. Left is whichever side the
+        // left-eye mask sits on; the eyes' topology is shared across the
+        // library, 922 vertices on every head checked.
+        let (mut eye_mesh, eye_report, _) = self.load_rebound(&format!(
+            "Objects/Characters/Human/heads/{sex}/pu/{0}/{protos_eyes}",
+            face.head
+        ))?;
+        let count = eye_mesh.vertex_count();
+        let eye_shape = |id: u16| eyes.get(&id).filter(|s| s.0.len() == count * 3);
+        let left: Vec<usize> = (0..count).filter(|&v| eye_mesh.positions[v * 3] * side > 0.0).collect();
+        let right: Vec<usize> = (0..count).filter(|&v| eye_mesh.positions[v * 3] * side <= 0.0).collect();
+        for (part, vertices) in [(character::EYE_LEFT, &left), (character::EYE_RIGHT, &right)] {
+            let positions = |id| eye_shape(id).map(|s| &s.0[..]);
+            let normals = |id| eye_shape(id).map(|s| &s.1[..]);
+            character::blend_part(&face, part, vertices, 3, &mut eye_mesh.positions, &positions);
+            character::blend_part(&face, part, vertices, 3, &mut eye_mesh.normals, &normals);
+        }
+        character::renormalise(&mut eye_mesh.normals);
+
+        let out = js_sys::Object::new();
+        let set = |key: &str, value: &JsValue| js_sys::Reflect::set(&out, &key.into(), value);
+        set("body", &sex.into())?;
+        set("head", &mesh_to_js(&head, head_report.as_ref())?)?;
+        set("eyes", &mesh_to_js(&eye_mesh, eye_report.as_ref())?)?;
+        let names = |list: &[String]| list.iter().map(|n| JsValue::from_str(n)).collect::<js_sys::Array>();
+        set("heads", &names(&used).into())?;
+        set("missing", &names(&missing).into())?;
+        Ok(out.into())
+    }
+
+    /// A mesh loaded and, with a rig, rebound to it; and its header half.
+    fn load_rebound(
+        &self,
+        path: &str,
+    ) -> Result<(mesh::LoadedMesh, Option<armature::RebindReport>, Vec<u8>), JsValue> {
         let skin_index = self
             .find_asset(path)
             .ok_or_else(|| JsValue::from_str(&format!("not in this archive: {path}")))?;
@@ -453,9 +570,57 @@ impl Archive {
             loaded.narrow_if_unused();
             report
         });
-        let out = mesh_to_js(&loaded, report.as_ref())?;
-        js_sys::Reflect::set(&out, &"overrides".into(), &overrides_to_js(&skin)?.into())?;
-        Ok(out)
+        Ok((loaded, report, skin))
+    }
+
+    /// A library mesh's positions and normals, by file name alone -- the DNA
+    /// names heads without their folder. `None` if the build ships no such
+    /// file, which for 4.10 is `imperator_t1` and nothing else.
+    fn head_shape(&self, file: &str) -> Option<(Vec<f32>, Vec<f32>, Vec<u32>)> {
+        let index = self.heads.get_or_init(|| {
+            let mut map = std::collections::HashMap::new();
+            for (i, entry) in self.entries.iter().enumerate() {
+                let lower = entry.name.to_ascii_lowercase().replace('\\', "/");
+                if lower.contains("/characters/human/heads/") {
+                    if let Some(name) = lower.rsplit('/').next() {
+                        map.entry(name.to_string()).or_insert(i);
+                    }
+                }
+            }
+            map
+        });
+        let skin = *index.get(&file.to_ascii_lowercase())?;
+        let skinm = *index.get(&format!("{}m", file.to_ascii_lowercase()))?;
+        let read = |i: usize| p4k::read_entry(self.reader.source(), &self.entries[i]).ok().map(|e| e.bytes);
+        let loaded = mesh::load(&read(skin)?, &read(skinm)?).ok()?;
+        Some((loaded.positions, loaded.normals, loaded.indices))
+    }
+
+    /// A protos head's DNA library, read once per session.
+    fn dna_library(&self, head: &str) -> Result<std::rc::Rc<character::DnaLibrary>, JsValue> {
+        if let Some(found) = self.dna.borrow().get(head) {
+            return Ok(found.clone());
+        }
+        let sex = if head == character::FEMALE_HEAD { "female" } else { "male" };
+        let path = format!("Objects/Characters/Human/heads/{sex}/pu/{head}/{head}_head.dna");
+        let index = self
+            .find_asset(&path)
+            .ok_or_else(|| JsValue::from_str(&format!("not in this archive: {path}")))?;
+        let entry = &self.entries[index];
+        let js = |e: String| JsValue::from_str(&e);
+        let header = p4k::read_entry_prefix(self.reader.source(), entry, 0x200).map_err(js)?;
+        let needed = character::DnaLibrary::needed(&header).map_err(js)?;
+        let bytes = p4k::read_entry_prefix(self.reader.source(), entry, needed).map_err(js)?;
+        let mut library = character::DnaLibrary::read(&bytes).map_err(js)?;
+        // Seam copies share their masks, or a blend cracks the jaw open.
+        let protos = self
+            .head_shape(&format!("{head}_head.skin"))
+            .ok_or_else(|| JsValue::from_str(&format!("{head}: no head mesh")))?;
+        library.weld(&protos.0);
+        library.smooth(&protos.2, &protos.0, MASK_SMOOTHING);
+        let library = std::rc::Rc::new(library);
+        self.dna.borrow_mut().insert(head.to_string(), library.clone());
+        Ok(library)
     }
 
     /// A material for an item whose record names none. See [`discover`].
@@ -593,6 +758,10 @@ fn normalise_asset(path: &str) -> String {
     let trimmed = lowered.trim_start_matches('/');
     trimmed.strip_prefix("data/").unwrap_or(trimmed).to_string()
 }
+
+/// Rounds of mask smoothing before a face is blended. `character::DnaLibrary::smooth`
+/// says why, and that it is an interpretation.
+const MASK_SMOOTHING: usize = 2;
 
 fn mesh_to_js(
     loaded: &mesh::LoadedMesh,

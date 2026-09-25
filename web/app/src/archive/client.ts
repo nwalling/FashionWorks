@@ -280,6 +280,11 @@ export class ArchiveClient {
     return this.request('mesh', { type: 'mesh', path });
   }
 
+  /** A player's face, from the bytes of their `.chf`. CHARACTER.md. */
+  async character(chf: Uint8Array) {
+    return (await this.request('character', { type: 'character', chf })).face;
+  }
+
   async material(path: string) {
     return this.request('material', { type: 'material', path });
   }

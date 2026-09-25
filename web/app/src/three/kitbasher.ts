@@ -56,6 +56,7 @@ import {
 import type { GearSlot } from '../archive/catalogue';
 import type {
   AttachmentOverride,
+  CharacterFace,
   ClipPayload,
   GearPayload,
   MaterialPayload,
@@ -161,6 +162,15 @@ interface FigureSpec {
    * adds this geometry tag -- `$hatHair+` on a cap. */
   readonly tag?: string;
 }
+/** A figure part as built: what it drew from, and whether it is a tagged
+ * variant waiting on something worn to ask for it. */
+interface FigurePartState {
+  readonly loaded: Loaded;
+  readonly part: FigurePart;
+  readonly mesh: string;
+  readonly tag?: string;
+}
+
 /** The body's skin against the head's, measured at the neck.
  *
  * The head and body are separate meshes on separate textures, and in the
@@ -406,6 +416,9 @@ export interface KitbasherState {
   readonly figure: boolean;
   /** Whether the pose plays as a loop rather than holding still. */
   readonly animated: boolean;
+  /** The player's character on the figure, by file name, or null for the
+   * default face. CHARACTER.md. */
+  readonly character: string | null;
 }
 
 /** A tint palette from the catalogue.
@@ -751,6 +764,7 @@ export class Kitbasher {
       holding: null,
       figure: true,
       animated: false,
+      character: null,
     };
     if (view.renderer && view.lights) {
       this.lighting = new StudioLighting({ scene: view.scene, renderer: view.renderer, ...view.lights }, client);
@@ -969,7 +983,7 @@ export class Kitbasher {
         }];
       }));
     this.view.scene.add(this.rig.root);
-    void this.buildFigure();
+    this.figureReady = this.buildFigure();
     // The first time an archive is open, light it. A body switch re-enters
     // here and keeps whatever preset is on.
     if (!this.lit) {
@@ -1130,7 +1144,11 @@ export class Kitbasher {
   }
 
   /** The figure's parts for the current body, once built. */
-  private figure: { body: Body; parts: Array<{ loaded: Loaded; part: FigurePart; tag?: string }> } | null = null;
+  private figure: { body: Body; parts: FigurePartState[] } | null = null;
+
+  /** The figure's build, for a caller that must wait for it: a character
+   * loaded onto a body that is still being built. */
+  private figureReady: Promise<void> = Promise.resolve();
 
   /** Tagged figure parts on their way in, so each loads once. */
   private readonly figureLoading = new Set<string>();
@@ -1154,11 +1172,11 @@ export class Kitbasher {
     const body = this.state.body;
     if (this.figure?.body === body) return;
     this.dropFigure();
-    const parts: Array<{ loaded: Loaded; part: FigurePart; tag?: string }> = [];
+    const parts: FigurePartState[] = [];
     // Tagged variants wait until something asks for them.
     for (const spec of FIGURE[body].filter((f) => !f.tag)) {
       try {
-        parts.push({ loaded: await this.loadFigurePart(spec), part: spec.part });
+        parts.push({ loaded: await this.loadFigurePart(spec), part: spec.part, mesh: spec.mesh });
       } catch {
         // A part that will not load leaves the rest of the figure standing.
       }
@@ -1173,6 +1191,8 @@ export class Kitbasher {
     }
     this.figure = { body, parts };
     this.applyOutfit();
+    // A character loaded for this body puts its face back on.
+    if (this.character?.face.body === body) await this.applyCharacter();
   }
 
   private dropFigure(): void {
@@ -1182,12 +1202,105 @@ export class Kitbasher {
     this.figure = null;
   }
 
-  private async loadFigurePart(spec: FigureSpec): Promise<Loaded> {
+  // ---------------------------------------------------------------- character
+
+  /** The player's own character, from their `.chf`. CHARACTER.md. */
+  private character: { name: string; key: string; face: CharacterFace } | null = null;
+
+  /** Bumped per load, so a slow blend that has been superseded is dropped. */
+  private characterTicket = 0;
+
+  /** Put a player's face on the figure, from the bytes of their `.chf`.
+   *
+   * The face is the protos head and eyes with every vertex blended from the
+   * library heads the file names. It belongs to the body it was made for:
+   * loading one switches to that body, and the other body keeps the default
+   * face -- a male face is not bent onto a female head. */
+  async loadCharacter(chf: Uint8Array, name = 'character'): Promise<boolean> {
+    if (!this.rig) await this.init();
+    if (this.disposed) return false;
+    const ticket = ++this.characterTicket;
+    this.publish({ busy: true, status: `${name}: blending the face…` });
+    let face: CharacterFace;
+    try {
+      face = await this.client.character(chf);
+    } catch (error) {
+      if (ticket === this.characterTicket) {
+        this.publish({ busy: false, status: `${name}: ${error instanceof Error ? error.message : String(error)}` });
+      }
+      return false;
+    }
+    if (this.disposed || ticket !== this.characterTicket) return false;
+    this.character = { name, key: `character${ticket}`, face };
+    if (face.body !== this.state.body) {
+      // The rebuilt figure applies it. A body switch refuses while the engine
+      // is busy, and it is busy with exactly this.
+      this.publish({ busy: false });
+      await this.setBody(face.body);
+      await this.figureReady;
+    } else {
+      await this.applyCharacter();
+    }
+    const missing = face.missing.length ? ` · no mesh for ${face.missing.join(', ')}` : '';
+    const blend = face.heads.length === 1
+      ? `library head ${face.heads[0]}`
+      : `a blend of ${face.heads.length} library heads`;
+    this.publish({ busy: false, character: name, status: `${name} · ${face.body} · ${blend}${missing}` });
+    return true;
+  }
+
+  /** Back to the default face. */
+  async clearCharacter(): Promise<void> {
+    this.characterTicket += 1;
+    this.character = null;
+    await this.swapFace(null);
+    this.publish({ character: null, status: 'default face' });
+  }
+
+  private async applyCharacter(): Promise<void> {
+    const character = this.character;
+    if (!character || character.face.body !== this.figure?.body) return;
+    await this.swapFace(character);
+  }
+
+  /** Replace the figure's head and eyes with a character's, or with the
+   * default ones when `character` is null. */
+  private async swapFace(character: { key: string; face: CharacterFace } | null): Promise<void> {
+    const figure = this.figure;
+    const rig = this.rig;
+    if (!figure || !rig) return;
+    const roles: Array<[string, MeshPayload | undefined]> = [
+      ['_head.skin', character?.face.head],
+      ['_eyes.skin', character?.face.eyes],
+    ];
+    for (const [suffix, mesh] of roles) {
+      const index = figure.parts.findIndex((p) => p.part === 'head' && p.mesh.endsWith(suffix));
+      const spec = FIGURE[figure.body].find((f) => f.mesh === figure.parts[index]?.mesh);
+      if (index < 0 || !spec) continue;
+      const loaded = await this.loadFigurePart(spec, mesh && character ? { key: character.key, mesh } : undefined);
+      if (this.disposed || this.figure !== figure || this.rig !== rig) return;
+      const previous = figure.parts[index]!.loaded;
+      if (previous === loaded) continue;
+      for (const object of previous.objects) object.removeFromParent();
+      for (const object of loaded.objects) {
+        this.view.scene.add(object);
+        if (object instanceof SkinnedMesh) object.bind(rig.skeleton, object.matrixWorld);
+      }
+      figure.parts[index] = { ...figure.parts[index]!, loaded };
+      this.refineLater(loaded);
+    }
+    this.applyOutfit();
+    this.evict();
+  }
+
+  /** A figure part, from its spec's mesh -- or, for a player's face, from a
+   * blended mesh of the same topology, cached under the character's key. */
+  private async loadFigurePart(spec: FigureSpec, face?: { key: string; mesh: MeshPayload }): Promise<Loaded> {
     const meshPath = spec.mesh;
-    const key = `figure:${meshPath}:${this.surfaceMode}`;
+    const key = `figure:${meshPath}:${this.surfaceMode}${face ? `:${face.key}` : ''}`;
     const hit = this.cache.get(key);
     if (hit) return hit;
-    const payload = (await this.client.mesh(meshPath)).mesh;
+    const payload = face?.mesh ?? (await this.client.mesh(meshPath)).mesh;
     const material: MaterialPayload = (await this.client.material(spec.material)).material;
     const count = Math.max(1, material.submaterials.length);
     const { materials, refine } = await this.materialsFor(
@@ -1276,7 +1389,7 @@ export class Kitbasher {
         this.view.scene.add(object);
         if (object instanceof SkinnedMesh) object.bind(rig.skeleton, object.matrixWorld);
       }
-      figure.parts.push({ loaded, part: spec.part, tag });
+      figure.parts.push({ loaded, part: spec.part, mesh: spec.mesh, tag });
       this.refineLater(loaded);
       this.applyOutfit();
     } catch {

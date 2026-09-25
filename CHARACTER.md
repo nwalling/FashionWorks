@@ -16,6 +16,7 @@ player's machine; `.chr` is the skeleton format this project already reads.
 | phase | state | what it measured |
 | --- | --- | --- |
 | research | done | The `.chf` fully parsed; every item it names resolves to a record the catalogue already exports; the face is a per-region blend of library heads that ship as ordinary meshes of the protos head's topology; the skin colour is the shader's own tone target. See below. |
+| 0 -- the face | done, awaiting the in-game comparison | Head id *k* is name *k*, proven on the archive's own characters; a one-head character reproduces its head to 0.0002 mm. Faces blend in the browser in 3.3 s cold, 1.7 s warm, with the eyes following their sockets. Three things the data did not say had to be settled on the way -- seams, shading, rough masks. See "Phase 0, as run". |
 
 ## What the data says
 
@@ -136,6 +137,75 @@ tiling). Eyes carry one `EyeColor`. Hair, beard and eyebrows each carry
   do; the facial joints in the `.dna` are the other candidate.
 - **`imperator_t1`**, male library head 19, has no mesh. A blend that names it needs
   a fallback -- renormalising the other three is the obvious one.
+
+## Phase 0, as run
+
+**Head id *k* is name *k*, and the blend is right where the data is
+unambiguous.** Two of the archive's mission givers are single library heads
+throughout: `Macken.chf` is 100% `macken_t2` and `recco_battaglia.chf` 100%
+`battaglia_t3`, each the entry at its id. Blended, Battaglia reproduces
+`battaglia_t3_head` to 0.0002 mm. Macken does everywhere but the neck, which a
+version-7 file does not describe and which therefore stays the protos head's --
+confined to the neck mask to the same 0.0002 mm. The masculine default's
+heaviest head is `male17_t1`, 31%, which is exactly the head whose textures
+`MasculineDefault.xml` names: the lead for which head textures a character
+wears.
+
+**Absolute against offset is not a question.** The masks sum to one at every
+vertex and the weights to one in every part, so blending positions and
+blending offsets from the protos head are the same arithmetic.
+
+**Three things the data does not say, settled by measurement:**
+
+- **Seams.** The mesh splits a vertex along its UV seams and the DNA masks the
+  copies independently -- one wholly jaw, its twin wholly neck -- so a mixed
+  face cracked open along the jaw, 24 places, up to 8.4 mm. The library heads
+  keep the copies exactly together, so giving the copies their mean mask
+  closes every seam (0.0000 mm on eight characters). `DnaLibrary::weld`.
+- **Shading.** Blending the library's normals under the masks jumps between
+  heads wherever a mask is hard-edged, which drew a jagged dark band down
+  Ilucide's right cheek. The authored normal is kept and turned by however
+  much the blend turns the surface, measured on the welded geometry.
+  `character::reshade`.
+- **The masks are rough.** 117 vertices carry a part none of their neighbours
+  has -- one beside the ear is 73% mouth -- and eyelid folds change part across
+  a single edge. As shipped, mixed faces buckle: edges stretch up to 2.4 times
+  on Ilucide and 5.9 on Meg, a stepped jaw and lumps at the mouth. Two passes
+  of smoothing over the surface take that to 1.1 and 1.7 while the face moves
+  0.06 mm on average. **This one is an interpretation**: how the game treats
+  the masks is not in the data, and a capture of the same character settles
+  it. `DnaLibrary::smooth`, `MASK_SMOOTHING` in `lib.rs`.
+
+Ruled out on the way: the masks are in the mesh's own vertex order. The mesh
+carries each vertex's original, pre-optimisation index in its second colour
+stream (`IVOCOLORS2`, red plus green times 256: 5,386 values, the welded vertex
+count), and reordering the masks by it makes them ten times rougher, not
+smoother. The rough patches are in the data.
+
+**The eyes follow their sockets.** Each eyeball blends from the library's own
+eye meshes -- 922 vertices on every head -- under its eye part's weights: the
+pair's width runs 84 to 91 mm across the characters tried, and on all five
+rendered the eyes sit in their lids. The head's neck rim moves at most
+0.45 mm, so the head still meets the body.
+
+**The part count is a byte.** The byte after it repeats it, so read as a
+`u16` the two make 3,341; the first reader asked for a 97 MB file.
+
+**In the browser.** `web/core` reads the `.chf` with StarBreaker's crate and
+the DNA's header, names and masks by streaming the first 22 MB of its 76 --
+zstd, fetched a megabyte at a time (`p4k::read_entry_prefix`) -- once per body,
+then loads the library meshes the face names. Ilucide, 22 library heads, loads
+in 3.3 s with the DNA read and 1.7 s after; the core grows by 110 KB. The
+engine swaps the figure's head and eyes for the blend, re-applies it when the
+figure is rebuilt, and switches to the character's body when it differs. A
+"character…" button beside the body switch takes a `.chf`; the file is read in
+the browser and goes nowhere. That is most of Phase 1 and a sliver of Phase 4,
+done because the spike needed them.
+
+Checked on Ilucide, Macken, Intersec Tobin, the DefenseCon NPCs and both
+defaults (male); Recco Battaglia and Meg (female).
+`examples/character_probe.rs` reproduces the measurements from extracted
+files.
 
 ## Phases
 

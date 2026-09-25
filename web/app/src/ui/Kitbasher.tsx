@@ -137,6 +137,7 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
   const viewer = useRef<ViewerHandle | null>(null);
   const [quality, setQuality] = useState<Quality | null>(null);
   const picker = useRef<HTMLInputElement>(null);
+  const chfPicker = useRef<HTMLInputElement>(null);
   const slot: WearSlot | GearSlot = mode === 'armour' ? armourSlot : mode === 'clothing' ? clothingSlot : gearSlot;
 
   // The engine is built once the scene exists, and torn down with the view.
@@ -382,6 +383,45 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
           >
             figure
           </button>
+          {/* A player's own face, from the file the game's customizer saves.
+              It is read here, in the browser, and goes nowhere. */}
+          <button
+            type="button"
+            aria-pressed={Boolean(state?.character)}
+            disabled={busy}
+            title={state?.character
+              ? `${state.character}: load another character`
+              : 'Load your character: the .chf the game saves in StarCitizen/LIVE/user/client/0/CustomCharacters. It stays in this browser.'}
+            onClick={() => chfPicker.current?.click()}
+          >
+            {state?.character ?? 'character…'}
+          </button>
+          {state?.character && (
+            <button
+              type="button"
+              aria-label="Back to the default face"
+              title="Back to the default face"
+              disabled={busy}
+              onClick={() => void engine.current?.clearCharacter()}
+            >
+              ×
+            </button>
+          )}
+          <input
+            ref={chfPicker}
+            type="file"
+            accept=".chf"
+            hidden
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = '';
+              if (!file) return;
+              void file.arrayBuffer().then((buffer) => engine.current?.loadCharacter(
+                new Uint8Array(buffer),
+                file.name.replace(/\.chf$/i, ''),
+              ));
+            }}
+          />
         </span>
         <span className="fw-kit-group">
           <span className="fw-kit-label">pose</span>
