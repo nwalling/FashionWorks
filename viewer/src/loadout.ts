@@ -52,20 +52,33 @@ export function encodeLoadout(loadout: Loadout): string {
   return toBase64Url(JSON.stringify(compact));
 }
 
+const HEX_COLOUR = /^#[0-9a-f]{6}$/i;
+
+/** A loadout from outside -- a share link or localStorage -- checked field by
+ * field. Anything that is not a slot id or a `#rrggbb` tint is dropped rather
+ * than handed to three.js, where a non-string colour throws during render. */
+export function sanitizeLoadout(value: unknown): Loadout {
+  const raw = (value && typeof value === 'object' ? value : {}) as {
+    s?: unknown;
+    e?: unknown;
+    t?: unknown;
+  };
+  const loadout = emptyLoadout(raw.s === 'female' ? 'female' : 'male');
+  const slots = raw.e && typeof raw.e === 'object' ? (raw.e as Record<string, unknown>) : {};
+  for (const slot of SLOTS) {
+    const id = slots[slot];
+    if (typeof id === 'string') loadout.slots[slot] = id;
+  }
+  const tints = raw.t && typeof raw.t === 'object' && !Array.isArray(raw.t) ? raw.t : {};
+  loadout.tints = Object.fromEntries(
+    Object.entries(tints).filter(([, colour]) => typeof colour === 'string' && HEX_COLOUR.test(colour)),
+  ) as Record<string, string>;
+  return loadout;
+}
+
 export function decodeLoadout(encoded: string): Loadout | null {
   try {
-    const raw = JSON.parse(fromBase64Url(encoded)) as {
-      s?: string;
-      e?: Record<string, string>;
-      t?: Record<string, string>;
-    };
-    const loadout = emptyLoadout(raw.s === 'female' ? 'female' : 'male');
-    for (const slot of SLOTS) {
-      const id = raw.e?.[slot];
-      if (typeof id === 'string') loadout.slots[slot] = id;
-    }
-    loadout.tints = raw.t ?? {};
-    return loadout;
+    return sanitizeLoadout(JSON.parse(fromBase64Url(encoded)));
   } catch (error) {
     console.warn('[loadout] could not decode share link', error);
     return null;

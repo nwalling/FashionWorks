@@ -4,7 +4,7 @@ import type { Item, Manifest, Slot } from './manifest';
 import { itemsBySlot, selectableItems } from './manifest';
 import type { Loadout, SkeletonName } from './loadout';
 import type { PoseLibrary } from './three/poses';
-import { emptyLoadout, loadoutFromLocation } from './loadout';
+import { emptyLoadout, loadoutFromLocation, sanitizeLoadout } from './loadout';
 
 const HISTORY_LIMIT = 50;
 /**
@@ -247,7 +247,8 @@ export const useStore = create<State>((set, get) => ({
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY);
       if (!raw) return;
-      get().applyLoadout(JSON.parse(raw) as Loadout);
+      const stored = JSON.parse(raw) as { skeleton?: unknown; slots?: unknown; tints?: unknown } | null;
+      get().applyLoadout(sanitizeLoadout({ s: stored?.skeleton, e: stored?.slots, t: stored?.tints }));
     } catch (error) {
       console.warn('[store] could not restore loadout', error);
     }
