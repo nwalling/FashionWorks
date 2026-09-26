@@ -418,6 +418,10 @@ function hairCards(
     // (`setHairVolume`); zero bend until then.
     uHairCentre: { value: new Vector3() },
     uHairSphere: { value: 0 },
+    // How hard the cards' baked occlusion bites: `AmbientOcclusion` on the
+    // ambient and environment light, `ShadowDensity` on the key.
+    uHairAo: { value: scalar(sub.params?.AmbientOcclusion, 1) },
+    uHairShadow: { value: scalar(sub.params?.ShadowDensity, 1) },
   };
   material.userData.hairPigment = pigment;
   material.userData.hairStrands = uniforms;
@@ -436,9 +440,16 @@ function hairCards(
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>
         uniform vec3 uHairCentre;
-        uniform float uHairSphere;`)
+        uniform float uHairSphere;
+        #ifdef FW_HAIR_OCCLUSION
+          attribute vec4 fwColor;
+          varying vec2 vHairOcclusion;
+        #endif`)
       .replace('#include <beginnormal_vertex>', `#include <beginnormal_vertex>
-        objectNormal = normalize(mix(objectNormal, normalize(position - uHairCentre), uHairSphere));`);
+        objectNormal = normalize(mix(objectNormal, normalize(position - uHairCentre), uHairSphere));
+        #ifdef FW_HAIR_OCCLUSION
+          vHairOcclusion = fwColor.gb;
+        #endif`);
     shader.fragmentShader = shader.fragmentShader
       .replace(
         '#include <normal_fragment_begin>',
@@ -452,6 +463,11 @@ function hairCards(
         '#include <common>',
         `#include <common>
         uniform float uHairSphere;
+        uniform float uHairAo;
+        uniform float uHairShadow;
+        #ifdef FW_HAIR_OCCLUSION
+          varying vec2 vHairOcclusion;
+        #endif
         uniform vec3 uHairLight;
         uniform vec3 uHairDark;
         uniform vec3 uDye;
@@ -482,6 +498,24 @@ function hairCards(
         '#include <alphamap_fragment>',
         `#ifdef USE_ALPHAMAP
           diffuseColor.a *= texture2D(alphaMap, vAlphaMapUv).r;
+        #endif`,
+      )
+      // The mesh's baked occlusion, in its vertex colour: green is how open a
+      // strand is to its surroundings, blue how far the key reaches it
+      // through the hair around it -- both dark at the roots and deep in
+      // the mass. Raised to the material's own powers, the inner strands
+      // shade toward black and a beard reads as a volume rather than as
+      // strands over skin.
+      .replace(
+        '#include <aomap_fragment>',
+        `#include <aomap_fragment>
+        #ifdef FW_HAIR_OCCLUSION
+          float hairAo = pow(max(vHairOcclusion.x, 1e-3), uHairAo);
+          float hairShadow = pow(max(vHairOcclusion.y, 1e-3), uHairShadow);
+          reflectedLight.indirectDiffuse *= hairAo;
+          reflectedLight.indirectSpecular *= hairAo;
+          reflectedLight.directDiffuse *= hairShadow;
+          reflectedLight.directSpecular *= hairShadow;
         #endif`,
       );
   };
@@ -562,13 +596,15 @@ function densityMask(texture: Texture, kind: 'strands' | 'cap' | 'coat', density
     const v = strands && !alphaVaries ? Math.max(data[i * 4]!, data[i * 4 + 1]!) : data[i * 4 + channel]!;
     level[i] = v / 255;
   }
-  // A cap is read against its own peak, and its falloff lifted by
-  // `CAP_GAMMA`: the beard's reaches only halfway up the cheeks before
-  // fading, where the captures show the beard dense to the cheekbone.
+  // A cap is read against its own peak, times `CAP_GAIN`: the beard's is a
+  // soft shadow, full only on the chin, and drawn as authored the skin
+  // showed through the whole jaw where the captures show a solid mass.
+  // Linear, so the faint edge stays faint: a gamma that filled the jaw as
+  // well threw a dark halo up the cheeks and round the nose.
   if (kind === 'cap') {
     let peak = 0;
     for (const v of level) peak = Math.max(peak, v);
-    if (peak > 0) for (let i = 0; i < texels; i += 1) level[i] = (level[i]! / peak) ** CAP_GAMMA;
+    if (peak > 0) for (let i = 0; i < texels; i += 1) level[i] = Math.min(1, (level[i]! / peak) * CAP_GAIN);
   }
   // A coat is short hair laid over the scalp, fine strands within a region.
   // Averaged down to the mip a head on screen samples, the region reads a
@@ -651,8 +687,9 @@ export function coverageScale(level: Float32Array, threshold: number, density = 
 
 const HAIR_ALPHA_TEST = 0.35;
 /** How far a cap's density is lifted toward full: chosen against the
- * captures' beard. */
-const CAP_GAMMA = 0.5;
+ * captures' beard, whose chin reads 0.49 of the cheek skin's luminance and
+ * ours 0.54 at 2. */
+const CAP_GAIN = 2;
 /** The share of strands a dye reaches at a `DyeAmount` of one, and how bright
  * a dyed strand is against its dye colour. Neither is in the data; both are
  * calibrated on Ilucide's chin, the most-dyed part of his beard in the
@@ -851,11 +888,19 @@ export function setIris(material: Material, colour: ArrayLike<number> | null): v
  * the material's own parameters; null restores them. */
 /** Point a hair card material's normals at the head: `centre` in the
  * mesh's own space, the middle of its bounds. */
-export function setHairVolume(material: Material, centre: Vector3): void {
+export function setHairVolume(material: Material, centre: Vector3, occluded = false): void {
   const strands = material.userData.hairStrands as { uHairCentre: { value: Vector3 }; uHairSphere: { value: number } } | undefined;
   if (!strands) return;
   strands.uHairCentre.value.copy(centre);
   strands.uHairSphere.value = HAIR_SPHERE;
+  // The occlusion is in the mesh's vertex colour, so only a mesh that has
+  // one can shade by it.
+  if (occluded !== Boolean(material.defines?.FW_HAIR_OCCLUSION)) {
+    material.defines = { ...material.defines };
+    if (occluded) material.defines.FW_HAIR_OCCLUSION = '';
+    else delete material.defines.FW_HAIR_OCCLUSION;
+    material.needsUpdate = true;
+  }
 }
 
 export function setHairLooks(material: Material, looks: Record<string, number | Float32Array> | null): void {

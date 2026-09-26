@@ -69,6 +69,9 @@ export function buildGeometry(mesh: MeshPayload, materialCount: number): BuiltGe
   if (mesh.decalUvs) {
     geometry.setAttribute('fwDecalUv', new BufferAttribute(mesh.decalUvs, 2));
   }
+  if (mesh.colors) {
+    geometry.setAttribute('fwColor', new BufferAttribute(mesh.colors, 4, true));
+  }
   if (mesh.joints1 && mesh.weights1) {
     geometry.setAttribute('skinIndex1', new BufferAttribute(mesh.joints1, 4));
     geometry.setAttribute('skinWeight1', new BufferAttribute(mesh.weights1, 4));

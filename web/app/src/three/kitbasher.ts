@@ -1512,7 +1512,8 @@ export class Kitbasher {
     // Hair cards shade as a volume round the head (`setHairVolume`).
     object.geometry.computeBoundingBox();
     const centre = object.geometry.boundingBox?.getCenter(new Vector3());
-    if (centre) for (const m of materials) setHairVolume(m, centre);
+    const occluded = object.geometry.hasAttribute('fwColor');
+    if (centre) for (const m of materials) setHairVolume(m, centre, occluded);
     // The figure skins four ways, renormalised, as the pipeline draws
     // everything. Eight ways folded the neck: the 86 head vertices that use
     // more than four bones -- Neck, Neck1, Spine3 plus a percent or three of

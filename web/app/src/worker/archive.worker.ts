@@ -293,6 +293,9 @@ export interface MeshPayload {
   /** u,v per vertex into the decal sheet, decoded from the vertex colour.
    * Absent on a mesh with no decal. */
   decalUvs?: Float32Array;
+  /** The vertex colour, RGBA per vertex, where the mesh has one. Hair reads
+   * its baked occlusion from it. */
+  colors?: Uint8Array;
   bones: string[];
   /** `zone` names a character mesh's body zone where the core knows it;
    * `zoneWord` is the mesh's own word for it, named or not. CLOTHING.md. */

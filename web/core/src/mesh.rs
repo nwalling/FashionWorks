@@ -89,6 +89,10 @@ pub struct LoadedMesh {
     /// u,v per vertex into the piece's decal sheet (`TexSlot9`), decoded from
     /// the vertex colour by [`decal_uv`]. Empty for a mesh with no decal.
     pub decal_uvs: Vec<f32>,
+    /// The vertex colour, RGBA per vertex, where the mesh carries one. Hair
+    /// keeps its baked occlusion here (green and blue, CHARACTER.md); on
+    /// armour it is the decal coordinate above and nothing reads it raw.
+    pub colors: Vec<u8>,
     /// The mesh's own bone names, in the order its joint indices address.
     ///
     /// **Not the canonical armature's order.** One armour piece exports 41
@@ -259,6 +263,7 @@ pub fn load_wide(skin: &[u8], skinm: &[u8], width: usize) -> Result<LoadedMesh, 
         weights: vec![0.0f32; vertices * width],
         influences: width,
         decal_uvs: Vec::new(),
+        colors: Vec::new(),
         bones,
         bone_parents,
         submeshes: built
@@ -326,6 +331,9 @@ pub fn load_wide(skin: &[u8], skinm: &[u8], width: usize) -> Result<LoadedMesh, 
     if let Some(colors) = &built.colors {
         if colors.iter().any(|c| c[0] >= DECAL_R_MIN) {
             out.decal_uvs = colors.iter().take(vertices).flat_map(|c| decal_uv(*c)).collect();
+        }
+        if colors.len() >= vertices {
+            out.colors = colors.iter().take(vertices).flatten().copied().collect();
         }
     }
 

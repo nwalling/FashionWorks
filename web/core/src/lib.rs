@@ -952,6 +952,9 @@ fn mesh_to_js(
     if !loaded.decal_uvs.is_empty() {
         set("decalUvs", &js_sys::Float32Array::from(&loaded.decal_uvs[..]).into())?;
     }
+    if !loaded.colors.is_empty() {
+        set("colors", &js_sys::Uint8Array::from(&loaded.colors[..]).into())?;
+    }
 
     let bones = js_sys::Array::new();
     for name in &loaded.bones {

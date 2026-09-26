@@ -421,6 +421,34 @@ ways, as the pipeline draws everything (`fourWays` in `kitbasher.ts`); rest,
 idle and raised are all clean. Why the eight-way path fails on these vertices
 is not known, and armour still takes it.
 
+**A beard's thickness is its occlusion and its cap, not more strands.**
+Skin showed through the jaw where the captures show a solid mass. Two things
+were unread:
+
+* **Hair meshes carry baked occlusion in their vertex colour.** Green and
+  blue track each other (Spearman 0.67-0.88), darken toward the roots (against
+  the card's V, -0.30 to -0.36) and floor near 0.3 on head hair; red is not
+  occlusion. The materials' own `AmbientOcclusion` (2.6-3.2) and
+  `ShadowDensity` (1.5-3.7, absent on `hair_75`) are read as powers on them --
+  green on the ambient and environment light, blue on the key -- which is
+  inferred, not confirmed. The core now passes the vertex colour through
+  (`colors`, `fwColor`). The beard's own occlusion is shallow, 0.9-1.0 on
+  most of its cards, so on its own it darkens the interior only a little.
+* **The cap is `facial_hair_011_scalp_shadow`**, a soft shade full only on the
+  chin. Read against its peak and doubled (`CAP_GAIN`, linear), it fills the
+  jaw. A gamma of 0.35 filled it too but threw a dark halo up the cheeks and
+  round the nose; the darkest natural strand as its colour took the chin to
+  0.25 of the cheek skin's luminance against the capture's 0.49. Kept in the
+  hair's average colour, it reads 0.54.
+
+Measured on the front view, in boxes under the lower lip and beside the mouth
+sized by the pupil distance: skin-like pixels 24.3% -> 23.2% (capture 5.6%),
+dark mass 33.1% -> 36.0% (37.6%). The skin that is left is one band directly
+under the lower lip, where the cards start lower than the captures' do -- a
+matter of where the geometry sits, not of shading. Head hair takes the same
+occlusion and reads 20% darker against the skin (0.136 -> 0.108), further
+from the captures' 0.356, whose brightness is mostly their overhead light.
+
 `coverageScale` gave up and returned no boost when a level held fewer
 non-empty texels than the target asked, drawing such a mask at its thinnest;
 it now passes every texel that holds anything.
