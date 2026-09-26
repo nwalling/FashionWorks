@@ -487,6 +487,49 @@ is not yet read.
 non-empty texels than the target asked, drawing such a mask at its thinnest;
 it now passes every texel that holds anything.
 
+### A beard drawn as CryEngine draws hair (2026-09-26)
+
+Close up the beard read as a near-black mass with hard, stair-stepped
+cut-out edges and chalky glints. CryEngine 5's public `Hair.cfx` -- the
+ancestor of HairPBR, whose own source is not public -- settled the lighting
+and the passes; `three/hair.ts` and `hairCards` carry them, for beards only.
+
+* **Lighting.** Two Kajiya-Kay lobes along the strand (`shadeLib.cfi`): a
+  narrow white one at 4.5% reflectance, exponent 2^(10 gloss + 1) with gloss
+  the smoothness held to 0.5-0.9, and a broader one at gloss / 1.5 (floored at
+  0.4), tinted 0.7 of the hair's colour and shifted 0.1 along the normal; the
+  diffuse wrapped by 0.5. Scaled by 1/pi to keep CryEngine's ratio against
+  three.js's normalised diffuse. The strand is the direction map's tangent,
+  and each strand's shift is jittered by its id (`HAIR_SHIFT_JITTER`, chosen:
+  HairPBR does not declare CryEngine's `ShiftVariation`).
+* **Two passes.** A cut-out at 0.5 that writes depth, then a second skinned
+  mesh over the same buffers blending what it left -- depth-tested strictly,
+  clipped below 5%, after the cap, casting no shadow and kept out of GTAO. The
+  cards' triangles are ordered innermost first once, at load, so outer
+  strands blend over inner from any side. The mask's green channel is the
+  density as authored for the blend, lifted down the mips by
+  `OpacityMipScale` from the second level, so a close view keeps its strands
+  and a portrait its density.
+* **Root to tip.** The vertex colour's red is the step along the card: every
+  card starts at 0 at the skin and counts up in whole steps of about 2 mm,
+  ordered exactly as the card's V on all 3,028 cards, its peak tracking the
+  card's length (Spearman 0.80). Red over its card's peak is a root-to-tip
+  coordinate (`fwStrandT`); roots shade to 0.7 and tips to 1.1, and the last
+  40% fades toward 40% opacity. The shades and fade are chosen.
+
+**The white specks were the strand id filtered.** With the specular and the
+environment off they stayed; with the dye off they went. The id map was
+sampled linearly, so between two strands it read an id belonging to neither,
+and the dye draw from that value scattered single-pixel specks along every
+strand's edge. The dye now reads the nearest texel (`texelFetch`); the
+melanin shade, which interpolates honestly, keeps the filtered value.
+
+At the portrait distance, against the front capture: brightness 0.43 of the
+cheek skin (capture 0.49), strand-scale speckle 0.139 (0.111), coarse
+variation 0.40 (0.51, from 0.31) -- the jaw sides now darker than the chin, as
+in game. Skin-like pixels read 13.8% against 9.7% before, nearly all of it the
+band under the lower lip, where the cards start lower than in game.
+
 ### Phase 4: the file, the body, the link
 
 The character belongs to its body. Loading one switches to it; switching away

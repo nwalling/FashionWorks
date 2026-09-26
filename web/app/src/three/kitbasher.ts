@@ -89,6 +89,7 @@ import {
   surfaceMaterial,
   texturesWanted,
 } from './materials';
+import { fringeOf, sortInnerFirst, strandCoordinate } from './hair';
 import { DEFAULT_PRESET, LIGHT_PRESETS, StudioLighting } from './lighting';
 import { ClipLoop, FADE_SECONDS, type LoopMode, smooth } from './idle';
 import { hasEight, padEight, skinEight } from './skin8';
@@ -1512,14 +1513,6 @@ export class Kitbasher {
     // Hair cards shade as a volume round the head (`setHairVolume`).
     object.geometry.computeBoundingBox();
     const centre = object.geometry.boundingBox?.getCenter(new Vector3());
-    // A beard is drawn thicker, and only a beard shades by its baked
-    // occlusion: head hair carries far deeper occlusion and went 20% darker
-    // against the skin, further from the captures, which read it much
-    // lighter than we do.
-    const beard = /facialhair/i.test(meshPath) ? { occluded: object.geometry.hasAttribute('fwColor') } : null;
-    if (centre) for (const m of materials) setHairVolume(m, centre, beard);
-    // Hair is cut-outs, which the ambient occlusion pass cannot see (Viewer).
-    if (materials.some((m) => m.userData.hairPigment)) object.userData.noAo = true;
     // The figure skins four ways, renormalised, as the pipeline draws
     // everything. Eight ways folded the neck: the 86 head vertices that use
     // more than four bones -- Neck, Neck1, Spine3 plus a percent or three of
@@ -1528,10 +1521,34 @@ export class Kitbasher {
     // where they were authored. Why eight fails here and not on armour is not
     // yet known.
     fourWays(object.geometry);
+    // A beard is drawn as CryEngine draws hair (`three/hair.ts`): its cards
+    // ordered innermost first and carried root to tip, a cut-out and then a
+    // blended pass for the rest. Only a beard shades by its baked occlusion:
+    // head hair carries far deeper occlusion and went 20% darker against the
+    // skin, further from the captures, which read it much lighter than we do.
+    const fringes = new Map<number, Material>();
+    let beard: { occluded: boolean; rootToTip: boolean } | null = null;
+    if (/facialhair/i.test(meshPath)) {
+      let rootToTip = false;
+      for (const group of object.geometry.groups) {
+        const index = group.materialIndex ?? 0;
+        const make = materials[index]?.userData.hairFringe as (() => Material) | undefined;
+        if (!make) continue;
+        if (strandCoordinate(object.geometry, group.start, group.count)) rootToTip = true;
+        if (centre) sortInnerFirst(object.geometry, group.start, group.count, centre);
+        if (!fringes.has(index)) fringes.set(index, make());
+      }
+      beard = { occluded: object.geometry.hasAttribute('fwColor'), rootToTip };
+    }
+    const all = [...materials, ...fringes.values()];
+    if (centre) for (const m of all) setHairVolume(m, centre, beard);
+    // Hair is cut-outs, which the ambient occlusion pass cannot see (Viewer).
+    if (materials.some((m) => m.userData.hairPigment)) object.userData.noAo = true;
     decalsWhereNeeded([object]);
     object.name = meshPath.split('/').pop() ?? meshPath;
     shaded(object);
-    const loaded = measure(key, [object], materials, []);
+    const fringe = fringeOf(object, fringes);
+    const loaded = measure(key, fringe ? [object, fringe] : [object], all, []);
     if (refine) loaded.refines = [refine];
     this.cache.set(key, loaded);
     return loaded;

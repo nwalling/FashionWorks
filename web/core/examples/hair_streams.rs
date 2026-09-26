@@ -116,6 +116,16 @@ fn main() {
         let b: Vec<f64> = colors.iter().map(|x| f64::from(x[2])).collect();
         println!("spearman G vs B: {:+.3}", spearman(&g, &b));
     }
+    // `DUMP=<dir>` writes the raw arrays for analysis elsewhere.
+    if let Ok(dir) = std::env::var("DUMP") {
+        let write = |name: &str, bytes: Vec<u8>| std::fs::write(format!("{dir}/{name}"), bytes).expect("write");
+        write("positions.f32", built.positions.iter().flatten().flat_map(|v| v.to_le_bytes()).collect());
+        write("uvs.f32", uv.iter().flatten().flat_map(|v| v.to_le_bytes()).collect());
+        write("colors.u8", colors.iter().flatten().copied().collect());
+        write("indices.u32", built.indices.iter().flat_map(|v| v.to_le_bytes()).collect());
+        let groups: Vec<u8> = built.submeshes.iter().flat_map(|s| [s.first_index, s.num_indices, s.material_id]).flat_map(|v| v.to_le_bytes()).collect();
+        write("groups.u32", groups);
+    }
     println!("{n} vertices, {} submeshes", built.submeshes.len());
     for s in &built.submeshes {
         let range = s.first_index as usize..(s.first_index + s.num_indices) as usize;
