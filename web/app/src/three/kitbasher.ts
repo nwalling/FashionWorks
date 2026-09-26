@@ -1541,7 +1541,7 @@ export class Kitbasher {
         if (!fringes.has(index)) fringes.set(index, make());
       }
       const beard = /facialhair/i.test(meshPath);
-      style = { passes: true, occluded: beard && object.geometry.hasAttribute('fwColor'), rootToTip };
+      style = { passes: true, beard, occluded: beard && object.geometry.hasAttribute('fwColor'), rootToTip };
     }
     const all = [...materials, ...fringes.values()];
     if (centre) for (const m of all) setHairVolume(m, centre, style);

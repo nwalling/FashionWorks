@@ -564,6 +564,22 @@ in every setting tried; that gap is the old one, the captures' bright overhead
 light and a hair colour we read darker, and the lobes do not close it. Close
 up the moustache is now bright, near white where the capture shows grey-white.
 
+### The moustache, toned down (2026-09-26)
+
+Close up and at a portrait's distance the moustache read near white: 1.18 of
+the cheek skin's luminance with 45% of it over 1.2 times the skin, against
+the capture's 0.90 and none. The environment was the cause. Taken as one
+light along the normal, it lands on the lobes' peak for every strand facing
+the camera, and a beard faces the camera. Turning the sheen off entirely
+left 0.96, so the direct lights and diffuse carry the rest.
+
+A beard now takes the environment through lobes 16 times broader
+(`BEARD_ENV_SPREAD`) at full strength, the normalisation lowering the peak as
+the exponent falls: the environment is the whole sky, not a point. The
+moustache reads 1.03 with 6.5% near white; the beard 0.46 of the skin
+against the capture's 0.49. Head hair keeps the narrow lobe at half strength:
+broadened, the grey sheen the captures show across the crown went flat brown.
+
 ### Phase 4: the file, the body, the link
 
 The character belongs to its body. Loading one switches to it; switching away

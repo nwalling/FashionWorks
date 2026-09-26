@@ -416,6 +416,7 @@ function hairCards(
     uHairExp1: { value: 2 ** (10 * gloss + 1) },
     uHairExp2: { value: 2 ** (10 * Math.max(gloss / HAIR_SECONDARY_WIDTH, 0.4) + 1) },
     uHairEnvSheen: { value: HAIR_ENV_SHEEN },
+    uHairEnvSpread: { value: 1 },
   };
   // One mask serves both passes: red scaled so the cut-out keeps its
   // coverage down the mips, green the density as authored for the blend.
@@ -498,6 +499,7 @@ function hairCards(
           uniform float uHairExp1;
           uniform float uHairExp2;
           uniform float uHairEnvSheen;
+          uniform float uHairEnvSpread;
           #ifdef FW_HAIR_OCCLUSION
             varying vec2 vHairOcclusion;
           #endif
@@ -564,8 +566,8 @@ function hairCards(
             vec3 H = normalize( geometryNormal + geometryViewDir );
             vec3 T1 = normalize( material.anisotropyT + fwHairShift * geometryNormal );
             vec3 T2 = normalize( material.anisotropyT + ( fwHairShift + ${HAIR_SECONDARY_SHIFT.toFixed(3)} ) * geometryNormal );
-            vec3 lobes = ${HAIR_PRIMARY_REFLECTANCE.toFixed(4)} * fwKajiyaKay( T1, H, uHairExp1 )
-              + ${HAIR_SECONDARY_TINT.toFixed(3)} * material.diffuseColor * fwKajiyaKay( T2, H, uHairExp2 );
+            vec3 lobes = ${HAIR_PRIMARY_REFLECTANCE.toFixed(4)} * fwKajiyaKay( T1, H, uHairExp1 / uHairEnvSpread )
+              + ${HAIR_SECONDARY_TINT.toFixed(3)} * material.diffuseColor * fwKajiyaKay( T2, H, uHairExp2 / uHairEnvSpread );
             reflectedLight.indirectSpecular = lobes * iblIrradiance * RECIPROCAL_PI * uHairEnvSheen;
           }
           #endif`,
@@ -846,6 +848,18 @@ const HAIR_SHIFT_JITTER = 0.3;
  * captures: at 0.5 the crown and back carry the grey sheen they show, the
  * moustache and chin grey, the jaw's sides dark. */
 const HAIR_ENV_SHEEN = 0.5;
+/** A beard takes the environment through lobes broadened by
+ * `BEARD_ENV_SPREAD` at full strength instead. A beard faces the camera, and
+ * for strands facing it the environment taken as one light along the normal
+ * lands on the lobes' peak: the moustache read 1.18 of the cheek skin with
+ * 45% of it near white, against the capture's 0.90 and none. Broadened --
+ * the environment is the whole sky, not a point -- the normalised peak falls
+ * with the exponent: the moustache reads 1.03 with 7% near white, and the
+ * beard 0.47 of the skin against the capture's 0.49. Head hair keeps the
+ * narrow lobe, which is what lays the grey sheen across the crown the
+ * captures show; broadened, the back of the head went flat brown. */
+const BEARD_ENV_SHEEN = 1;
+const BEARD_ENV_SPREAD = 16;
 /** The blended pass: clipped below 5%, as CryEngine's, and its density
  * lifted as `AlphaBlendMultiplier` lifts it there. Chosen. */
 const HAIR_FRINGE_CLIP = 0.05;
@@ -1077,6 +1091,9 @@ export function setHairVolume(
   // where the mesh carries them, and by its baked occlusion where asked.
   const fringe = 'FW_HAIR_FRINGE' in (material.defines ?? {});
   if (style?.passes && !fringe) material.alphaTest = HAIR_CUT;
+  const sheen = material.userData.hairStrands as { uHairEnvSheen: { value: number }; uHairEnvSpread: { value: number } };
+  sheen.uHairEnvSheen.value = style?.beard ? BEARD_ENV_SHEEN : HAIR_ENV_SHEEN;
+  sheen.uHairEnvSpread.value = style?.beard ? BEARD_ENV_SPREAD : 1;
   const want: Record<string, boolean> = {
     FW_HAIR_KK: Boolean(style?.passes),
     FW_HAIR_OCCLUSION: Boolean(style?.occluded),
@@ -1100,6 +1117,8 @@ export function setHairVolume(
  * by its baked occlusion, and shaded along its strands. */
 export interface HairStyle {
   passes: boolean;
+  /** A beard: its environment sheen is broadened (`BEARD_ENV_SPREAD`). */
+  beard: boolean;
   occluded: boolean;
   rootToTip: boolean;
 }
