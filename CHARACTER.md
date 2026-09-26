@@ -362,10 +362,15 @@ back, profile; kept in the gitignored `data/reference/ilucide/`). Compared
 from matching angles, measured as ratios against the skin in the same image
 -- the hangar's green light defeats absolute colour. What they settled:
 
-- **Caps are black.** Every cap's `Diffuse` is `0,0,0` and every coat's
-  white. Drawn in the hair's colour, a white-dyed beard's cap painted the jaw
-  grey; drawn as its own colour, the cap is the dark base under the beard and
-  the dark of the brows the captures show.
+- **A cap is the hair's average colour, not its black `Diffuse`.** Every
+  cap declares `Diffuse 0,0,0`, and the first reading drew them black: the
+  beard's base then read brown, skin under black. The captures show it
+  charcoal grey -- the average of black and white strands -- so a cap takes
+  the hair's flat colour through its density, read against its peak and
+  lifted by `CAP_GAMMA` 0.5, since the beard's fades halfway up the cheeks
+  where the captures show it dense to the cheekbone. The first-first reading,
+  hair colour with the dye mixed flat, painted it light grey: it was the flat
+  dye, not the cap, that was wrong.
 - **Dye is per strand.** The beard in game is salt and pepper: black melanin,
   with white strands, lightest on the moustache and chin. Neither a flat mix
   (grey) nor absorption (black) draws that. `DyeAmount` is the share of
@@ -392,7 +397,14 @@ from matching angles, measured as ratios against the skin in the same image
 Still off: the captures' hair carries a broader grey sheen than ours, most of
 it their bright overhead light; the head
 mesh's lower neck rim shows as two dark triangles either side of the collar,
-on the default face too; the beard's cap ends in a hard edge under the jaw.
+on the default face too; the beard's cap ends in a hard edge under the jaw;
+and under the jaw the beard reads brown -- not its strands' colour, which a
+magenta test left untouched, but their shadow on the skin, which the
+captures' denser strands cover.
+
+`coverageScale` gave up and returned no boost when a level held fewer
+non-empty texels than the target asked, drawing such a mask at its thinnest;
+it now passes every texel that holds anything.
 
 ### Phase 4: the file, the body, the link
 

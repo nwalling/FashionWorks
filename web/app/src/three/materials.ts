@@ -345,12 +345,13 @@ function hairMaterial(sub: Submaterial, textures: SurfaceTextures, siblings: rea
 }
 
 function hairCap(sub: Submaterial, mask: Texture | undefined, pigment: HairParams, kind: 'cap' | 'coat'): Material {
-  // A cap's `Diffuse` is black on every one in the archive -- the brows', the
-  // beard's, the scalps' -- and a coat's white: a cap is shadow on the skin,
-  // not hair colour. Drawn in the hair's colour, a white-dyed beard's cap
-  // painted the jaw grey; drawn black it is the dark base the game shows
-  // under a salt-and-pepper beard, and the dark of the brows.
-  const tint: [number, number, number] = sub.diffuse ? [sub.diffuse[0]!, sub.diffuse[1]!, sub.diffuse[2]!] : [1, 1, 1];
+  // A cap is the shade a head of hair gives the skin beneath it: the hair's
+  // flat colour -- the average of its strands, dyed and natural -- through
+  // the cap's density. Every cap's `Diffuse` is black, and drawn black a
+  // salt-and-pepper beard's base read brown, skin under black; the captures
+  // show it charcoal grey, which is exactly that average. So `Diffuse` is
+  // not read here. Checked on Ilucide (CHARACTER.md, against the captures).
+  const tint: [number, number, number] = [1, 1, 1];
   const material = new MeshStandardMaterial({
     name: sub.name,
     color: hairColour(pigment).multiply(new Color(tint[0], tint[1], tint[2])),
@@ -561,10 +562,13 @@ function densityMask(texture: Texture, kind: 'strands' | 'cap' | 'coat', density
     const v = strands && !alphaVaries ? Math.max(data[i * 4]!, data[i * 4 + 1]!) : data[i * 4 + channel]!;
     level[i] = v / 255;
   }
+  // A cap is read against its own peak, and its falloff lifted by
+  // `CAP_GAMMA`: the beard's reaches only halfway up the cheeks before
+  // fading, where the captures show the beard dense to the cheekbone.
   if (kind === 'cap') {
     let peak = 0;
     for (const v of level) peak = Math.max(peak, v);
-    if (peak > 0) for (let i = 0; i < texels; i += 1) level[i] = level[i]! / peak;
+    if (peak > 0) for (let i = 0; i < texels; i += 1) level[i] = (level[i]! / peak) ** CAP_GAMMA;
   }
   // A coat is short hair laid over the scalp, fine strands within a region.
   // Averaged down to the mip a head on screen samples, the region reads a
@@ -634,14 +638,21 @@ export function coverageScale(level: Float32Array, threshold: number, density = 
   const target = Math.min(0.95, (sum / level.length) * density);
   if (target <= 0) return 1;
   let passing = 0;
+  let lowest = 0;
   for (let b = 255; b > 0; b -= 1) {
     passing += bins[b]!;
+    if (bins[b]!) lowest = b;
     if (passing / level.length >= target) return Math.max(1, threshold / (b / 255));
   }
-  return 1;
+  // Fewer texels hold anything than the target asks: every one that does
+  // passes. Returning 1 here drew such a mask at its raw, thinnest coverage.
+  return lowest ? Math.max(1, threshold / (lowest / 255)) : 1;
 }
 
 const HAIR_ALPHA_TEST = 0.35;
+/** How far a cap's density is lifted toward full: chosen against the
+ * captures' beard. */
+const CAP_GAMMA = 0.5;
 /** The share of strands a dye reaches at a `DyeAmount` of one, and how bright
  * a dyed strand is against its dye colour. Neither is in the data; both are
  * calibrated on Ilucide's chin, the most-dyed part of his beard in the

@@ -65,4 +65,13 @@ describe('coverageScale', () => {
   it('never thins a mask', () => {
     expect(coverageScale(new Float32Array([1, 1, 0, 0]), 0.35)).toBe(1);
   });
+
+  it('passes every texel that holds anything when the target is out of reach', () => {
+    // A tenth of texels hold a faint 0.1; a target of half cannot be met, so
+    // all of them should pass rather than none.
+    const level = new Float32Array(100);
+    for (let i = 0; i < 10; i += 1) level[i] = 0.1;
+    const scale = coverageScale(level, 0.35, 50);
+    expect(level.filter((v) => v * scale >= 0.35).length).toBe(10);
+  });
 });
