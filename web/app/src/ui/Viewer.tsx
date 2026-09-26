@@ -231,6 +231,18 @@ export function Viewer({ tokens, onScene, className }: ViewerProps): JSX.Element
       gtao.updateGtaoMaterial({ radius: 0.12, distanceExponent: 1, thickness: 1, scale: 1, samples: 16 });
       gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 16 });
       gtao.blendIntensity = 0.9;
+      // GTAO draws depth and normals with one override material, which knows
+      // nothing of a cut-out: every hair card went in as a solid quad, and
+      // the skin round the strands took occlusion from quads nobody sees --
+      // a brown fringe under the beard and a darkened skin between strands.
+      // Hair stays out of that pass (`userData.noAo`); a cap is its occlusion.
+      const overrideVisibility = gtao.overrideVisibility.bind(gtao);
+      gtao.overrideVisibility = () => {
+        overrideVisibility();
+        scene.traverse((object) => {
+          if (object.userData.noAo) object.visible = false;
+        });
+      };
       composer.addPass(gtao);
       composer.addPass(new OutputPass());
       return { composer, gtao };

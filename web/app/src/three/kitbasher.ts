@@ -1512,8 +1512,14 @@ export class Kitbasher {
     // Hair cards shade as a volume round the head (`setHairVolume`).
     object.geometry.computeBoundingBox();
     const centre = object.geometry.boundingBox?.getCenter(new Vector3());
-    const occluded = object.geometry.hasAttribute('fwColor');
-    if (centre) for (const m of materials) setHairVolume(m, centre, occluded);
+    // A beard is drawn thicker, and only a beard shades by its baked
+    // occlusion: head hair carries far deeper occlusion and went 20% darker
+    // against the skin, further from the captures, which read it much
+    // lighter than we do.
+    const beard = /facialhair/i.test(meshPath) ? { occluded: object.geometry.hasAttribute('fwColor') } : null;
+    if (centre) for (const m of materials) setHairVolume(m, centre, beard);
+    // Hair is cut-outs, which the ambient occlusion pass cannot see (Viewer).
+    if (materials.some((m) => m.userData.hairPigment)) object.userData.noAo = true;
     // The figure skins four ways, renormalised, as the pipeline draws
     // everything. Eight ways folded the neck: the 86 head vertices that use
     // more than four bones -- Neck, Neck1, Spine3 plus a percent or three of

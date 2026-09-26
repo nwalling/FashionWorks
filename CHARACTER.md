@@ -444,10 +444,44 @@ were unread:
 Measured on the front view, in boxes under the lower lip and beside the mouth
 sized by the pupil distance: skin-like pixels 24.3% -> 23.2% (capture 5.6%),
 dark mass 33.1% -> 36.0% (37.6%). The skin that is left is one band directly
-under the lower lip, where the cards start lower than the captures' do -- a
-matter of where the geometry sits, not of shading. Head hair takes the same
-occlusion and reads 20% darker against the skin (0.136 -> 0.108), further
-from the captures' 0.356, whose brightness is mostly their overhead light.
+under the lower lip, where the cards start lower than the captures' do.
+Head hair took the same occlusion and read 20% darker against the skin (0.136
+-> 0.108), further from the captures' 0.356, so only a beard shades by it.
+
+**Then the patchiness, which had three causes, none of them missing hair.**
+Measured as strand-scale speckle -- the luminance band between a 1 px and a
+4 px blur, at 100 px between the pupils, over the region's median -- the
+capture reads 0.111 and we read 0.174.
+
+* **Each pixel drew one strand of several.** Strands are two or three texels
+  wide in the 2048 ID map, so at a portrait's distance a pixel spans several
+  and took whichever it landed on: near-white dyed or near-black natural. The
+  shader now blends toward the strands' average as the pixel's footprint
+  grows past a strand (`STRAND_TEXELS`); the map averages to an id of 0.50
+  and the dye draw is uniform, so that average is exact and a close view keeps
+  every strand. Speckle 0.174 -> 0.122.
+* **The grey was mostly the cap.** Coloured magenta, the cap showed through
+  nearly the whole beard, the strands a sparse layer of flecks over it.
+  Thicker strands made it worse only while the colour aliased; with the
+  averaging, a beard's cut-off of 0.15 (`BEARD_ALPHA_TEST`, head hair stays at
+  0.35) takes skin-like pixels from 22% to 6.3% against the capture's 5.6%
+  and fills the band under the lip, with speckle unchanged.
+* **The brown fringe under the jaw was GTAO**, not a shadow, the cap or the
+  strands: it stayed brown with the strands magenta, the cap magenta and the
+  beard's shadow off, and went only when the cards were hidden. GTAO draws
+  depth and normals with one override material that knows nothing of a
+  cut-out, so every card went in as a solid quad and the skin round it took
+  occlusion from quads nobody sees. Hair now stays out of that pass
+  (`userData.noAo`), which also lifts head hair from 0.141 to 0.160 against
+  the skin.
+
+Now: speckle 0.127 (capture 0.111), skin-like 9.7% (5.6%), the beard 0.56 of
+the skin's luminance (0.49). What is left is where the grey sits: the
+captures' jaw sides and underside are near-black with the grey on the chin and
+moustache, and ours is one even grey -- coarse variation 0.31 against 0.51.
+Part of that is their overhead light; whether the dye has a place of its own
+(`DyeFadeout` 0.074, or the vertex colour's red, which follows the cards' V)
+is not yet read.
 
 `coverageScale` gave up and returned no boost when a level held fewer
 non-empty texels than the target asked, drawing such a mask at its thinnest;

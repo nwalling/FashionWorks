@@ -2219,6 +2219,12 @@ viewer/src/
   light theme's text colour on the dark page. About 1.3:1, which reads as a
   disabled button rather than as a bug. Hangarworks itself never hits this,
   because `ThemeProvider` writes to `document.documentElement` and nothing else.
+- **GTAO cannot see a cut-out.** `GTAOPass` draws depth and normals with one
+  override material, so an alpha-tested hair card goes in as a solid quad and
+  the skin round it takes occlusion from geometry nobody sees -- a brown fringe
+  under a beard that no colour, cap or shadow test moves. Hair is kept out of
+  the pass by `userData.noAo` (`ui/Viewer.tsx`). Anything else drawn as
+  cut-outs needs the same.
 - **`ContactShadows` must not be offset upwards.** drei parents its depth camera
   to the component's own group, but the plane it runs the two blur passes
   through is a standalone mesh pinned at world y=0. Give the group a positive y

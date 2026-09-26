@@ -491,7 +491,18 @@ function hairCards(
           // Ilucide's hair.
           float draw = uDyeSoft + fract(id * 7.31 + 0.137) * (1.0 - 2.0 * uDyeSoft);
           float dyed = smoothstep(draw - uDyeSoft, draw + uDyeSoft, uDyeAmount);
-          diffuseColor.rgb = mix(natural, uDye, dyed);
+          // A pixel that spans several strands takes their average, not
+          // whichever one it lands on: strands are two or three texels wide
+          // in a 2048 map, and at a portrait's distance a pixel covers
+          // several, so each drew as a near-white or near-black speck -- a
+          // salt-and-pepper beard where the captures show a soft grey. The
+          // map's strands average to an id of 0.50 and take the dye in
+          // proportion to its amount, so the average is exact, and a close
+          // view keeps every strand.
+          vec2 texels = vec2(textureSize(uStrandId, 0));
+          float footprint = max(length(dFdx(vAlphaMapUv) * texels), length(dFdy(vAlphaMapUv) * texels)) / ${STRAND_TEXELS.toFixed(1)};
+          vec3 average = mix(mix(uHairLight, uHairDark, 0.5), uDye, uDyeAmount);
+          diffuseColor.rgb = mix(mix(natural, uDye, dyed), average, smoothstep(0.5, 2.0, footprint));
         }` : ''}`,
       )
       .replace(
@@ -686,6 +697,14 @@ export function coverageScale(level: Float32Array, threshold: number, density = 
 }
 
 const HAIR_ALPHA_TEST = 0.35;
+/** A beard's strands pass lower: at `HAIR_ALPHA_TEST` the cap showed between
+ * them and the grey of the beard was mostly the cap's. Chosen against the
+ * front capture: at 0.15 skin-like pixels in the beard are 6.3% against its
+ * 5.6%, where 0.35 left 22%. */
+const BEARD_ALPHA_TEST = 0.15;
+/** A strand's width in its ID map's texels: two to three between changes of
+ * id across the strands of `hair_texture_01_id`, measured. */
+const STRAND_TEXELS = 3;
 /** How far a cap's density is lifted toward full: chosen against the
  * captures' beard, whose chin reads 0.49 of the cheek skin's luminance and
  * ours 0.54 at 2. */
@@ -888,13 +907,16 @@ export function setIris(material: Material, colour: ArrayLike<number> | null): v
  * the material's own parameters; null restores them. */
 /** Point a hair card material's normals at the head: `centre` in the
  * mesh's own space, the middle of its bounds. */
-export function setHairVolume(material: Material, centre: Vector3, occluded = false): void {
+export function setHairVolume(material: Material, centre: Vector3, beard: { occluded: boolean } | null = null): void {
   const strands = material.userData.hairStrands as { uHairCentre: { value: Vector3 }; uHairSphere: { value: number } } | undefined;
   if (!strands) return;
   strands.uHairCentre.value.copy(centre);
   strands.uHairSphere.value = HAIR_SPHERE;
-  // The occlusion is in the mesh's vertex colour, so only a mesh that has
-  // one can shade by it.
+  // A beard is drawn thicker than head hair: its strands pass at
+  // `BEARD_ALPHA_TEST`, and it shades by the occlusion in its vertex colour
+  // where it has one.
+  if (beard) material.alphaTest = BEARD_ALPHA_TEST;
+  const occluded = Boolean(beard?.occluded);
   if (occluded !== Boolean(material.defines?.FW_HAIR_OCCLUSION)) {
     material.defines = { ...material.defines };
     if (occluded) material.defines.FW_HAIR_OCCLUSION = '';
