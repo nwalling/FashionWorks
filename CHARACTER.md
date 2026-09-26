@@ -405,12 +405,21 @@ moustache hiding the mouth's corners and a relaxed expression are the likely
 reasons. `landmarks.py`-style measurement was done in a scratch environment.
 
 Still off: the captures' hair carries a broader grey sheen than ours, most of
-it their bright overhead light; the head
-mesh's lower neck rim shows as two dark triangles either side of the collar,
-on the default face too; the beard's cap ends in a hard edge under the jaw;
+it their bright overhead light; the beard's cap ends in a hard edge under the jaw;
 and under the jaw the beard reads brown -- not its strands' colour, which a
 magenta test left untouched, but their shadow on the skin, which the
 captures' denser strands cover.
+
+**The neck flaps were eight-way skinning.** Two dark triangles stood out
+either side of the collar on every face and in every pose, the default face
+included. They are the head mesh's **86 vertices with more than four
+influences** -- Neck, Neck1 and Spine3, plus a percent or three of trapezius
+and shoulder. Skinned eight ways (`FW_SKIN8`) they fold outward; keeping the
+four heaviest, renormalised, puts them back where they were authored, with the
+rig at bind pose either way. The figure -- body, head, eyes -- now skins four
+ways, as the pipeline draws everything (`fourWays` in `kitbasher.ts`); rest,
+idle and raised are all clean. Why the eight-way path fails on these vertices
+is not known, and armour still takes it.
 
 `coverageScale` gave up and returned no boost when a level held fewer
 non-empty texels than the target asked, drawing such a mask at its thinnest;

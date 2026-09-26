@@ -16,6 +16,7 @@ import {
   type AmbientLight,
   Bone,
   Box3,
+  type BufferGeometry,
   Color,
   type DirectionalLight,
   Group,
@@ -1512,7 +1513,14 @@ export class Kitbasher {
     object.geometry.computeBoundingBox();
     const centre = object.geometry.boundingBox?.getCenter(new Vector3());
     if (centre) for (const m of materials) setHairVolume(m, centre);
-    eightWhereNeeded([object]);
+    // The figure skins four ways, renormalised, as the pipeline draws
+    // everything. Eight ways folded the neck: the 86 head vertices that use
+    // more than four bones -- Neck, Neck1, Spine3 plus a percent or three of
+    // trapezius and shoulder -- stood out of the body in two dark flaps either
+    // side of the collar, on every face and pose. Renormalised they sit
+    // where they were authored. Why eight fails here and not on armour is not
+    // yet known.
+    fourWays(object.geometry);
     decalsWhereNeeded([object]);
     object.name = meshPath.split('/').pop() ?? meshPath;
     shaded(object);
@@ -2858,4 +2866,19 @@ function materialsOf(loaded: Loaded): Material[] {
 /** An item's class name as a status line shows it: `hair_75`, `brows_002`. */
 function shortItemName(item: CharacterItem): string {
   return item.className;
+}
+
+/** Reduce a geometry to its first four influences, renormalised. */
+function fourWays(geometry: BufferGeometry): void {
+  if (!geometry.hasAttribute('skinIndex1')) return;
+  const weights = geometry.getAttribute('skinWeight');
+  for (let i = 0; i < weights.count; i += 1) {
+    const sum = weights.getX(i) + weights.getY(i) + weights.getZ(i) + weights.getW(i);
+    if (sum > 0 && Math.abs(sum - 1) > 1e-4) {
+      weights.setXYZW(i, weights.getX(i) / sum, weights.getY(i) / sum, weights.getZ(i) / sum, weights.getW(i) / sum);
+    }
+  }
+  weights.needsUpdate = true;
+  geometry.deleteAttribute('skinIndex1');
+  geometry.deleteAttribute('skinWeight1');
 }
