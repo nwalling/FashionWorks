@@ -492,7 +492,8 @@ it now passes every texel that holds anything.
 Close up the beard read as a near-black mass with hard, stair-stepped
 cut-out edges and chalky glints. CryEngine 5's public `Hair.cfx` -- the
 ancestor of HairPBR, whose own source is not public -- settled the lighting
-and the passes; `three/hair.ts` and `hairCards` carry them, for beards only.
+and the passes; `three/hair.ts` and `hairCards` carry them, for every mesh of
+hair cards but lashes (see the next section for head hair and brows).
 
 * **Lighting.** Two Kajiya-Kay lobes along the strand (`shadeLib.cfi`): a
   narrow white one at 4.5% reflectance, exponent 2^(10 gloss + 1) with gloss
@@ -529,6 +530,39 @@ cheek skin (capture 0.49), strand-scale speckle 0.139 (0.111), coarse
 variation 0.40 (0.51, from 0.31) -- the jaw sides now darker than the chin, as
 in game. Skin-like pixels read 13.8% against 9.7% before, nearly all of it the
 band under the lower lip, where the cards start lower than in game.
+
+### Head hair and brows, the same way (2026-09-26)
+
+The passes, lighting and root-to-tip coordinate now draw head hair and brows
+as well as the beard. Lashes are left out: they are too fine to gain from it,
+and their vertex red is 0 throughout. The red count holds elsewhere -- on all
+4,464 of `hair_75`'s cards and 99% of `brows_002`'s -- and a card that never
+counts sits mid-strand rather than reading as a root. Occlusion stays with the
+beard.
+
+**The chalky grey-white sheets on the nape and sides were the environment's
+mirror reflection.** Strand colour controlled them (magenta went pink-white),
+the key and rim lights did not, and turning the material's specular off took
+them away. The scene's environment runs at an intensity of 44, and three.js
+reflected it off the hair as a glossy mirror. CryEngine's hair takes no mirror
+reflection at all -- its ambient is a diffuse lookup -- so the environment now
+reaches these hairs through the same two lobes, as a light along the normal,
+scaled by `HAIR_ENV_SHEEN` (0.5, chosen: at 1 the back of the head and the
+moustache went white).
+
+**The lobes are normalised, (e + 2) / 2 pi.** CryEngine 5's unnormalised lobe
+at 4.5% is a pre-PBR convention and HairPBR is not that shader; unnormalised,
+with the mirror gone, the hair read 0.10 of the skin and the beard 0.34
+against the capture's 0.36 and 0.49. Normalised, the sheen falls where the
+captures show it -- across the crown and back, and grey on the moustache and
+chin with the jaw's sides dark.
+
+At the portrait distance against the front capture: beard 0.38 of the cheek
+skin (0.49), skin-like pixels in the beard 7.1% (5.6%), coarse variation 0.54
+(0.51). Hair above the forehead stays near 0.11 against the capture's 0.36
+in every setting tried; that gap is the old one, the captures' bright overhead
+light and a hair colour we read darker, and the lobes do not close it. Close
+up the moustache is now bright, near white where the capture shows grey-white.
 
 ### Phase 4: the file, the body, the link
 

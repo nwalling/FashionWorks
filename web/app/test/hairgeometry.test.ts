@@ -47,6 +47,13 @@ describe('strandCoordinate', () => {
     expect(strandCoordinate(geometry, 0, geometry.getIndex()!.count)).toBe(false);
     expect(geometry.hasAttribute('fwStrandT')).toBe(false);
   });
+  it('gives no coordinate to a mesh whose cards never count, as lashes', () => {
+    const geometry = cards();
+    const color = geometry.getAttribute('fwColor');
+    for (let v = 0; v < color.count; v += 1) color.setX(v, 0);
+    expect(strandCoordinate(geometry, 0, geometry.getIndex()!.count)).toBe(false);
+    expect(geometry.hasAttribute('fwStrandT')).toBe(false);
+  });
 });
 
 describe('sortInnerFirst', () => {

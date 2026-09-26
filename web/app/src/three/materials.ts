@@ -415,6 +415,7 @@ function hairCards(
     uHairShadow: { value: scalar(sub.params?.ShadowDensity, 1) },
     uHairExp1: { value: 2 ** (10 * gloss + 1) },
     uHairExp2: { value: 2 ** (10 * Math.max(gloss / HAIR_SECONDARY_WIDTH, 0.4) + 1) },
+    uHairEnvSheen: { value: HAIR_ENV_SHEEN },
   };
   // One mask serves both passes: red scaled so the cut-out keeps its
   // coverage down the mips, green the density as authored for the blend.
@@ -496,6 +497,7 @@ function hairCards(
           uniform float uHairShadow;
           uniform float uHairExp1;
           uniform float uHairExp2;
+          uniform float uHairEnvSheen;
           #ifdef FW_HAIR_OCCLUSION
             varying vec2 vHairOcclusion;
           #endif
@@ -511,7 +513,7 @@ function hairCards(
           float fwHairShift = 0.0;
           ${strandId ? 'uniform sampler2D uStrandId;' : ''}`,
         )
-        // CryEngine's hair lighting (`Hair.cfx`, `shadeLib.cfi`), for a beard:
+        // CryEngine's hair lighting (`Hair.cfx`, `shadeLib.cfi`):
         // two Kajiya-Kay lobes along the strand -- a narrow white one at the
         // hair's 4.5% reflectance, and a broader one tinted by the hair,
         // shifted along the normal -- over a wrapped diffuse. The strand is
@@ -522,9 +524,14 @@ function hairCards(
           '#include <lights_physical_pars_fragment>',
           `#include <lights_physical_pars_fragment>
           #if defined( FW_HAIR_KK ) && defined( USE_ANISOTROPY )
+            // Normalised, (e + 2) / 2 pi, as a PBR lobe is: CryEngine 5's
+            // unnormalised lobe at 4.5% is a pre-PBR convention, and HairPBR
+            // is not that shader. Unnormalised, with the mirror reflection
+            // gone, Ilucide's hair read 0.10 of his skin against the
+            // capture's 0.36.
             float fwKajiyaKay( const in vec3 T, const in vec3 H, const in float e ) {
               float d = dot( T, H );
-              return pow( sqrt( max( 1.0 - d * d, 0.01 ) ), e );
+              return pow( sqrt( max( 1.0 - d * d, 0.01 ) ), e ) * ( e + 2.0 ) * RECIPROCAL_PI * 0.5;
             }
             void RE_Direct_Hair( const in IncidentLight directLight, const in vec3 geometryPosition, const in vec3 geometryNormal, const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in PhysicalMaterial material, inout ReflectedLight reflectedLight ) {
               float dotNL = dot( geometryNormal, directLight.direction );
@@ -541,6 +548,26 @@ function hairCards(
             }
             #undef RE_Direct
             #define RE_Direct RE_Direct_Hair
+          #endif`,
+        )
+        // The environment's sheen through the same two lobes, the
+        // environment taken as light arriving along the normal. three.js
+        // reflects it as a glossy mirror, which at an environment intensity
+        // in the forties painted chalky grey-white sheets across the nape and
+        // sides; CryEngine's hair takes no mirror reflection at all, only its
+        // lobes and a diffuse ambient (`Hair.cfx`).
+        .replace(
+          '#include <lights_fragment_end>',
+          `#include <lights_fragment_end>
+          #if defined( FW_HAIR_KK ) && defined( USE_ANISOTROPY )
+          {
+            vec3 H = normalize( geometryNormal + geometryViewDir );
+            vec3 T1 = normalize( material.anisotropyT + fwHairShift * geometryNormal );
+            vec3 T2 = normalize( material.anisotropyT + ( fwHairShift + ${HAIR_SECONDARY_SHIFT.toFixed(3)} ) * geometryNormal );
+            vec3 lobes = ${HAIR_PRIMARY_REFLECTANCE.toFixed(4)} * fwKajiyaKay( T1, H, uHairExp1 )
+              + ${HAIR_SECONDARY_TINT.toFixed(3)} * material.diffuseColor * fwKajiyaKay( T2, H, uHairExp2 );
+            reflectedLight.indirectSpecular = lobes * iblIrradiance * RECIPROCAL_PI * uHairEnvSheen;
+          }
           #endif`,
         )
         // Each strand its own shade, and its own dye: the ID map is a random
@@ -813,12 +840,18 @@ const HAIR_DIFFUSE_WRAP = 0.5;
  * CryEngine takes it from the direction map by `ShiftVariation`, which
  * HairPBR does not declare; chosen. */
 const HAIR_SHIFT_JITTER = 0.3;
+/** How much of the lobes' peak the environment lends: taken as one light
+ * along the normal it is spread over the whole sky, and at full strength it
+ * turned the back of the head and the moustache white. Chosen against the
+ * captures: at 0.5 the crown and back carry the grey sheen they show, the
+ * moustache and chin grey, the jaw's sides dark. */
+const HAIR_ENV_SHEEN = 0.5;
 /** The blended pass: clipped below 5%, as CryEngine's, and its density
  * lifted as `AlphaBlendMultiplier` lifts it there. Chosen. */
 const HAIR_FRINGE_CLIP = 0.05;
 const HAIR_FRINGE_GAIN = 1.5;
-/** A beard's cut-out, now that a blended pass carries what it leaves. */
-const BEARD_CUT = 0.5;
+/** The cut-out, where a blended pass carries what it leaves. */
+const HAIR_CUT = 0.5;
 /** Root to tip: the shade at each end, and how much of the tip fades from
  * where. Chosen. */
 const HAIR_ROOT_SHADE = 0.7;
@@ -1033,21 +1066,21 @@ export function setIris(material: Material, colour: ArrayLike<number> | null): v
 export function setHairVolume(
   material: Material,
   centre: Vector3,
-  beard: { occluded: boolean; rootToTip: boolean } | null = null,
+  style: HairStyle | null = null,
 ): void {
   const strands = material.userData.hairStrands as { uHairCentre: { value: Vector3 }; uHairSphere: { value: number } } | undefined;
   if (!strands) return;
   strands.uHairCentre.value.copy(centre);
   strands.uHairSphere.value = HAIR_SPHERE;
-  // A beard is drawn as CryEngine draws hair: its own lighting, a cut-out at
-  // `BEARD_CUT` with a blended pass for the rest, shading by the occlusion in
-  // its vertex colour and along its strands where the mesh carries them.
+  // Hair drawn as CryEngine draws it: its own lighting, a cut-out at
+  // `HAIR_CUT` with a blended pass for the rest, shading along its strands
+  // where the mesh carries them, and by its baked occlusion where asked.
   const fringe = 'FW_HAIR_FRINGE' in (material.defines ?? {});
-  if (beard && !fringe) material.alphaTest = BEARD_CUT;
+  if (style?.passes && !fringe) material.alphaTest = HAIR_CUT;
   const want: Record<string, boolean> = {
-    FW_HAIR_KK: Boolean(beard),
-    FW_HAIR_OCCLUSION: Boolean(beard?.occluded),
-    FW_HAIR_ROOT: Boolean(beard?.rootToTip),
+    FW_HAIR_KK: Boolean(style?.passes),
+    FW_HAIR_OCCLUSION: Boolean(style?.occluded),
+    FW_HAIR_ROOT: Boolean(style?.rootToTip),
   };
   const defines = { ...material.defines };
   let changed = false;
@@ -1061,6 +1094,14 @@ export function setHairVolume(
     material.defines = defines;
     material.needsUpdate = true;
   }
+}
+
+/** How a mesh of hair cards is drawn: with CryEngine's lighting and passes,
+ * by its baked occlusion, and shaded along its strands. */
+export interface HairStyle {
+  passes: boolean;
+  occluded: boolean;
+  rootToTip: boolean;
 }
 
 export function setHairLooks(material: Material, looks: Record<string, number | Float32Array> | null): void {

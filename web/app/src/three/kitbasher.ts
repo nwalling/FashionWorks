@@ -84,6 +84,7 @@ import {
   plainMaterial,
   setHairLooks,
   setHairVolume,
+  type HairStyle,
   setIris,
   setSkinTone,
   surfaceMaterial,
@@ -1521,14 +1522,15 @@ export class Kitbasher {
     // where they were authored. Why eight fails here and not on armour is not
     // yet known.
     fourWays(object.geometry);
-    // A beard is drawn as CryEngine draws hair (`three/hair.ts`): its cards
+    // Hair is drawn as CryEngine draws it (`three/hair.ts`): its cards
     // ordered innermost first and carried root to tip, a cut-out and then a
-    // blended pass for the rest. Only a beard shades by its baked occlusion:
-    // head hair carries far deeper occlusion and went 20% darker against the
-    // skin, further from the captures, which read it much lighter than we do.
+    // blended pass for the rest. Lashes are too fine to gain from it and carry
+    // no root-to-tip count. Only a beard shades by its baked occlusion: head
+    // hair carries far deeper occlusion and went 20% darker against the skin,
+    // further from the captures, which read it much lighter than we do.
     const fringes = new Map<number, Material>();
-    let beard: { occluded: boolean; rootToTip: boolean } | null = null;
-    if (/facialhair/i.test(meshPath)) {
+    let style: HairStyle | null = null;
+    if (!/lashes/i.test(meshPath) && materials.some((m) => m.userData.hairFringe)) {
       let rootToTip = false;
       for (const group of object.geometry.groups) {
         const index = group.materialIndex ?? 0;
@@ -1538,10 +1540,11 @@ export class Kitbasher {
         if (centre) sortInnerFirst(object.geometry, group.start, group.count, centre);
         if (!fringes.has(index)) fringes.set(index, make());
       }
-      beard = { occluded: object.geometry.hasAttribute('fwColor'), rootToTip };
+      const beard = /facialhair/i.test(meshPath);
+      style = { passes: true, occluded: beard && object.geometry.hasAttribute('fwColor'), rootToTip };
     }
     const all = [...materials, ...fringes.values()];
-    if (centre) for (const m of all) setHairVolume(m, centre, beard);
+    if (centre) for (const m of all) setHairVolume(m, centre, style);
     // Hair is cut-outs, which the ambient occlusion pass cannot see (Viewer).
     if (materials.some((m) => m.userData.hairPigment)) object.userData.noAo = true;
     decalsWhereNeeded([object]);

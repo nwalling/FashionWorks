@@ -14,7 +14,8 @@ import { BufferAttribute, BufferGeometry, type Material, SkinnedMesh, type Vecto
  * A hair mesh's vertex colour red is the vertex's step along its card: every
  * card of the beard starts at 0 where it leaves the skin and counts up to its
  * tip, in whole steps of about 2 mm -- ordered exactly as the card's V on all
- * 3,028 cards, its peak tracking the card's length. So the position along a
+ * 3,028 cards, its peak tracking the card's length. `hair_75` holds it on all
+ * 4,464 cards and `brows_002` on 99%; lashes carry 0 throughout. So the position along a
  * strand is red over the peak of the card it belongs to, a card being the
  * triangles that share vertices. */
 export function strandCoordinate(geometry: BufferGeometry, start: number, count: number): boolean {
@@ -52,11 +53,17 @@ export function strandCoordinate(geometry: BufferGeometry, start: number, count:
     const root = find(v);
     peak[root] = Math.max(peak[root]!, step(v));
   }
+  // A card that never counts -- lashes carry 0 throughout -- has no root or
+  // tip to speak of, and sits mid-strand: neither shaded as a root nor faded
+  // as a tip. A mesh with no counting card at all gets no coordinate.
+  let counts = false;
   const t = new Float32Array(vertices);
   for (let v = 0; v < vertices; v += 1) {
     const top = used[v] ? peak[find(v)]! : 0;
-    t[v] = top > 0 ? step(v) / top : 0;
+    if (top > 0) counts = true;
+    t[v] = top > 0 ? step(v) / top : 0.5;
   }
+  if (!counts) return false;
   geometry.setAttribute('fwStrandT', new BufferAttribute(t, 1));
   return true;
 }
