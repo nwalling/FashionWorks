@@ -13,10 +13,14 @@
 import { ArchiveClient, coreUrl, readCatalogue } from './dist/fashionworks.js';
 
 const log = document.getElementById('log')!;
-const lines: string[] = [];
+// Built as nodes, not markup: a line can carry an error message from the
+// worker, which quotes archive content.
 const say = (line: string, cls = '') => {
-  lines.push(cls ? `<span class="${cls}">${line}</span>` : line);
-  log.innerHTML = lines.join('\n');
+  if (log.childNodes.length) log.append('\n');
+  const span = document.createElement('span');
+  if (cls) span.className = cls;
+  span.textContent = line;
+  log.append(span);
 };
 
 async function main(): Promise<void> {

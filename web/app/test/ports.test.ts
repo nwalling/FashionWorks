@@ -189,6 +189,13 @@ describe('the share string, version 2', () => {
     expect(decodeGear('heavy', catalogue).carrying).toEqual([]);
   });
 
+  it('bounds what a hostile link can ask for', () => {
+    // Every id is an equip and a composite, so repeats must not multiply them.
+    const flood = [Array(10_000).fill('heavy').join(','), ...Array(10_000).fill('wep_stocked_2=p4ar')].join(';');
+    expect(decodeLoadout(flood, catalogue).map((i) => i.id)).toEqual(['heavy']);
+    expect(decodeGear(flood, catalogue).carrying.length).toBeLessThanOrEqual(64);
+  });
+
   it('carries clothing in the same segment, with no marker needed', () => {
     // A slot belongs to one outfit, so the ids alone say which is on.
     const shirt = { ...armour('tee', 'shirt', []), outfit: 'clothing' as const };

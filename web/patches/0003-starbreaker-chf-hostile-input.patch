@@ -1,0 +1,178 @@
+diff --git a/crates/starbreaker-chf/src/container.rs b/crates/starbreaker-chf/src/container.rs
+index 644607f..c537ecf 100644
+--- a/crates/starbreaker-chf/src/container.rs
++++ b/crates/starbreaker-chf/src/container.rs
+@@ -7,6 +7,8 @@ use starbreaker_common::{ParseError, SpanReader};
+ const CHF_SIZE: usize = 4096;
+ const MAGIC: u16 = 0x4242;
+ const MODDED_MARKER: &[u8; 8] = b"diogotr7";
++/// Ceiling on the inflated payload. Real characters are a few KB.
++const MAX_DECOMPRESSED: usize = 256 * 1024;
+ 
+ /// A CHF container file. Always exactly 4096 bytes on disk.
+ ///
+@@ -58,13 +60,31 @@ impl ChfFile {
+         }
+ 
+         // Decompress zstd data
+-        let compressed = &bytes[16..16 + compressed_size];
+-        let mut decoder = ruzstd::decoding::StreamingDecoder::new(std::io::Cursor::new(compressed))
++        // The size comes from the file, so it is checked against the container
++        // rather than trusted: slicing with it unchecked panicked on any value
++        // past the 4,096-byte payload.
++        let compressed = bytes
++            .get(16..CHF_SIZE)
++            .and_then(|payload| payload.get(..compressed_size))
++            .ok_or_else(|| {
++                ChfError::InvalidContainer(format!(
++                    "compressed size {compressed_size} exceeds the container"
++                ))
++            })?;
++        let decoder = ruzstd::decoding::StreamingDecoder::new(std::io::Cursor::new(compressed))
+             .map_err(|e| ChfError::Compression(e.to_string()))?;
++        // A real character inflates to a few KB. Cap the output so a crafted
++        // stream cannot inflate 4 KB into hundreds of MB.
+         let mut data = Vec::new();
+         decoder
++            .take(MAX_DECOMPRESSED as u64 + 1)
+             .read_to_end(&mut data)
+             .map_err(|e| ChfError::Compression(e.to_string()))?;
++        if data.len() > MAX_DECOMPRESSED {
++            return Err(ChfError::InvalidContainer(format!(
++                "decompressed data exceeds {MAX_DECOMPRESSED} bytes"
++            )));
++        }
+ 
+         // Check modded marker at last 8 bytes
+         let tail = &bytes[CHF_SIZE - 8..CHF_SIZE];
+diff --git a/crates/starbreaker-chf/src/itemport.rs b/crates/starbreaker-chf/src/itemport.rs
+index 024a132..f8f4d82 100644
+--- a/crates/starbreaker-chf/src/itemport.rs
++++ b/crates/starbreaker-chf/src/itemport.rs
+@@ -3,6 +3,9 @@ use starbreaker_common::{CigGuid, NameHash, ParseError, SpanReader, SpanWriter};
+ 
+ use crate::read_helpers::{read_guid, read_name_hash};
+ 
++/// Deepest item-port nesting accepted from a file.
++const MAX_DEPTH: usize = 32;
++
+ /// A recursive item port tree node representing equipped items.
+ ///
+ /// Game field names: `"portID"` (name hash), `"itemGUID"`, `"childCount"`.
+@@ -25,14 +28,27 @@ pub struct ItemPort {
+ impl ItemPort {
+     /// Read an ItemPort (and its children recursively) from the reader.
+     pub fn read(reader: &mut SpanReader) -> Result<Self, ParseError> {
++        Self::read_at_depth(reader, 0)
++    }
++
++    /// The counts come from the file, so neither the capacity nor the nesting
++    /// is trusted: a crafted tree could ask for a multi-gigabyte `Vec` or
++    /// recurse until the stack runs out. A real loadout is a few levels deep.
++    fn read_at_depth(reader: &mut SpanReader, depth: usize) -> Result<Self, ParseError> {
++        if depth > MAX_DEPTH {
++            return Err(ParseError::Validation {
++                context: "ItemPort".into(),
++                message: format!("nesting deeper than {MAX_DEPTH}"),
++            });
++        }
+         let name = read_name_hash(reader)?;
+         let id = read_guid(reader)?;
+         let child_count = reader.read_u32()?;
+         let tail_count = reader.read_u32()?;
+ 
+-        let mut children = Vec::with_capacity(child_count as usize);
++        let mut children = Vec::with_capacity((child_count as usize).min(reader.remaining()));
+         for _ in 0..child_count {
+-            children.push(ItemPort::read(reader)?);
++            children.push(ItemPort::read_at_depth(reader, depth + 1)?);
+         }
+ 
+         Ok(ItemPort {
+diff --git a/crates/starbreaker-chf/src/material.rs b/crates/starbreaker-chf/src/material.rs
+index 2319dc7..1d581fc 100644
+--- a/crates/starbreaker-chf/src/material.rs
++++ b/crates/starbreaker-chf/src/material.rs
+@@ -107,19 +107,19 @@ impl SubMaterial {
+         let name = read_name_hash(reader)?;
+ 
+         let texture_count = reader.read_u32()? as usize;
+-        let mut textures = Vec::with_capacity(texture_count);
++        let mut textures = Vec::with_capacity(texture_count.min(reader.remaining()));
+         for _ in 0..texture_count {
+             textures.push(Texture::read(reader)?);
+         }
+ 
+         let param_count = reader.read_u64()? as usize;
+-        let mut material_params = Vec::with_capacity(param_count);
++        let mut material_params = Vec::with_capacity(param_count.min(reader.remaining()));
+         for _ in 0..param_count {
+             material_params.push(MaterialParam::<f32>::read(reader)?);
+         }
+ 
+         let color_count = reader.read_u64()? as usize;
+-        let mut material_colors = Vec::with_capacity(color_count);
++        let mut material_colors = Vec::with_capacity(color_count.min(reader.remaining()));
+         for _ in 0..color_count {
+             material_colors.push(MaterialParam::<ColorRgba>::read(reader)?);
+         }
+@@ -185,7 +185,7 @@ impl MaterialDefinition {
+         // See chf_data.rs for full documentation.
+         expect_u32(reader, 5)?;
+ 
+-        let mut sub_materials = Vec::with_capacity(sub_material_count);
++        let mut sub_materials = Vec::with_capacity(sub_material_count.min(reader.remaining()));
+         for i in 0..sub_material_count {
+             sub_materials.push(SubMaterial::read(reader)?);
+ 
+diff --git a/crates/starbreaker-chf/tests/hostile_test.rs b/crates/starbreaker-chf/tests/hostile_test.rs
+new file mode 100644
+index 0000000..d316bac
+--- /dev/null
++++ b/crates/starbreaker-chf/tests/hostile_test.rs
+@@ -0,0 +1,45 @@
++//! A `.chf` is a file people share, so a malformed one must be an error, not
++//! a panic: under `panic = "abort"` a panic kills the whole WebAssembly worker.
++
++use starbreaker_chf::{ChfFile, ItemPort};
++use starbreaker_common::SpanReader;
++
++/// A 4,096-byte container with a valid header and CRC over `payload`.
++fn container(compressed_size: u32, payload: &[u8]) -> Vec<u8> {
++    let mut bytes = vec![0u8; 4096];
++    bytes[0..2].copy_from_slice(&0x4242u16.to_le_bytes());
++    bytes[8..12].copy_from_slice(&compressed_size.to_le_bytes());
++    bytes[16..16 + payload.len()].copy_from_slice(payload);
++    let crc = crc32c::crc32c(&bytes[16..4096]);
++    bytes[4..8].copy_from_slice(&crc.to_le_bytes());
++    bytes
++}
++
++#[test]
++fn compressed_size_past_the_container_is_an_error() {
++    for size in [4081, 10_000, u32::MAX] {
++        assert!(ChfFile::from_chf(&container(size, &[])).is_err(), "size {size}");
++    }
++}
++
++/// One item-port node: name hash, GUID, child count, tail count.
++fn node(children: u32) -> Vec<u8> {
++    let mut out = vec![0u8; 4 + 16];
++    out.extend_from_slice(&children.to_le_bytes());
++    out.extend_from_slice(&0u32.to_le_bytes());
++    out
++}
++
++#[test]
++fn a_huge_child_count_is_an_error_not_an_allocation() {
++    let bytes = node(u32::MAX);
++    let mut reader = SpanReader::new(&bytes);
++    assert!(ItemPort::read(&mut reader).is_err());
++}
++
++#[test]
++fn nesting_past_the_limit_is_an_error_not_a_stack_overflow() {
++    let bytes: Vec<u8> = (0..100_000).flat_map(|_| node(1)).collect();
++    let mut reader = SpanReader::new(&bytes);
++    assert!(ItemPort::read(&mut reader).is_err());
++}

@@ -195,9 +195,11 @@ async function run(golden) {
     `within ${TOLERANCE} sRGB units        ${agree} of ${checked}  (${pct(agree)})`,
   ].join('\n'));
 
+  // Names come from whatever JSON `?golden=` pointed at, so they are text.
+  const escape = (text) => String(text).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
   rows.innerHTML = '<tr><th>submaterial</th><th>shader</th><th>bake</th><th>off</th></tr>'
     + bad.sort((a, b) => b.off - a.off).slice(0, 20).map(({ row, got, off }) =>
-      `<tr class="bad"><td>${row.name ?? ''} / ${row.sub}</td>`
+      `<tr class="bad"><td>${escape(`${row.name ?? ''} / ${row.sub}`)}</td>`
       + `<td>${got.map((v) => v.toFixed(1)).join(' ')}</td>`
       + `<td>${row.baked_mean.map((v) => v.toFixed(1)).join(' ')}</td>`
       + `<td>${off.toFixed(1)}</td></tr>`).join('');

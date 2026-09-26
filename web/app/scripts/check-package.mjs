@@ -79,12 +79,26 @@ check(
     + 'fetch rejects with "Failed to parse URL" and the archive hangs',
 );
 
-/** The inlined worker, decoded. Vite emits it as one long base64 literal. */
-const inlined = bundle.match(/=\s*"([A-Za-z0-9+/=]{5000,})"/);
-check('a worker is inlined in the bundle', Boolean(inlined), 'no base64 worker literal found');
+/** The inlined worker, decoded.
+ *
+ * Vite 5 emitted it as one long base64 literal; Vite 6 emits the source as a
+ * template literal handed to `new Blob([...])`. Either is an inlined worker. */
+function inlinedWorker() {
+  const base64 = bundle.match(/=\s*"([A-Za-z0-9+/=]{5000,})"/);
+  if (base64) return Buffer.from(base64[1], 'base64').toString('utf8');
+  const blob = bundle.match(/new Blob\(\["URL\.revokeObjectURL\(import\.meta\.url\);",\s*([\w$]+)\]/);
+  if (!blob) return null;
+  const start = bundle.indexOf(`${blob[1]} = \``);
+  if (start < 0) return null;
+  let end = start + blob[1].length + 4;
+  while (end < bundle.length && !(bundle[end] === '`' && bundle[end - 1] !== '\\')) end += 1;
+  const source = bundle.slice(start + blob[1].length + 4, end);
+  return source.length > 5000 ? source : null;
+}
+const worker = inlinedWorker();
+check('a worker is inlined in the bundle', Boolean(worker), 'no inlined worker source found');
 
-if (inlined) {
-  const worker = Buffer.from(inlined[1], 'base64').toString('utf8');
+if (worker) {
 
   check(
     'the inlined worker is the archive worker',

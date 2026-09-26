@@ -496,12 +496,21 @@ export function encodeLoadout(
   return parts.join(';');
 }
 
+/** Most gear a link may hang on the body. Twenty is a full belt; the rest is
+ * headroom for ports that do not exist yet. */
+const MAX_LINK_GEAR = 64;
+
+/** A shared link is somebody else's string, and every id in it costs an equip
+ * and a composite. So a link asks for at most one piece per slot, each id
+ * once, which is all `encodeLoadout` ever writes -- a fragment repeating one
+ * id ten thousand times would otherwise re-composite it ten thousand times. */
 export function decodeLoadout(encoded: string, catalogue: Catalogue): CatalogueItem[] {
   if (!encoded) return [];
   const byId = new Map(catalogue.items.map((i) => [i.id, i]));
-  return (encoded.split(';')[0] ?? '')
-    .split(',')
-    .map((id) => byId.get(id.trim()))
+  const ids = new Set((encoded.split(';')[0] ?? '').split(',').map((id) => id.trim()));
+  return [...ids]
+    .slice(0, SLOTS.length + CLOTHING_SLOTS.length)
+    .map((id) => byId.get(id))
     .filter((item): item is CatalogueItem => Boolean(item));
 }
 
@@ -513,7 +522,7 @@ export function decodeGear(
   const byId = new Map(catalogue.gear.map((i) => [i.id, i]));
   const carrying: Array<{ port: string; item: CatalogueItem }> = [];
   let holding: string | null = null;
-  for (const part of encoded.split(';').slice(1)) {
+  for (const part of encoded.split(';').slice(1, 1 + MAX_LINK_GEAR)) {
     const [key, value] = part.split('=');
     if (!key || !value) continue;
     if (key === 'hold') {
