@@ -49,6 +49,13 @@ function archiveRange(): Plugin {
         }
         const start = Number(range[1]);
         const end = Math.min(range[2] ? Number(range[2]) : size - 1, size - 1);
+        // An inverted or out-of-file range would otherwise go out with a
+        // negative content-length.
+        if (start > end) {
+          response.writeHead(416, { 'content-range': `bytes */${size}` });
+          response.end();
+          return;
+        }
         response.writeHead(206, {
           'content-type': 'application/octet-stream',
           'content-range': `bytes ${start}-${end}/${size}`,
