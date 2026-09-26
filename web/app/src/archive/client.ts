@@ -55,6 +55,20 @@ export function coreUrl(): string {
   return typeof location === 'undefined' ? resolved : new URL(resolved, location.href).href;
 }
 
+/** A promise awaited only after another one: marked handled now, so that when
+ * the first rejects and the second never gets awaited, its rejection is not
+ * reported as unhandled. It still rejects for whoever does await it.
+ *
+ * Opening registers the catalogue's waiter before the index's is awaited, and
+ * a rejected archive fails both. Unmarked, dropping a file that is not an
+ * archive threw an uncaught "end of central directory record not found"
+ * alongside the rejection the page handled -- which Hangarworks's archive test
+ * caught on 0.9.0 and 0.10.0. */
+function handled<T>(promise: Promise<T>): Promise<T> {
+  promise.catch(() => {});
+  return promise;
+}
+
 export type Progress = Extract<FromWorker, { type: 'progress' }>;
 export type Indexed = Extract<FromWorker, { type: 'indexed' }>;
 export type Catalogue = Extract<FromWorker, { type: 'catalogue' }>;
@@ -182,7 +196,7 @@ export class ArchiveClient {
   ): Promise<OpenResult> {
     this.ensure();
     const indexed = this.expect('indexed');
-    const catalogue = this.expect('catalogue');
+    const catalogue = handled(this.expect('catalogue'));
     this.relayProgress(handlers.onProgress);
     this.send({ type: 'open', file, skeleton, catalogue: true, coreUrl: coreUrl() });
 
@@ -214,7 +228,7 @@ export class ArchiveClient {
   ): Promise<OpenResult> {
     this.ensure();
     const indexed = this.expect('indexed');
-    const catalogue = this.expect('catalogue');
+    const catalogue = handled(this.expect('catalogue'));
     this.relayProgress(handlers.onProgress);
     this.send({
       type: 'open-url',
