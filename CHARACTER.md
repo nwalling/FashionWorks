@@ -394,6 +394,16 @@ from matching angles, measured as ratios against the skin in the same image
   capture's hair is a dark ash-brown near 7% of the skin's luminance, which
   `hair_75`'s pigment already gives; the darkness was lighting, not colour.
 
+**The face shape matches.** MediaPipe landmarks on the front capture and the
+front render, normalised by the distance between the pupils: face width at
+the cheeks 2.236 against 2.223, jaw 1.768 against 1.805, eyes to chin 1.899
+against 1.854, eyes to mouth 1.209 against 1.205. The fuller look of the
+captures is the beard and the light. What differs is local -- mouth width
+0.89 against 0.78, eye width 0.47 against 0.42, lip height 0.36 against
+0.29 -- and it is not the mask smoothing (with none, the mouth is 0.782); the
+moustache hiding the mouth's corners and a relaxed expression are the likely
+reasons. `landmarks.py`-style measurement was done in a scratch environment.
+
 Still off: the captures' hair carries a broader grey sheen than ours, most of
 it their bright overhead light; the head
 mesh's lower neck rim shows as two dark triangles either side of the collar,
