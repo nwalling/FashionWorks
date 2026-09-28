@@ -11,7 +11,7 @@
 
 import { createServer } from 'node:http';
 import { createReadStream, statSync } from 'node:fs';
-import { extname, join, normalize, resolve } from 'node:path';
+import { extname, join, normalize, resolve, sep } from 'node:path';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 const PORT = Number(process.argv[2] ?? 8777);
@@ -27,12 +27,24 @@ const TYPES = {
   '.glb': 'model/gltf-binary',
 };
 
+// Binding to 127.0.0.1 keeps other machines out, but not other web pages: a
+// site that rebinds its own hostname to 127.0.0.1 can read anything served
+// here, and this serves the whole repository plus extracted game data. So the
+// Host header must name this machine.
+const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]']);
+
 createServer((request, response) => {
+  const host = (request.headers.host ?? '').replace(/:\d+$/, '');
+  if (!LOCAL_HOSTS.has(host)) {
+    response.writeHead(403).end('localhost only');
+    return;
+  }
   const url = new URL(request.url, 'http://localhost');
   const relative = decodeURIComponent(url.pathname).replace(/^\/+/, '');
-  // Everything served must resolve inside the repo, even after `..`.
+  // Everything served must resolve inside the repo, even after `..`. A bare
+  // prefix test would also admit a sibling such as `StarFashion-old/`.
   const path = normalize(join(ROOT, relative));
-  if (!path.startsWith(ROOT)) {
+  if (path !== ROOT && !path.startsWith(ROOT + sep)) {
     response.writeHead(403).end('outside the repository');
     return;
   }
