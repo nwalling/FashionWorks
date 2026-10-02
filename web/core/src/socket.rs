@@ -134,14 +134,62 @@ pub fn mount(locator: &Transform) -> Transform {
     invert(locator)
 }
 
+fn local(m: &Transform) -> Transform {
+    if m.iter().all(|row| row.iter().all(|v| *v == 0.0)) {
+        IDENTITY
+    } else {
+        *m
+    }
+}
+
+/// Each node's transform composed with its ancestors', parents first.
+pub fn compose(nodes: &mut [nmc::NmcNode]) {
+    let locals: Vec<Transform> = nodes.iter().map(|n| local(&n.bone_to_world)).collect();
+    let parents: Vec<Option<usize>> = nodes
+        .iter()
+        .map(|n| n.parent_index.map(usize::from).filter(|p| *p < nodes.len()))
+        .collect();
+    let mut world: Vec<Option<Transform>> = vec![None; nodes.len()];
+    fn resolve(i: usize, locals: &[Transform], parents: &[Option<usize>], world: &mut [Option<Transform>], depth: usize) -> Transform {
+        if let Some(m) = world[i] {
+            return m;
+        }
+        // A malformed parent cycle stops at the node itself.
+        let m = match parents[i] {
+            Some(p) if p != i && depth < 64 => multiply(&resolve(p, locals, parents, world, depth + 1), &locals[i]),
+            _ => locals[i],
+        };
+        world[i] = Some(m);
+        m
+    }
+    for i in 0..nodes.len() {
+        let m = resolve(i, &locals, &parents, &mut world, 0);
+        if parents[i].is_some() {
+            nodes[i].bone_to_world = m;
+            nodes[i].world_to_bone = invert(&m);
+        }
+    }
+}
+
 /// Every node of a prop, with the mesh nodes and helpers separated.
 pub struct Prop {
     pub nodes: Vec<nmc::NmcNode>,
 }
 
 impl Prop {
+    /// The prop's nodes, each with its transform **in the prop's own space**.
+    ///
+    /// A node's `bone_to_world` is relative to its parent node: StarBreaker's
+    /// assembler parents each node's object to its parent's and applies the
+    /// matrix as a local transform. Every node read so far was a child of the
+    /// root, where the two agree, so it was used as is. A ship gun's barrel is
+    /// not: the Tigerstrike T-19P's hangs off its housing (housing z 0.317,
+    /// barrel z 0.086 relative to it) and came out 32 cm low. Composing here
+    /// gives every reader -- placement, helpers, mounts, grips -- the world
+    /// transform. A zero matrix is the identity, as StarBreaker reads it.
     pub fn parse(cga: &[u8]) -> Option<Prop> {
-        let (nodes, _) = nmc::parse_nmc_full(cga)?;
+        let (mut nodes, _) = nmc::parse_nmc_full(cga)?;
+        compose(&mut nodes);
         Some(Prop { nodes })
     }
 
@@ -162,6 +210,19 @@ impl Prop {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_child_node_is_placed_through_its_parent() {
+        // The Tigerstrike: barrel (1) under housing (0) under the root (2).
+        let mut nodes = vec![node("Housing", 0, [0.0, -0.029, 0.317]), node("Barrel", 0, [0.0, 0.740, 0.086]), node("root", 3, [0.0; 3])];
+        nodes[0].parent_index = Some(2);
+        nodes[1].parent_index = Some(0);
+        compose(&mut nodes);
+        let barrel = nodes[1].bone_to_world;
+        assert!((barrel[1][3] - 0.711).abs() < 1e-4 && (barrel[2][3] - 0.403).abs() < 1e-4, "{barrel:?}");
+        // A child of an identity root is unchanged.
+        assert!((nodes[0].bone_to_world[2][3] - 0.317).abs() < 1e-6);
+    }
 
     fn node(name: &str, geometry_type: u16, t: [f32; 3]) -> nmc::NmcNode {
         let mut m = IDENTITY;

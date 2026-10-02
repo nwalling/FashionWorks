@@ -571,6 +571,19 @@ const NORMAL = /* glsl */ `
   normal = normalize( tbn * mapN );
 `;
 
+/** A 1x1 stand-in to bind where a surface has no control map at all -- a
+ * HardSurface ship part, which is its primary layer and nothing else. It only
+ * gives the shader its UVs and tangent frame; every `fwHas*` flag stays false. */
+let flat: DataTexture | null = null;
+function flatControl(): DataTexture {
+  if (!flat) {
+    flat = new DataTexture(new Uint8Array([128, 128, 255, 255]) as Uint8Array<ArrayBuffer>, 1, 1);
+    flat.needsUpdate = true;
+    flat.userData.shared = true;
+  }
+  return flat;
+}
+
 /** Build every LayerBlend submaterial of a piece as a live material. */
 export async function liveSurfaces(
   material: MaterialPayload,
@@ -600,7 +613,11 @@ export async function liveSurfaces(
     out.name = sub.name;
     // The normal map binding is what gives the shader its UVs and tangent
     // frame; the maps it actually samples are the uniforms below.
-    out.normalMap = b ?? a ?? c;
+    // Only a HardSurface ship part, which is its primary layer and has no
+    // control map by design, gets the flat stand-in. A LayerBlend surface whose
+    // maps are missing still falls back to the bake: drawn live with no maps,
+    // gear surfaces (the HDGW rifle's magazine, the APAR knife's blade) vanished.
+    out.normalMap = b ?? a ?? c ?? (sub.shader.toLowerCase() === "hardsurface" ? flatControl() : null);
     out.normalScale = new Vector2(1, 1);
     if (!out.normalMap) continue;
     if (sub.glow > 0) {

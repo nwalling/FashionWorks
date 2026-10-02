@@ -177,7 +177,8 @@ pub struct SubMaterial {
 
 impl SubMaterial {
     pub fn tintable(&self) -> bool {
-        self.shader.to_ascii_lowercase().contains("layerblend")
+        let shader = self.shader.to_ascii_lowercase();
+        shader.contains("layerblend") || (shader == "hardsurface" && !self.base_layers.is_empty())
     }
 
     /// The wear layer paired with each base layer, by trailing slot number.
@@ -256,8 +257,19 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<SubMaterial>, String> {
                     textures.entry(role.to_string()).or_insert_with(|| binding.path.clone());
                 }
             }
-            let (wear_layers, base_layers): (Vec<_>, Vec<_>) =
+            let (wear_layers, mut base_layers): (Vec<_>, Vec<_>) =
                 sub.layers.iter().map(layer_ref).partition(|l| l.is_wear);
+            // HardSurface, the ship hull shader, carries no textures of its own:
+            // a palette-tinted `Primary` layer, and a `Secondary` the game wears
+            // through to by vertex colour and damage. A new part is the primary
+            // alone, which is what the live shader draws with no blend map.
+            if sub.shader.eq_ignore_ascii_case("HardSurface") {
+                let primary = base_layers
+                    .iter()
+                    .position(|l| l.name.eq_ignore_ascii_case("Primary"))
+                    .unwrap_or(0);
+                base_layers = base_layers.into_iter().skip(primary).take(1).collect();
+            }
             SubMaterial {
                 name: sub.name.clone(),
                 shader: sub.shader.clone(),
