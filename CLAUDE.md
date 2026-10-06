@@ -1872,6 +1872,30 @@ glows in CIG's render while the near-black plate around it does not. Emitted
 as `albedo * glow * GLOW_GAIN` (25, chosen by eye against that render). 486
 LayerBlend submaterials carry some Glow; the gain is capped at 4.
 
+**A metal emits nothing.** The live composite's colour is a dielectric's albedo
+but a metal's F0, so `albedo * glow` made every bright metal on a glowing
+submaterial emit up to four times its reflectance: the BUL-H4 SteelTek's
+silver, the IAE 2953 suits' champagne aluminium and the Geist "Golden Blossom"
+gold all baked flat white, and no change of light moved them (environment x0.25,
+key x0.4: identical). Glow is now `colour * (1 - metal) * glow`, which keeps the
+Big Boss graffiti (a dielectric) as it was.
+
+**An empty layer is still a layer.** StarBreaker's `.mtl` parser drops a
+`<Layer>` whose `Path` is empty, and the composite places layers by position,
+so every later layer slid into the previous one's blend channel. 1,566 of 27,862
+LayerBlend submaterials on character gear and FPS weapons have an empty base
+layer ahead of another. `material::parse` now re-reads each material's
+`MatLayers` and puts the empty ones back in slot order (as the Python bake
+always had them); the library skips them, and the shader draws one as a
+dielectric in its own TintColor or palette entry. StarBreaker itself is left
+alone: its CLI feeds other pipelines.
+
+**A palette tints glass.** `glassColor` is set on 525 of 2,369 palettes, and a
+GlassPBR lens's own Diffuse is white, so a colourway that differs only in its
+lens (SightRight Goggles Yellow) drew identical to the plain one. The catalogue's
+`tint.glass` now colours glass surfaces; white means untinted. Decal colours
+(`decalTexture`, `decalColorR/G/B`) are still not applied.
+
 **One failed request used to kill the worker client.** Replies were matched to
 requests by type and a failure was a bare `failed`, which the client could
 only treat as the whole worker failing -- so one missing material rejected

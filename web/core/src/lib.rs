@@ -1110,6 +1110,10 @@ impl Archive {
             std::collections::HashMap::new();
         for sub in &subs {
             for layer in sub.base_layers.iter().chain(sub.wear_layers.iter()) {
+                // A layer with no material is the artist's flat colour; there is nothing to resolve.
+                if layer.path.is_empty() {
+                    continue;
+                }
                 let key = layer.path.to_ascii_lowercase();
                 if library.contains_key(&key) {
                     continue;

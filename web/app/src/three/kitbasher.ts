@@ -1708,7 +1708,7 @@ export class Kitbasher {
     const materials = material.submaterials.map((sub) => live?.materials.get(sub.name)
       ?? (composited?.surfaces.has(sub.name)
         ? surfaceMaterial(sub, composited, { byPath })
-        : plainMaterial(sub, { byPath }, material.submaterials)));
+        : plainMaterial(sub, { byPath }, material.submaterials, item.tint?.glass ?? null)));
     await this.addDecals(material, materials, plainSize);
     return { materials, refine };
   }

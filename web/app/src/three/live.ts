@@ -660,7 +660,10 @@ export async function liveSurfaces(
         .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = fwRough;')
         .replace('#include <metalnessmap_fragment>', 'float metalnessFactor = fwMetal;')
         .replace('#include <normal_fragment_maps>', NORMAL)
-        .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += fwColour * fwGlow;')
+        // Glow emits a fraction of the surface's diffuse colour. A metal has none:
+        // its colour here is its F0, and emitting that (x4 at the cap) turned polished
+        // gold, steel and champagne aluminium flat white under any light.
+        .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += fwColour * (1.0 - fwMetal) * fwGlow;')
         .replace('#include <aomap_fragment>', '#include <aomap_fragment>\n  reflectedLight.indirectDiffuse *= fwAo;\n  reflectedLight.indirectSpecular *= fwAo;')
         .replace('#include <dithering_fragment>', '#include <dithering_fragment>\n  if (fwDebug == 1) gl_FragColor = vec4(fwColour, 1.0);');
     };

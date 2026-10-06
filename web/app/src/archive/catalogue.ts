@@ -18,7 +18,8 @@ export interface CatalogueItem {
   flags: string[];
   weight_class: string | null;
   manufacturer?: { code?: string | null; name?: string | null };
-  tint?: { layers?: Array<{ color: string; spec: string; glossiness: number }> } | null;
+  /** `glass` is the palette's `glassColor`: what tints its visors and lenses (`#ffffff` on most, meaning untinted). */
+  tint?: { layers?: Array<{ color: string; spec: string; glossiness: number }>; glass?: string } | null;
   geometry: Array<{ source: string; side: string | null }>;
   materials: string[];
   /** The holsters this piece declares. Armour and gear both carry them: a

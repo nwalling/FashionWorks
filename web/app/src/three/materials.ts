@@ -213,7 +213,12 @@ function linear(rgb: ArrayLike<number> | undefined, fallback: number): Color {
  *
  * `siblings` are the other submaterials of the same `.mtl`, for a shader that
  * takes something from them: a hair cap names no colour and wears its cards'. */
-export function plainMaterial(sub: Submaterial, textures: SurfaceTextures, siblings: readonly Submaterial[] = []): Material {
+export function plainMaterial(
+  sub: Submaterial,
+  textures: SurfaceTextures,
+  siblings: readonly Submaterial[] = [],
+  glass: string | null = null,
+): Material {
   const shader = sub.shader.toLowerCase();
   if (shader.includes('nodraw')) {
     // Collision proxies. Invisible in the game too.
@@ -225,10 +230,14 @@ export function plainMaterial(sub: Submaterial, textures: SurfaceTextures, sibli
   const metal = specular > 0.2;
 
   if (shader.includes('glass')) {
-    // Visors and canopies: tinted, glossy and see-through.
+    // Visors and canopies: tinted, glossy and see-through. The colourway's
+    // palette carries the tint (`glassColor`): 525 of 2369 palettes set one,
+    // and a GlassPBR lens's own Diffuse is white, so without it the SightRight
+    // Goggles' Yellow lens drew as clear as the plain pair's. White means none.
+    const tinted = glass && /^#[0-9a-f]{6}$/i.test(glass) && glass.toLowerCase() !== '#ffffff';
     const material = new MeshStandardMaterial({
       name: sub.name,
-      color: linear(sub.diffuse, 0x202428),
+      color: tinted ? new Color(glass) : linear(sub.diffuse, 0x202428),
       roughness: 0.08,
       metalness: 0.6,
       transparent: true,

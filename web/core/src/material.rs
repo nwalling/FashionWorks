@@ -213,13 +213,99 @@ fn layer_ref(layer: &mtl::MatLayer) -> LayerRef {
     }
 }
 
+/// Each material's `BaseLayer` entries in file order, including the ones
+/// with an empty `Path`, in the order `mtl::parse_mtl` lists materials.
+///
+/// **A layer with no material is still a layer.** StarBreaker's parser drops a
+/// `Layer` whose `Path` is empty, and the composite places layers by position,
+/// so every later layer slid into the blend channel before it: 1,566 of 27,862
+/// LayerBlend submaterials on character gear and FPS weapons have an empty base
+/// layer ahead of another. The Geist "Golden Blossom" pack's red-channel panels
+/// took its polished gold. The empty layer is the artist's flat colour (its
+/// `TintColor`, or a palette entry), so it comes back as a layer whose path the
+/// library cannot resolve: drawn as a dielectric in that colour.
+fn base_layers_in_order(bytes: &[u8]) -> Option<Vec<Vec<LayerRef>>> {
+    let xml = starbreaker_cryxml::from_bytes(bytes).ok()?;
+    let root = xml.root();
+    let materials: Vec<_> = match xml.node_children(root).find(|c| xml.node_tag(c) == "SubMaterials") {
+        Some(node) => xml.node_children(node).filter(|c| xml.node_tag(c) == "Material").collect(),
+        None => vec![root],
+    };
+    let number = |v: &str, fallback: f32| v.trim().parse::<f32>().unwrap_or(fallback);
+    Some(
+        materials
+            .into_iter()
+            .map(|material| {
+                xml.node_children(material)
+                    .filter(|c| xml.node_tag(c) == "MatLayers")
+                    .flat_map(|layers| xml.node_children(layers))
+                    .map(|layer| {
+                        let mut out = LayerRef {
+                            name: String::new(),
+                            path: String::new(),
+                            tint_color: [1.0; 3],
+                            palette_tint: 0,
+                            gloss_mult: 1.0,
+                            uv_tiling: 1.0,
+                            is_wear: false,
+                        };
+                        for (key, value) in xml.node_attributes(layer) {
+                            match key {
+                                "Name" => out.name = value.to_string(),
+                                "Path" => out.path = value.trim().to_string(),
+                                "TintColor" => {
+                                    let parts: Vec<f32> = value.split(',').map(|p| number(p, 1.0)).collect();
+                                    if parts.len() >= 3 {
+                                        out.tint_color = [parts[0], parts[1], parts[2]];
+                                    }
+                                }
+                                "PaletteTint" => out.palette_tint = value.trim().parse().unwrap_or(0),
+                                "GlossMult" => out.gloss_mult = number(value, 1.0),
+                                "UVTiling" => out.uv_tiling = number(value, 1.0),
+                                _ => {}
+                            }
+                        }
+                        out.is_wear = out.name.to_ascii_lowercase().starts_with("wear");
+                        out
+                    })
+                    .filter(|layer| !layer.is_wear)
+                    .collect()
+            })
+            .collect(),
+    )
+}
+
+/// The parsed base layers with the empty ones put back in their places
+/// (`base_layers_in_order`): a parsed layer is matched to its raw entry by
+/// name, so everything StarBreaker read about it is kept.
+fn with_empty_layers(parsed: Vec<LayerRef>, raw: Option<&Vec<LayerRef>>) -> Vec<LayerRef> {
+    let Some(raw) = raw else { return parsed };
+    if !raw.iter().any(|l| l.path.is_empty()) {
+        return parsed;
+    }
+    let mut parsed = parsed;
+    let mut out = Vec::with_capacity(raw.len());
+    for entry in raw {
+        if entry.path.is_empty() {
+            out.push(entry.clone());
+        } else if let Some(i) = parsed.iter().position(|l| l.name.eq_ignore_ascii_case(&entry.name)) {
+            out.push(parsed.remove(i));
+        }
+    }
+    // Anything the raw read did not account for keeps its place at the end.
+    out.extend(parsed);
+    out
+}
+
 /// Parse an armour `.mtl` into its submaterials.
 pub fn parse(bytes: &[u8]) -> Result<Vec<SubMaterial>, String> {
     let file: MtlFile = mtl::parse_mtl(bytes).map_err(|e| format!("parsing .mtl: {e}"))?;
+    let raw = base_layers_in_order(bytes);
     Ok(file
         .materials
         .iter()
-        .map(|sub| {
+        .enumerate()
+        .map(|(index, sub)| {
             // Slot numbers mean different things to different shaders. On
             // LayerBlend, TexSlot2 is unused and TexSlot3 is the normal map; on
             // Illum and the decal shaders TexSlot2 carries the `_ddna` normal.
@@ -257,8 +343,9 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<SubMaterial>, String> {
                     textures.entry(role.to_string()).or_insert_with(|| binding.path.clone());
                 }
             }
-            let (wear_layers, mut base_layers): (Vec<_>, Vec<_>) =
+            let (wear_layers, base_layers): (Vec<_>, Vec<_>) =
                 sub.layers.iter().map(layer_ref).partition(|l| l.is_wear);
+            let mut base_layers = with_empty_layers(base_layers, raw.as_ref().and_then(|r| r.get(index)));
             // HardSurface, the ship hull shader, carries no textures of its own:
             // a palette-tinted `Primary` layer, and a `Secondary` the game wears
             // through to by vertex colour and damage. A new part is the primary
@@ -400,6 +487,39 @@ fn tex_mod_tile_u(textures: &[mtl::AuthoredTexture]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn named(name: &str, path: &str) -> LayerRef {
+        LayerRef {
+            name: name.into(),
+            path: path.into(),
+            tint_color: [1.0; 3],
+            palette_tint: 0,
+            gloss_mult: 1.0,
+            uv_tiling: 1.0,
+            is_wear: false,
+        }
+    }
+
+    #[test]
+    fn an_empty_layer_keeps_its_place_so_later_layers_keep_their_channels() {
+        // The Geist "Golden Blossom" pack: BaseLayer1 has no material, only a
+        // tint. Dropped, gold slid into the red channel the panels are drawn in.
+        let parsed = vec![named("BaseLayer2", "gold02_polished.mtl"), named("BaseLayer3", "gun_metal_04.mtl")];
+        let mut flat = named("BaseLayer1", "");
+        flat.tint_color = [1.0, 0.122, 0.0];
+        let raw = vec![flat.clone(), named("BaseLayer2", "gold02_polished.mtl"), named("BaseLayer3", "gun_metal_04.mtl")];
+        let out = with_empty_layers(parsed, Some(&raw));
+        assert_eq!(out.iter().map(|l| l.name.as_str()).collect::<Vec<_>>(), ["BaseLayer1", "BaseLayer2", "BaseLayer3"]);
+        assert_eq!(out[0], flat);
+        assert_eq!(out[1].path, "gold02_polished.mtl");
+    }
+
+    #[test]
+    fn no_empty_layer_leaves_the_parse_alone() {
+        let parsed = vec![named("BaseLayer1", "a.mtl"), named("BaseLayer2", "b.mtl")];
+        assert_eq!(with_empty_layers(parsed.clone(), Some(&parsed.clone())), parsed);
+        assert_eq!(with_empty_layers(parsed.clone(), None), parsed);
+    }
 
     #[test]
     fn the_control_maps_are_numbered_slots_not_names() {
