@@ -174,6 +174,10 @@ export interface MaterialPayload {
     params?: Record<string, number | Float32Array>;
     /** `TexSlot9` where the shader is compiled with `%DECALS`, else null. */
     decalSheet?: string | null;
+    /** A decal the colourway paints (`material::Stencil`): its own colours for
+     * the stencil's red, green and blue (linear), and whether they override the
+     * palette's. Null for anything else; absent on older cores. */
+    stencil?: { colors: Float32Array[]; override: boolean; opacity: number; glossiness: number } | null;
     /** A `HairPBR` surface's kind, from its shader flags: strand `cards`, the
      * scalp `cap` a hairline shades the skin with, or a short-hair `coat`. */
     hair?: 'cards' | 'cap' | 'coat';

@@ -1893,8 +1893,17 @@ alone: its CLI feeds other pipelines.
 **A palette tints glass.** `glassColor` is set on 525 of 2,369 palettes, and a
 GlassPBR lens's own Diffuse is white, so a colourway that differs only in its
 lens (SightRight Goggles Yellow) drew identical to the plain one. The catalogue's
-`tint.glass` now colours glass surfaces; white means untinted. Decal colours
-(`decalTexture`, `decalColorR/G/B`) are still not applied.
+`tint.glass` now colours glass surfaces; white means untinted.
+
+**A palette paints stencil decals.** A `MeshDecal` compiled with `%STENCIL_MAP`
+whose stencil slot is the placeholder `$TintPaletteDecal` (819 material files,
+182 of them FPS weapons) draws the colourway palette's `decalTexture`: its red,
+green and blue are separate masks, coloured by the palette's `decalColorR/G/B`
+unless the material sets `StencilTintOverride` (then its own
+`StencilDiffuseColor`, `...2`, `...3`). The placeholder resolved to nothing, so
+every such decal was hidden: the P8-SC's large "BEHRING" side marking among
+them. `material::Stencil` carries the material's half, the catalogue's
+`tint.decal` the palette's, and `stencilMaterial` draws them.
 
 **One failed request used to kill the worker client.** Replies were matched to
 requests by type and a failure was a bare `failed`, which the client could

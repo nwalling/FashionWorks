@@ -166,6 +166,10 @@ pub struct SubMaterial {
     /// `%DECALS`. Placed by the UV set the mesh packs into its vertex colour
     /// (`mesh::decal_uv`). None where the material has no decals.
     pub decal_sheet: Option<String>,
+    /// A decal the colourway paints: a `MeshDecal` compiled with
+    /// `%STENCIL_MAP` whose stencil slot is the placeholder `$TintPaletteDecal`.
+    /// None for anything else.
+    pub stencil: Option<Stencil>,
     /// How a `HairPBR` surface is drawn, from its shader flags: `cards` for
     /// strands (`%HAIR_CARDS`), `cap` for the shadow a hairline casts on the
     /// skin (`%HAIR_CAP`), `coat` for short hair laid over the scalp
@@ -173,6 +177,54 @@ pub struct SubMaterial {
     /// cut's coat is `hair_02_shaved_opac`, and `_opac` read as cards drew it
     /// as a solid band across the forehead.
     pub hair: Option<&'static str>,
+}
+
+/// How a palette stencil decal is coloured (`SubMaterial::stencil`).
+///
+/// The palette's `decalTexture` is the stencil: its red, green and blue are
+/// separate masks (the VOLT logo's wordmark in green, its emblem in red), and
+/// the palette's `decalColorR/G/B` colour them -- unless the material sets
+/// `StencilTintOverride`, when its own `StencilDiffuseColor`, `...2` and
+/// `...3` do. With no palette the decal has nothing to draw.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Stencil {
+    /// Linear, for the stencil's red, green and blue.
+    pub colors: [[f32; 3]; 3],
+    pub override_tint: bool,
+    pub opacity: f32,
+    /// 0-1.
+    pub glossiness: f32,
+}
+
+fn stencil_of(sub: &mtl::SubMaterial) -> Option<Stencil> {
+    let paths: Vec<&str> = sub.texture_slots.iter().map(|b| b.path.as_str()).collect();
+    let params: Vec<(&str, &str)> = sub.public_params.iter().map(|p| (p.name.as_str(), p.value.as_str())).collect();
+    stencil_from(&sub.string_gen_mask, &paths, &params)
+}
+
+fn stencil_from(gen_mask: &str, texture_paths: &[&str], public_params: &[(&str, &str)]) -> Option<Stencil> {
+    let flagged = gen_mask.split('%').any(|t| t.eq_ignore_ascii_case("STENCIL_MAP"));
+    let from_palette = texture_paths.iter().any(|p| p.trim().eq_ignore_ascii_case("$TintPaletteDecal"));
+    if !flagged || !from_palette {
+        return None;
+    }
+    let param = |name: &str| {
+        public_params
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.split(',').filter_map(|v| v.trim().parse::<f32>().ok()).collect::<Vec<_>>())
+    };
+    let colour = |name: &str| {
+        let v = param(name).unwrap_or_default();
+        if v.len() >= 3 { [v[0], v[1], v[2]] } else { [1.0; 3] }
+    };
+    let scalar = |name: &str, fallback: f32| param(name).and_then(|v| v.first().copied()).unwrap_or(fallback);
+    Some(Stencil {
+        colors: [colour("StencilDiffuseColor"), colour("StencilDiffuseColor2"), colour("StencilDiffuseColor3")],
+        override_tint: scalar("StencilTintOverride", 0.0) > 0.5,
+        opacity: scalar("StencilOpacity", 1.0).clamp(0.0, 1.0),
+        glossiness: scalar("StencilGlossiness", 0.5).clamp(0.0, 1.0),
+    })
 }
 
 impl SubMaterial {
@@ -374,6 +426,7 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<SubMaterial>, String> {
                 // decal constants are the exception.
                 // LayerBlend's flag is `%DECALS`; StarBreaker's decoded
                 // `has_decal` matches only `DECAL`, and misses every armour.
+                stencil: stencil_of(sub),
                 decal_sheet: sub
                     .string_gen_mask
                     .split('%')
@@ -512,6 +565,19 @@ mod tests {
         assert_eq!(out.iter().map(|l| l.name.as_str()).collect::<Vec<_>>(), ["BaseLayer1", "BaseLayer2", "BaseLayer3"]);
         assert_eq!(out[0], flat);
         assert_eq!(out[1].path, "gold02_polished.mtl");
+    }
+
+    #[test]
+    fn a_palette_stencil_decal_is_recognised_and_its_colours_read() {
+        let gen = "%STENCIL_MAP%STENCIL_AS_STICKER";
+        let params = [("StencilDiffuseColor2", "0.5,0.25,0"), ("StencilTintOverride", "1")];
+        let s = stencil_from(gen, &["$TintPaletteDecal", "textures/grime.tif"], &params).expect("a stencil");
+        assert_eq!(s.colors[1], [0.5, 0.25, 0.0]);
+        assert_eq!(s.colors[0], [1.0; 3]);
+        assert!(s.override_tint);
+        // The same decal pointing at a texture of its own is not the palette's.
+        assert!(stencil_from(gen, &["textures/decal.tif"], &params).is_none());
+        assert!(stencil_from("%DIFFUSE_MAP", &["$TintPaletteDecal"], &params).is_none());
     }
 
     #[test]

@@ -1164,6 +1164,22 @@ impl Archive {
                 &"decalSheet".into(),
                 &sub.decal_sheet.as_deref().map_or(JsValue::NULL, JsValue::from_str),
             )?;
+            let stencil = match &sub.stencil {
+                Some(s) => {
+                    let value = js_sys::Object::new();
+                    let colors = js_sys::Array::new();
+                    for c in &s.colors {
+                        colors.push(&js_sys::Float32Array::from(&c[..]).into());
+                    }
+                    js_sys::Reflect::set(&value, &"colors".into(), &colors.into())?;
+                    js_sys::Reflect::set(&value, &"override".into(), &s.override_tint.into())?;
+                    js_sys::Reflect::set(&value, &"opacity".into(), &s.opacity.into())?;
+                    js_sys::Reflect::set(&value, &"glossiness".into(), &s.glossiness.into())?;
+                    JsValue::from(value)
+                }
+                None => JsValue::NULL,
+            };
+            js_sys::Reflect::set(&entry, &"stencil".into(), &stencil)?;
 
             let textures = js_sys::Object::new();
             for (role, texture) in &sub.textures {

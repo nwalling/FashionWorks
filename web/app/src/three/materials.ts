@@ -1158,6 +1158,47 @@ function srgbToLinear(byte: number): number {
 }
 
 /** Which of a submaterial's textures the renderer needs, and in what space. */
+/** A decal the colourway paints: the palette's stencil, its red, green and
+ * blue masks coloured `colors[0..2]` (the palette's `decalColorR/G/B`, or the
+ * material's own where it overrides them). The material's slot names only
+ * `$TintPaletteDecal`, so without a palette there is nothing to draw. */
+export function stencilMaterial(sub: Submaterial, stencil: Texture, colors: [Color, Color, Color]): Material {
+  const s = sub.stencil!;
+  const material = new MeshStandardMaterial({
+    name: sub.name,
+    map: stencil,
+    transparent: true,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2,
+    roughness: 1 - s.glossiness,
+    metalness: 0,
+    alphaTest: Math.max(sub.alphaTest, 0.02),
+  });
+  const uniforms = {
+    fwStencilR: { value: colors[0] },
+    fwStencilG: { value: colors[1] },
+    fwStencilB: { value: colors[2] },
+    fwStencilOpacity: { value: s.opacity },
+  };
+  material.userData.fwStencil = uniforms;
+  material.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, uniforms);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform vec3 fwStencilR;\nuniform vec3 fwStencilG;\nuniform vec3 fwStencilB;\nuniform float fwStencilOpacity;')
+      .replace('#include <map_fragment>', `
+        // The stencil is masks, not colour: each channel says where its ink goes.
+        vec4 fwMask = texture2D( map, vMapUv );
+        float fwCover = clamp( fwMask.r + fwMask.g + fwMask.b, 0.0, 1.0 );
+        vec3 fwInk = fwMask.r * fwStencilR + fwMask.g * fwStencilG + fwMask.b * fwStencilB;
+        diffuseColor.rgb = fwCover > 0.0 ? fwInk / max( fwMask.r + fwMask.g + fwMask.b, 1e-4 ) : vec3( 0.0 );
+        diffuseColor.a *= fwCover * fwStencilOpacity;`);
+  };
+  material.customProgramCacheKey = () => 'fw-stencil';
+  return material;
+}
+
 export function texturesWanted(sub: Submaterial): Array<{ path: string; srgb: boolean; alpha?: boolean }> {
   const out: Array<{ path: string; srgb: boolean; alpha?: boolean }> = [];
   // Skin's gloss lives in its normal map's smoothness stream, as armour

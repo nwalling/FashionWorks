@@ -19,7 +19,12 @@ export interface CatalogueItem {
   weight_class: string | null;
   manufacturer?: { code?: string | null; name?: string | null };
   /** `glass` is the palette's `glassColor`: what tints its visors and lenses (`#ffffff` on most, meaning untinted). */
-  tint?: { layers?: Array<{ color: string; spec: string; glossiness: number }>; glass?: string } | null;
+  /** `decal` is the palette's stencil decal: a texture whose red, green and blue are masks, and a colour for each. */
+  tint?: {
+    layers?: Array<{ color: string; spec: string; glossiness: number }>;
+    glass?: string;
+    decal?: { texture: string | null; colors: Array<string | null> };
+  } | null;
   /** A ship part (the item renders' synthesised entries): its unmapped surfaces draw live (`LiveOptions.flatUnmapped`). */
   ship?: boolean;
   geometry: Array<{ source: string; side: string | null }>;

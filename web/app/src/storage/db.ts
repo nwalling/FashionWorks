@@ -24,7 +24,8 @@ export const STORE_HANDLES = 'handles';
  * version does not match is discarded rather than migrated -- rebuilding costs
  * a couple of minutes and migration code costs forever.
  */
-export const CATALOGUE_VERSION = 1;
+// 2: tint carries the palette's stencil decal.
+export const CATALOGUE_VERSION = 2;
 
 export interface CachedCatalogue {
   /** The archive fingerprint this was built from. */

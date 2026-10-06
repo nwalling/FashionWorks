@@ -87,6 +87,7 @@ import {
   type HairStyle,
   setIris,
   setSkinTone,
+  stencilMaterial,
   surfaceMaterial,
   texturesWanted,
 } from './materials';
@@ -1705,7 +1706,23 @@ export class Kitbasher {
         refine,
       };
     }
+    // Decals the colourway paints: its stencil, its masks coloured by the
+    // palette's decal colours (or the material's own, where it overrides them).
+    const stencils = new Map<string, Material>();
+    const decal = item.tint?.decal;
+    for (const sub of material.submaterials) {
+      if (!sub.stencil || !decal?.texture) continue;
+      const colors = sub.stencil.override
+        ? sub.stencil.colors.map((c) => new Color().setRGB(c[0] ?? 1, c[1] ?? 1, c[2] ?? 1))
+        : decal.colors.map((hex) => new Color(hex ?? '#ffffff'));
+      if (colors.length < 3) continue;
+      const payload = (await this.client.texture(decal.texture, plainSize)).texture;
+      if (!payload) continue;
+      const mask = meshTexture(dataTexture(payload.rgba, payload.width, payload.height, false), false);
+      stencils.set(sub.name, stencilMaterial(sub, mask, colors as [Color, Color, Color]));
+    }
     const materials = material.submaterials.map((sub) => live?.materials.get(sub.name)
+      ?? stencils.get(sub.name)
       ?? (composited?.surfaces.has(sub.name)
         ? surfaceMaterial(sub, composited, { byPath })
         : plainMaterial(sub, { byPath }, material.submaterials, item.tint?.glass ?? null)));

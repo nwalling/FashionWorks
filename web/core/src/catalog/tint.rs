@@ -157,11 +157,22 @@ pub fn tint_for(
         .filter(|c| !c.is_null())
         .collect();
 
+    // The colourway's stencil decal: a texture whose red, green and blue are
+    // masks, and a colour for each (`material::Stencil`).
+    let decal_texture = root
+        .get("decalTexture")
+        .and_then(Value::as_str)
+        .map(|p| p.trim().replace('\\', "/"))
+        .filter(|p| !p.is_empty());
+    let decal_colors: Vec<Option<String>> =
+        ["decalColorR", "decalColorG", "decalColorB"].iter().map(|k| srgb(root, k)).collect();
+
     Some(json!({
         "palette_ref": name,
         "layers": layers,
         "colors": colors,
         "glass": srgb(root, "glassColor"),
+        "decal": { "texture": decal_texture, "colors": decal_colors },
     }))
 }
 
