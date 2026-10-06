@@ -1667,7 +1667,7 @@ export class Kitbasher {
         : { ...LIVE_DEFAULTS, normalSize: 128, controlSize: 512, surfaceSize: 512 };
     const live = this.surfaceMode === 'live'
       ? await liveSurfaces(material, paletteOf(item), this.client, {
-        ...sizes, wear: this.state.wear, compressed: this.s3tc,
+        ...sizes, wear: this.state.wear, compressed: this.s3tc, flatUnmapped: item.ship === true,
       })
       : null;
     const fetchTexture = async (path: string, maxSize: number) =>

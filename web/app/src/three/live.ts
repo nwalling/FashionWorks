@@ -68,6 +68,12 @@ export interface LiveOptions {
   readonly normalSize: number;
   readonly controlSize: number;
   readonly surfaceSize: number;
+  /** Draw a LayerBlend surface with no control map live from its first layer
+   * (the flat stand-in) rather than leave it to the bake. Ship weapons' surfaces
+   * carry no maps, and the bake drew them in their submaterial's plain white
+   * (the Liberator's navy pods); FPS gear keeps the bake, where the HDGW rifle's
+   * magazine and the APAR knife's blade vanished when drawn live. */
+  readonly flatUnmapped?: boolean;
 }
 
 export const LIVE_DEFAULTS: Omit<LiveOptions, 'wear' | 'compressed'> = {
@@ -617,7 +623,7 @@ export async function liveSurfaces(
     // control map by design, gets the flat stand-in. A LayerBlend surface whose
     // maps are missing still falls back to the bake: drawn live with no maps,
     // gear surfaces (the HDGW rifle's magazine, the APAR knife's blade) vanished.
-    out.normalMap = b ?? a ?? c ?? (sub.shader.toLowerCase() === "hardsurface" ? flatControl() : null);
+    out.normalMap = b ?? a ?? c ?? (sub.shader.toLowerCase() === "hardsurface" || options.flatUnmapped ? flatControl() : null);
     out.normalScale = new Vector2(1, 1);
     if (!out.normalMap) continue;
     if (sub.glow > 0) {

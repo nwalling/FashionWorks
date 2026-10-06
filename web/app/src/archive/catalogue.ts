@@ -20,6 +20,8 @@ export interface CatalogueItem {
   manufacturer?: { code?: string | null; name?: string | null };
   /** `glass` is the palette's `glassColor`: what tints its visors and lenses (`#ffffff` on most, meaning untinted). */
   tint?: { layers?: Array<{ color: string; spec: string; glossiness: number }>; glass?: string } | null;
+  /** A ship part (the item renders' synthesised entries): its unmapped surfaces draw live (`LiveOptions.flatUnmapped`). */
+  ship?: boolean;
   geometry: Array<{ source: string; side: string | null }>;
   materials: string[];
   /** The holsters this piece declares. Armour and gear both carry them: a
