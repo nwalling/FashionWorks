@@ -1880,6 +1880,18 @@ gold all baked flat white, and no change of light moved them (environment x0.25,
 key x0.4: identical). Glow is now `colour * (1 - metal) * glow`, which keeps the
 Big Boss graffiti (a dielectric) as it was.
 
+**A composited surface emits at most half its colour** (`GLOW_CAP` 0.5, the
+Big Boss graffiti's 0.02 x 25). Higher Glow does not read brighter in CIG's
+renders: the Doomsday Skullcap's bone face (`skull_m`, Glow 0.45, Emissive
+white) is lit bone in the store render, its sockets, nasal cavity and teeth in
+shadow and only two LEDs glowing, but at the old ceiling of 4 it emitted four
+times its colour and drew as a flat cream shape that no light moved. 184 item
+looks had a layer at that ceiling (the Ana arms' gold, skulls, bones,
+interiors) and about 800 more emitted between 0.5 and 4 times their colour.
+The `_hal` blue (luminance) channel is not the mask: the Skullcap's is a grain
+pattern at 0-58 with the eye sockets black. Plain materials (displays, eyes)
+keep their own `GLOW_GAIN * 0.4` path and its ceiling of 4.
+
 **An empty layer is still a layer.** StarBreaker's `.mtl` parser drops a
 `<Layer>` whose `Path` is empty, and the composite places layers by position,
 so every later layer slid into the previous one's blend channel. 1,566 of 27,862

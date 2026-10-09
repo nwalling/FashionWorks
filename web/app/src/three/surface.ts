@@ -80,6 +80,17 @@ export const DETAIL_SIZE = 256;
  * glows in CIG's render while the near-black plate it sits on stays dark. */
 export const GLOW_GAIN = 25;
 
+/** The most a composited surface emits, as a multiple of its own colour.
+ *
+ * The Big Boss graffiti's 0.02 is 0.5 at GLOW_GAIN, and that is the ceiling.
+ * Higher Glow does not read as brighter in CIG's renders: the Doomsday
+ * Skullcap's bone face (`skull_m`, Glow 0.45, Emissive white) is lit bone with
+ * its sockets and teeth in shadow, but at the old ceiling of 4 it emitted four
+ * times its colour and drew as a flat cream shape. 184 item looks had a layer
+ * at that ceiling (the Ana arms' gold, skulls, bones, interiors) and about 800
+ * more emitted between 0.5 and 4 times their colour. */
+export const GLOW_CAP = 0.5;
+
 /** One palette entry: a tint colour, a specular colour and a glossiness.
  *
  * **A metal takes the specular and a dielectric the colour.** A metal has no

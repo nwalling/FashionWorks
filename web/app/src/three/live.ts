@@ -55,7 +55,7 @@ import {
 import { DEFAULT_PALETTE, linearMean } from '../../../gpu/bake.js';
 import type { ArchiveClient } from '../archive/client';
 import type { LayerRef, MaterialPayload, TexturePayload } from '../worker/archive.worker';
-import type { PaletteEntry } from './surface';
+import { GLOW_CAP, GLOW_GAIN, type PaletteEntry } from './surface';
 
 export type Submaterial = MaterialPayload['submaterials'][number];
 
@@ -108,8 +108,6 @@ const WEAR_FALLOFF = 0.5;
 /** Layer normals are authored for a surface otherwise flat; on top of the
  * armour's own `_ddn` they read a little strong, so they are eased back. */
 const DETAIL_NORMAL = 0.8;
-/** A fraction of the surface's own colour, emitted. Same as the bake path. */
-const GLOW_GAIN = 25;
 
 const srgbToLinear = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
 
@@ -653,7 +651,8 @@ export async function liveSurfaces(
       fwWearFalloff: { value: WEAR_FALLOFF },
       fwWearAmount: { value: options.wear ? 1 : 0 },
       fwUserTint: { value: new Color(1, 1, 1) },
-      fwGlow: { value: Math.min(4, sub.glow * GLOW_GAIN) },
+      // A fraction of the surface's own colour, emitted: the bake path's gain and ceiling.
+      fwGlow: { value: Math.min(GLOW_CAP, sub.glow * GLOW_GAIN) },
       fwDetailNormal: { value: DETAIL_NORMAL },
       fwDebug: { value: 0 },
     };

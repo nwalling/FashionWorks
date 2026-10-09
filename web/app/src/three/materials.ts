@@ -45,7 +45,7 @@ import {
 } from 'three';
 
 import type { MaterialPayload } from '../worker/archive.worker';
-import { GLOW_GAIN, type Composited, type DetailLibrary } from './surface';
+import { GLOW_CAP, GLOW_GAIN, type Composited, type DetailLibrary } from './surface';
 
 export type Submaterial = MaterialPayload['submaterials'][number];
 
@@ -196,7 +196,7 @@ export function surfaceMaterial(
     // dark ones do not, which is how the Big Boss graffiti reads in game.
     material.emissive = new Color(1, 1, 1);
     material.emissiveMap = surface.albedo;
-    material.emissiveIntensity = Math.min(4, sub.glow * GLOW_GAIN);
+    material.emissiveIntensity = Math.min(GLOW_CAP, sub.glow * GLOW_GAIN);
   }
 
   if (composited.detail) withGrain(material, composited.detail, sub.name);
