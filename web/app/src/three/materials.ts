@@ -45,7 +45,7 @@ import {
 } from 'three';
 
 import type { MaterialPayload } from '../worker/archive.worker';
-import { GLOW_CAP, GLOW_GAIN, type Composited, type DetailLibrary } from './surface';
+import { GLOW_CAP, GLOW_GAIN, dataTexture, type Composited, type DetailLibrary } from './surface';
 
 export type Submaterial = MaterialPayload['submaterials'][number];
 
@@ -300,8 +300,12 @@ export function plainMaterial(
     metalness: metal ? 1 : 0,
   });
   if (diffuseMap) material.color.set(0xffffff).multiply(linear(sub.diffuse, 0xffffff));
-  if (isSkin(sub) && normalMap) {
-    const rough = skinRoughness(normalMap, sub.shininess ?? 1);
+  const specularMap = specGloss(sub) ? textures.byPath.get(sub.textures.specular!) : undefined;
+  if (diffuseMap && specularMap) withSpecGloss(material, sub, diffuseMap, specularMap);
+  // Skin's gloss, and a spec/gloss metal's, is per pixel: a polished bar
+  // drawn at one constant smoothness is a mirror of the dark studio.
+  if ((isSkin(sub) || (diffuseMap && specularMap)) && normalMap) {
+    const rough = glossRoughness(normalMap, sub.shininess ?? 1);
     if (rough) {
       material.roughnessMap = rough;
       material.roughness = 1;
@@ -1203,12 +1207,14 @@ export function texturesWanted(sub: Submaterial): Array<{ path: string; srgb: bo
   const out: Array<{ path: string; srgb: boolean; alpha?: boolean }> = [];
   // Skin's gloss lives in its normal map's smoothness stream, as armour
   // layers' does; the plain decode leaves that stream out.
-  if (sub.textures.normal) out.push({ path: sub.textures.normal, srgb: false, alpha: isSkin(sub) });
+  if (sub.textures.normal) out.push({ path: sub.textures.normal, srgb: false, alpha: isSkin(sub) || specGloss(sub) });
   // Skin's tone mask: data, not colour.
   if (isSkin(sub) && sub.textures.tone_mask) out.push({ path: sub.textures.tone_mask, srgb: false });
   // Hair's slot 1 is a mask, not a colour, and an sRGB decode would thin it.
   const hair = sub.shader.toLowerCase().includes('hair');
   if (!sub.tintable && sub.textures.base_color) out.push({ path: sub.textures.base_color, srgb: !hair });
+  // An Illum metal's colour is in its specular map; see `withSpecGloss`.
+  if (specGloss(sub)) out.push({ path: sub.textures.specular!, srgb: true });
   // A strand's shade and its direction: data, not colour.
   if (hair && sub.textures.strand_id) out.push({ path: sub.textures.strand_id, srgb: false });
   if (hair && sub.textures.strand_direction) out.push({ path: sub.textures.strand_direction, srgb: false });
@@ -1219,13 +1225,96 @@ function isSkin(sub: Submaterial): boolean {
   return sub.shader.toLowerCase().includes('humanskin');
 }
 
-/** Skin roughness from the normal map's smoothness stream.
+/** An `Illum` submaterial with both a diffuse and a specular map: CryEngine's
+ * specular/glossiness, where a metal's colour lives in `_spec` and its `_diff`
+ * is near black (dirt and nothing else). The UNE gold ingot's diffuse averages
+ * (27, 23, 19); its gold is the specular map's (127, 110, 92). Drawn from the
+ * diffuse alone, as every plain metal was, the loot props came out as soot. */
+function specGloss(sub: Submaterial): boolean {
+  return sub.shader.toLowerCase() === 'illum' && !sub.tintable && !!sub.textures.base_color && !!sub.textures.specular;
+}
+
+/** The F0 of every non-metal, in linear light (glTF's and CryEngine's 4%). */
+const DIELECTRIC = 0.04;
+
+const SRGB_TO_LINEAR = Float32Array.from({ length: 256 }, (_, i) => {
+  const c = i / 255;
+  return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+});
+
+function linearToSrgbByte(c: number): number {
+  const v = c <= 0.0031308 ? c * 12.92 : 1.055 * c ** (1 / 2.4) - 0.055;
+  return Math.round(Math.min(1, Math.max(0, v)) * 255);
+}
+
+function perceived(r: number, g: number, b: number): number {
+  return Math.sqrt(0.299 * r * r + 0.587 * g * g + 0.114 * b * b);
+}
+
+/** How metallic a texel is, from its diffuse and specular brightness: the
+ * root of the quadratic in the Khronos spec/gloss-to-metal/rough converter
+ * (KHR_materials_pbrSpecularGlossiness, "Converting between workflows"). */
+function solveMetallic(diffuse: number, specular: number, oneMinusSpecularStrength: number): number {
+  if (specular < DIELECTRIC) return 0;
+  const a = DIELECTRIC;
+  const b = (diffuse * oneMinusSpecularStrength) / (1 - DIELECTRIC) + specular - 2 * DIELECTRIC;
+  const c = DIELECTRIC - specular;
+  const d = b * b - 4 * a * c;
+  return Math.min(1, Math.max(0, (-b + Math.sqrt(Math.max(0, d))) / (2 * a)));
+}
+
+/** Convert a spec/gloss submaterial to three.js's metal/rough, texel by
+ * texel: a base colour from the diffuse where it is a dielectric and from the
+ * specular where it is a metal, and a metalness map (blue, as glTF packs it).
+ * The `.mtl`'s Diffuse and Specular colours scale their maps first. */
+function withSpecGloss(material: MeshStandardMaterial, sub: Submaterial, diffuse: Texture, specular: Texture): void {
+  type Pixels = { data?: Uint8Array; width?: number; height?: number };
+  const d = diffuse.image as Pixels;
+  const s = specular.image as Pixels;
+  if (!d.data || !d.width || !d.height || !s.data || !s.width || !s.height) return;
+  const kd = sub.diffuse ?? [1, 1, 1];
+  const ks = sub.specular ?? [1, 1, 1];
+  const { width, height } = d;
+  const albedo = new Uint8Array(width * height * 4);
+  const metal = new Uint8Array(width * height * 4);
+  for (let y = 0; y < height; y += 1) {
+    const sy = Math.min(s.height - 1, Math.floor((y * s.height) / height));
+    for (let x = 0; x < width; x += 1) {
+      const i = (y * width + x) * 4;
+      const j = (sy * s.width + Math.min(s.width - 1, Math.floor((x * s.width) / width))) * 4;
+      const dr = SRGB_TO_LINEAR[d.data[i]!]! * kd[0]!;
+      const dg = SRGB_TO_LINEAR[d.data[i + 1]!]! * kd[1]!;
+      const db = SRGB_TO_LINEAR[d.data[i + 2]!]! * kd[2]!;
+      const sr = SRGB_TO_LINEAR[s.data[j]!]! * ks[0]!;
+      const sg = SRGB_TO_LINEAR[s.data[j + 1]!]! * ks[1]!;
+      const sb = SRGB_TO_LINEAR[s.data[j + 2]!]! * ks[2]!;
+      const oneMinus = 1 - Math.max(sr, sg, sb);
+      const m = solveMetallic(perceived(dr, dg, db), perceived(sr, sg, sb), oneMinus);
+      const fromDiffuse = oneMinus / (1 - DIELECTRIC) / Math.max(1 - m, 1e-4);
+      const fromSpecular = (v: number) => (v - DIELECTRIC * (1 - m)) / Math.max(m, 1e-4);
+      const t = m * m;
+      albedo[i] = linearToSrgbByte(dr * fromDiffuse * (1 - t) + fromSpecular(sr) * t);
+      albedo[i + 1] = linearToSrgbByte(dg * fromDiffuse * (1 - t) + fromSpecular(sg) * t);
+      albedo[i + 2] = linearToSrgbByte(db * fromDiffuse * (1 - t) + fromSpecular(sb) * t);
+      albedo[i + 3] = d.data[i + 3]!;
+      metal[i + 2] = Math.round(m * 255);
+      metal[i + 3] = 255;
+    }
+  }
+  material.map = meshTexture(dataTexture(albedo, width, height, true), true);
+  material.color.set(0xffffff);
+  material.metalnessMap = meshTexture(dataTexture(metal, width, height, false), false);
+  material.metalness = 1;
+}
+
+/** Roughness from the normal map's smoothness stream (skin, and spec/gloss
+ * `Illum` metals).
  *
  * `HumanSkin_V2` carries Shininess 1 on the body and the head, and taken as a
  * constant that is a mirror: the figure came out wet and plastic. In CryEngine
  * the constant scales the per-pixel smoothness in the `_ddna` alpha, exactly
  * as it does for an armour layer, so roughness is `1 - alpha x shininess`. */
-function skinRoughness(normal: Texture, shininess: number): DataTexture | null {
+function glossRoughness(normal: Texture, shininess: number): DataTexture | null {
   const image = normal.image as { data?: Uint8Array; width?: number; height?: number } | undefined;
   const data = image?.data;
   if (!data || !image?.width || !image.height) return null;
