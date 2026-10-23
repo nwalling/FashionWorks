@@ -1149,6 +1149,9 @@ impl Archive {
             if let Some(hair) = sub.hair {
                 js_sys::Reflect::set(&entry, &"hair".into(), &hair.into())?;
             }
+            if sub.hologram {
+                js_sys::Reflect::set(&entry, &"hologram".into(), &true.into())?;
+            }
             let params = js_sys::Object::new();
             for (name, values) in &sub.params {
                 let value: JsValue = if values.len() == 1 {

@@ -181,6 +181,9 @@ export interface MaterialPayload {
     /** A `HairPBR` surface's kind, from its shader flags: strand `cards`, the
      * scalp `cap` a hairline shades the skin with, or a short-hair `coat`. */
     hair?: 'cards' | 'cap' | 'coat';
+    /** Light rather than a surface: `%HOLOGRAPHIC_PROJECTION` or the
+     * `Hologram` shader. Absent on older cores. */
+    hologram?: boolean;
   }>;
   /** Every distinct detail layer the piece references, by lowercased path. */
   library: Record<string, LayerMaterial>;

@@ -177,6 +177,10 @@ pub struct SubMaterial {
     /// cut's coat is `hair_02_shaved_opac`, and `_opac` read as cards drew it
     /// as a solid band across the forehead.
     pub hair: Option<&'static str>,
+    /// A projection of light rather than a surface: `Illum` compiled with
+    /// `%HOLOGRAPHIC_PROJECTION` (a standing flag's flag, at 9% opacity and
+    /// full glow), or the `Hologram` shader.
+    pub hologram: bool,
 }
 
 /// How a palette stencil decal is coloured (`SubMaterial::stencil`).
@@ -194,6 +198,12 @@ pub struct Stencil {
     pub opacity: f32,
     /// 0-1.
     pub glossiness: f32,
+}
+
+/// Light, not a surface (`SubMaterial::hologram`).
+fn is_hologram(shader: &str, gen_mask: &str) -> bool {
+    shader.to_ascii_lowercase().contains("hologram")
+        || gen_mask.split('%').any(|t| t.eq_ignore_ascii_case("HOLOGRAPHIC_PROJECTION"))
 }
 
 fn stencil_of(sub: &mtl::SubMaterial) -> Option<Stencil> {
@@ -451,6 +461,7 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<SubMaterial>, String> {
                         None
                     }
                 },
+                hologram: is_hologram(&sub.shader, &sub.string_gen_mask),
                 params: if layered {
                     numeric_params(&sub.public_params)
                         .into_iter()
@@ -578,6 +589,14 @@ mod tests {
         // The same decal pointing at a texture of its own is not the palette's.
         assert!(stencil_from(gen, &["textures/decal.tif"], &params).is_none());
         assert!(stencil_from("%DIFFUSE_MAP", &["$TintPaletteDecal"], &params).is_none());
+    }
+
+    #[test]
+    fn a_holographic_projection_is_light_and_so_is_the_hologram_shader() {
+        assert!(is_hologram("Illum", "%HOLOGRAPHIC_PROJECTION"));
+        assert!(is_hologram("Hologram", "%VERTCOLORS"));
+        assert!(!is_hologram("Illum", "%NORMAL_MAP%SPECULAR_MAP"));
+        assert!(!is_hologram("GlassPBR", "%REFRACTION"));
     }
 
     #[test]

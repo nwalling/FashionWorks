@@ -265,6 +265,24 @@ export function plainMaterial(
     });
   }
 
+  // A projection with art of its own: a standing flag's flag. In game it is
+  // light glowing over whatever is behind it. Drawn additive it would vanish
+  // from the item renders, whose alpha comes from two captures over different
+  // greys (light added equally to both reads as no coverage), so it is a
+  // translucent, unlit sheet of its own art, which reads on any background.
+  if (sub.hologram && diffuseMap) {
+    return new MeshBasicMaterial({
+      name: sub.name,
+      map: diffuseMap,
+      color: linear(sub.diffuse, 0xffffff),
+      transparent: true,
+      opacity: HOLOGRAM_OPACITY,
+      depthWrite: false,
+      side: DoubleSide,
+      alphaTest: 0.02,
+    });
+  }
+
   // A HUD plane or hologram shows UI the game renders at runtime -- the
   // texture is `$RenderToTexture`, nothing in the archive -- and in the shop it
   // is transparent until powered. Drawn, it was a flat grey card floating
@@ -1233,6 +1251,9 @@ function isSkin(sub: Submaterial): boolean {
 function specGloss(sub: Submaterial): boolean {
   return sub.shader.toLowerCase() === 'illum' && !sub.tintable && !!sub.textures.base_color && !!sub.textures.specular;
 }
+
+/** How solid a hologram's art is drawn (`plainMaterial`). */
+const HOLOGRAM_OPACITY = 0.75;
 
 /** The F0 of every non-metal, in linear light (glTF's and CryEngine's 4%). */
 const DIELECTRIC = 0.04;
