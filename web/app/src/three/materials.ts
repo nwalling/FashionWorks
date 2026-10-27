@@ -42,9 +42,11 @@ import {
   UnsignedByteType,
   Vector2,
   Vector3,
+  Vector4,
 } from 'three';
 
 import type { MaterialPayload } from '../worker/archive.worker';
+import { FILM_DECLARE, filmFragment, filmValue, interferenceRamp } from './film';
 import { GLOW_CAP, GLOW_GAIN, dataTexture, type Composited, type DetailLibrary } from './surface';
 
 export type Submaterial = MaterialPayload['submaterials'][number];
@@ -200,7 +202,30 @@ export function surfaceMaterial(
   }
 
   if (composited.detail) withGrain(material, composited.detail, sub.name);
+  if (sub.film) {
+    const ramp = sub.textures.iridescence ? textures.byPath.get(sub.textures.iridescence) : undefined;
+    withFilm(material, ramp ?? interferenceRamp(), filmValue(sub.film, Boolean(ramp)));
+  }
   return material;
+}
+
+/** Draw a thin film over a composited material (film.ts). Chained after the
+ * grain, whose program it then extends. */
+function withFilm(material: MeshStandardMaterial, ramp: Texture, film: Vector4): void {
+  const uniforms = {
+    fwFilmRamp: { value: ramp },
+    fwFilm: { value: film },
+  };
+  material.userData.fwFilm = uniforms;
+  const before = material.userData.fwGrain ? material.onBeforeCompile : null;
+  material.onBeforeCompile = (shader, renderer) => {
+    before?.call(material, shader, renderer);
+    Object.assign(shader.uniforms, uniforms);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>\n${FILM_DECLARE}`)
+      .replace('#include <emissivemap_fragment>', `${filmFragment('metalnessFactor')}\n#include <emissivemap_fragment>`);
+  };
+  material.customProgramCacheKey = () => (before ? 'fw-grain-film' : 'fw-film');
 }
 
 function linear(rgb: ArrayLike<number> | undefined, fallback: number): Color {
@@ -1233,6 +1258,8 @@ export function texturesWanted(sub: Submaterial): Array<{ path: string; srgb: bo
   if (!sub.tintable && sub.textures.base_color) out.push({ path: sub.textures.base_color, srgb: !hair });
   // An Illum metal's colour is in its specular map; see `withSpecGloss`.
   if (specGloss(sub)) out.push({ path: sub.textures.specular!, srgb: true });
+  // A thin film's ramp is colour.
+  if (sub.film && sub.textures.iridescence) out.push({ path: sub.textures.iridescence, srgb: true });
   // A strand's shade and its direction: data, not colour.
   if (hair && sub.textures.strand_id) out.push({ path: sub.textures.strand_id, srgb: false });
   if (hair && sub.textures.strand_direction) out.push({ path: sub.textures.strand_direction, srgb: false });

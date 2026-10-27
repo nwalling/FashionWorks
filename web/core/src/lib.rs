@@ -1152,6 +1152,13 @@ impl Archive {
             if sub.hologram {
                 js_sys::Reflect::set(&entry, &"hologram".into(), &true.into())?;
             }
+            if let Some(film) = &sub.film {
+                let value = js_sys::Object::new();
+                js_sys::Reflect::set(&value, &"u".into(), &film.u.into())?;
+                js_sys::Reflect::set(&value, &"v".into(), &film.v.into())?;
+                js_sys::Reflect::set(&value, &"strength".into(), &film.strength.into())?;
+                js_sys::Reflect::set(&entry, &"film".into(), &value.into())?;
+            }
             let params = js_sys::Object::new();
             for (name, values) in &sub.params {
                 let value: JsValue = if values.len() == 1 {

@@ -181,6 +181,49 @@ pub struct SubMaterial {
     /// `%HOLOGRAPHIC_PROJECTION` (a standing flag's flag, at 9% opacity and
     /// full glow), or the `Hologram` shader.
     pub hologram: bool,
+    /// A thin film over the surface: LayerBlend compiled with `%IRIDESCENCE`.
+    /// Its ramp, where it has one, is `textures["iridescence"]` (`TexSlot5`).
+    /// None for anything else.
+    pub film: Option<Film>,
+}
+
+/// How a thin film colours what a surface reflects (`SubMaterial::film`),
+/// from `PublicParams`: `IridescenceThicknessU`, `...V` and
+/// `IridescenceStrength`. With a ramp, `u` scales how far across it the view
+/// angle reads and `v` is the row; with none (the Arclight "Glimmer", the
+/// Yubarev "Mirage"), the two are the film's thickness. The app's `film.ts`
+/// draws it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Film {
+    pub u: f32,
+    pub v: f32,
+    pub strength: f32,
+}
+
+/// The film a LayerBlend surface's flags and constants describe.
+fn film_of(sub: &mtl::SubMaterial) -> Option<Film> {
+    let params: Vec<(&str, &str)> = sub.public_params.iter().map(|p| (p.name.as_str(), p.value.as_str())).collect();
+    film_from(&sub.shader, &sub.string_gen_mask, &params)
+}
+
+fn film_from(shader: &str, gen_mask: &str, public_params: &[(&str, &str)]) -> Option<Film> {
+    let flagged = gen_mask.split('%').any(|t| t.eq_ignore_ascii_case("IRIDESCENCE"));
+    if !flagged || !shader.to_ascii_lowercase().contains("layerblend") {
+        return None;
+    }
+    let param = |name: &str| {
+        public_params
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(name))
+            .and_then(|(_, v)| v.trim().parse::<f32>().ok())
+            .unwrap_or(1.0)
+    };
+    let film = Film {
+        u: param("IridescenceThicknessU"),
+        v: param("IridescenceThicknessV"),
+        strength: param("IridescenceStrength"),
+    };
+    (film.strength > 0.0).then_some(film)
 }
 
 /// How a palette stencil decal is coloured (`SubMaterial::stencil`).
@@ -396,6 +439,10 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<SubMaterial>, String> {
                     // black exactly where head and body meet. Read as the
                     // decal slot it would be drawn as a sticker sheet.
                     Some("tone_mask")
+                } else if layered && binding.slot.eq_ignore_ascii_case("TexSlot5") {
+                    // A thin film's colour ramp (`%IRIDESCENCE`); nothing else
+                    // on LayerBlend uses the slot.
+                    Some("iridescence")
                 } else if layered {
                     slot_role(&binding.slot).or_else(|| suffix_role(&binding.path))
                 } else {
@@ -462,6 +509,7 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<SubMaterial>, String> {
                     }
                 },
                 hologram: is_hologram(&sub.shader, &sub.string_gen_mask),
+                film: film_of(sub),
                 params: if layered {
                     numeric_params(&sub.public_params)
                         .into_iter()
@@ -597,6 +645,23 @@ mod tests {
         assert!(is_hologram("Hologram", "%VERTCOLORS"));
         assert!(!is_hologram("Illum", "%NORMAL_MAP%SPECULAR_MAP"));
         assert!(!is_hologram("GlassPBR", "%REFRACTION"));
+    }
+
+    #[test]
+    fn a_thin_film_is_layerblend_with_the_iridescence_flag() {
+        // The S-38 "Scorched" slide, and the Arclight "Glimmer" with no ramp.
+        let scorched = [("IridescenceThicknessV", "1"), ("IridescenceThicknessU", "1"), ("IridescenceStrength", "1")];
+        assert_eq!(
+            film_from("LayerBlend_V2", "%IRIDESCENCE", &scorched),
+            Some(Film { u: 1.0, v: 1.0, strength: 1.0 })
+        );
+        let glimmer = [("IridescenceThicknessU", "0.090000004"), ("IridescenceStrength", "5")];
+        let film = film_from("LayerBlend_V2", "%NORMAL_MAP%IRIDESCENCE", &glimmer).unwrap();
+        assert!((film.u - 0.09).abs() < 1e-6 && film.v == 1.0 && film.strength == 5.0);
+        assert_eq!(film_from("LayerBlend_V2", "%NORMAL_MAP%BLEND_MAP", &scorched), None);
+        // A ship hull's film is the Hangar's to draw.
+        assert_eq!(film_from("HardSurface", "%IRIDESCENCE", &scorched), None);
+        assert_eq!(film_from("LayerBlend_V2", "%IRIDESCENCE", &[("IridescenceStrength", "0")]), None);
     }
 
     #[test]

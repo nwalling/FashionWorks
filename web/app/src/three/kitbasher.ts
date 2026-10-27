@@ -2860,7 +2860,7 @@ function measure(
   const textures = new Set<Texture>(textureSlots(materials));
   for (const material of materials) {
     const m = material as Material & Record<string, unknown>;
-    for (const bag of [m.userData?.fwGrain, m.userData?.fwLive, m.userData?.fwDecal]) {
+    for (const bag of [m.userData?.fwGrain, m.userData?.fwLive, m.userData?.fwDecal, m.userData?.fwFilm]) {
       for (const uniform of Object.values((bag ?? {}) as Record<string, { value: unknown }>)) {
         const texture = uniform.value as Texture | null;
         if (texture && typeof texture === 'object' && 'isTexture' in texture && !texture.userData.shared) textures.add(texture);

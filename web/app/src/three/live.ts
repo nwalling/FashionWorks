@@ -33,6 +33,7 @@
  */
 
 import {
+  ClampToEdgeWrapping,
   Color,
   CompressedArrayTexture,
   DataArrayTexture,
@@ -55,6 +56,7 @@ import {
 import { DEFAULT_PALETTE, linearMean } from '../../../gpu/bake.js';
 import type { ArchiveClient } from '../archive/client';
 import type { LayerRef, MaterialPayload, TexturePayload } from '../worker/archive.worker';
+import { FILM_DECLARE, filmFragment, filmValue, interferenceRamp } from './film';
 import { GLOW_CAP, GLOW_GAIN, type PaletteEntry } from './surface';
 
 export type Submaterial = MaterialPayload['submaterials'][number];
@@ -389,6 +391,27 @@ async function buildControls(
   return { a: cache.get(keyA) ?? null, b: cache.get(keyB) ?? null, c: cache.get(keyC) ?? null };
 }
 
+/** The size a thin film's ramp is read at: they are smooth, and most ship at it. */
+const FILM_RAMP = 128;
+
+/** A thin film's colour ramp (`textures.iridescence`), once per piece. */
+async function filmRamp(path: string, client: ArchiveClient, cache: Map<string, DataTexture | null>): Promise<DataTexture | null> {
+  const key = `f|${path}`;
+  if (!cache.has(key)) {
+    const payload = (await client.texture(path, FILM_RAMP)).texture;
+    if (!payload) {
+      cache.set(key, null);
+    } else {
+      const texture = controlTexture(square(payload, FILM_RAMP), FILM_RAMP);
+      texture.colorSpace = SRGBColorSpace;
+      texture.wrapS = ClampToEdgeWrapping;
+      texture.wrapT = ClampToEdgeWrapping;
+      cache.set(key, texture);
+    }
+  }
+  return cache.get(key) ?? null;
+}
+
 const MAX_LAYERS = 8;
 
 interface Packed {
@@ -613,6 +636,7 @@ export async function liveSurfaces(
     if (!sub.tintable || !sub.layers.length) continue;
     const { a, b, c } = await buildControls(sub, client, options, controls, Math.min(FIRST_SURFACE, options.surfaceSize));
     const packed = pack(sub, material, library);
+    const ramp = sub.film && sub.textures.iridescence ? await filmRamp(sub.textures.iridescence, client, controls) : null;
     const out = new MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 1 });
     out.name = sub.name;
     // The normal map binding is what gives the shader its UVs and tangent
@@ -655,12 +679,15 @@ export async function liveSurfaces(
       fwGlow: { value: Math.min(GLOW_CAP, sub.glow * GLOW_GAIN) },
       fwDetailNormal: { value: DETAIL_NORMAL },
       fwDebug: { value: 0 },
+      // A film (film.ts): its own ramp, or interference by thickness.
+      fwFilmRamp: { value: (ramp ?? (sub.film ? interferenceRamp() : out.normalMap)) as Texture },
+      fwFilm: { value: filmValue(sub.film, Boolean(ramp)) },
     };
     out.userData.fwLive = uniforms;
     out.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, uniforms);
       shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', `#include <common>\n${DECLARE}`)
+        .replace('#include <common>', `#include <common>\n${DECLARE}\n${FILM_DECLARE}`)
         .replace('#include <map_fragment>', `#include <map_fragment>\n${COMPOSITE}`)
         .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = fwRough;')
         .replace('#include <metalnessmap_fragment>', 'float metalnessFactor = fwMetal;')
@@ -668,7 +695,7 @@ export async function liveSurfaces(
         // Glow emits a fraction of the surface's diffuse colour. A metal has none:
         // its colour here is its F0, and emitting that (x4 at the cap) turned polished
         // gold, steel and champagne aluminium flat white under any light.
-        .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += fwColour * (1.0 - fwMetal) * fwGlow;')
+        .replace('#include <emissivemap_fragment>', `${filmFragment('fwMetal')}\n#include <emissivemap_fragment>\n  totalEmissiveRadiance += fwColour * (1.0 - fwMetal) * fwGlow;`)
         .replace('#include <aomap_fragment>', '#include <aomap_fragment>\n  reflectedLight.indirectDiffuse *= fwAo;\n  reflectedLight.indirectSpecular *= fwAo;')
         .replace('#include <dithering_fragment>', '#include <dithering_fragment>\n  if (fwDebug == 1) gl_FragColor = vec4(fwColour, 1.0);');
     };

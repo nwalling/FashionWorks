@@ -184,6 +184,10 @@ export interface MaterialPayload {
     /** Light rather than a surface: `%HOLOGRAPHIC_PROJECTION` or the
      * `Hologram` shader. Absent on older cores. */
     hologram?: boolean;
+    /** A thin film (`material::Film`): LayerBlend compiled with
+     * `%IRIDESCENCE`, its ramp in `textures.iridescence` where it has one.
+     * Absent for anything else, and on older cores. */
+    film?: { u: number; v: number; strength: number };
   }>;
   /** Every distinct detail layer the piece references, by lowercased path. */
   library: Record<string, LayerMaterial>;
