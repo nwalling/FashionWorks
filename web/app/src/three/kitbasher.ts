@@ -1128,6 +1128,36 @@ export class Kitbasher {
       return hit;
     }
 
+    const piece = await this.build(item);
+    const objects = [...piece.objects];
+    const materials = [...piece.materials];
+    const overrides = [...piece.overrides];
+    const refines = piece.refine ? [piece.refine] : [];
+    // The parts its skin ports carry are worn with it, each in its own
+    // material: the Deadhead helmets' hair, the superheavy suits' arms and legs.
+    for (const part of item.attached ?? []) {
+      const built = await this.build(part.item);
+      objects.push(...built.objects);
+      materials.push(...built.materials);
+      overrides.push(...built.overrides);
+      if (built.refine) refines.push(built.refine);
+    }
+
+    const loaded = measure(key, objects, materials, overrides, piece.helpers);
+    if (refines.length) loaded.refines = refines;
+    this.cache.set(key, loaded);
+    this.evict(loaded);
+    return loaded;
+  }
+
+  /** One piece's meshes in its material, before it is measured and cached. */
+  private async build(item: CatalogueItem): Promise<{
+    objects: Object3D[];
+    materials: Material[];
+    overrides: AttachmentOverride[];
+    helpers?: Record<string, Float32Array>;
+    refine?: () => Promise<number>;
+  }> {
     // Meshes first: the compositor needs to know where each submaterial sits
     // in UV space to bake them all into one atlas.
     const socket = item.bind_mode === 'socket';
@@ -1174,17 +1204,13 @@ export class Kitbasher {
     eightWhereNeeded(objects);
     decalsWhereNeeded(objects);
 
-    const loaded = measure(
-      key,
+    return {
       objects,
       materials,
-      payloads.flatMap((p) => p.overrides ?? []),
-      socket ? (payloads[0] as PropPayload | undefined)?.helperTransforms : undefined,
-    );
-    if (refine) loaded.refines = [refine];
-    this.cache.set(key, loaded);
-    this.evict(loaded);
-    return loaded;
+      overrides: payloads.flatMap((p) => p.overrides ?? []),
+      helpers: socket ? (payloads[0] as PropPayload | undefined)?.helperTransforms : undefined,
+      refine: refine ?? undefined,
+    };
   }
 
   /** The figure's parts for the current body, once built. */

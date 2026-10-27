@@ -356,15 +356,17 @@ pub fn build_catalogue(dcb: &[u8], ini: &str, skeleton: &str) -> Result<String, 
     // JSON tree rather than all of them (`db::armor_records`).
     let mut items: Vec<serde_json::Value> = db::armor_records(&database)
         .filter_map(|r| build::build_item(&r.value, &palettes, &makers, &loc, skeleton, &r.source_path))
-        // NPC-only records are in the DataCore and are not wearable, so they
-        // never reach the listing.
-        .filter(|i| {
-            !i["flags"]
-                .as_array()
-                .map(|f| f.iter().any(|x| x == "npc"))
-                .unwrap_or(false)
-        })
         .collect();
+    // The parts a piece wears with it, before anything leaves the list.
+    build::resolve_attached(&mut items);
+    // NPC-only records are in the DataCore and are not wearable, so they
+    // never reach the listing.
+    items.retain(|i| {
+        !i["flags"]
+            .as_array()
+            .map(|f| f.iter().any(|x| x == "npc"))
+            .unwrap_or(false)
+    });
 
     // Sorted before sets are assigned, because `assign_sets` keys on the order
     // it sees and the pipeline sorts here too. A catalogue built in a different

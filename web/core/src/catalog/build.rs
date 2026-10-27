@@ -280,10 +280,50 @@ pub fn build_item(
         "socket": socket_for(slot, bind_mode),
         "flags": flags,
         "ports": super::gear::ports_for(record),
+        // Resolved to the parts' own items once the catalogue is built
+        // (`resolve_attached`).
+        "attached": super::gear::skin_parts_for(record)
+            .into_iter()
+            .map(|(port, class_name)| json!({ "port": port, "class_name": class_name }))
+            .collect::<Vec<_>>(),
         "outfit": super::outfit_of(slot),
         "chunks": chunks_for(record),
         "hidden": hidden_for(record),
     }))
+}
+
+/// Hand each item the parts its skin ports carry, as those parts' own items:
+/// their meshes and their materials (the superheavy suits' arms have a `.mtl`
+/// of their own). A part that is not in the catalogue is dropped. Run before
+/// anything filters the list, so a part with no name of its own still
+/// resolves.
+pub fn resolve_attached(items: &mut [Value]) {
+    let parts: HashMap<String, Value> = items
+        .iter()
+        .filter_map(|item| {
+            let class = item["class_name"].as_str()?.to_ascii_lowercase();
+            let mut part = item.clone();
+            if let Some(object) = part.as_object_mut() {
+                object.remove("attached");
+            }
+            Some((class, part))
+        })
+        .collect();
+    for item in items.iter_mut() {
+        let Some(attached) = item.get_mut("attached").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        attached.retain_mut(|entry| {
+            let class = entry["class_name"].as_str().unwrap_or("").to_ascii_lowercase();
+            match parts.get(&class) {
+                Some(part) => {
+                    entry["item"] = part.clone();
+                    true
+                }
+                None => false,
+            }
+        });
+    }
 }
 
 /// Group colour variants so the viewer shows one entry with swatches.
@@ -416,6 +456,26 @@ mod tests {
         assert_eq!(bind_mode_for(&[]), "skinned");
         assert_eq!(socket_for("backpack", "socket"), Some("backpack_attach_1_override"));
         assert_eq!(socket_for("backpack", "skinned"), None);
+    }
+
+    #[test]
+    fn a_piece_wears_its_parts_own_meshes_and_materials() {
+        let mut items = vec![
+            json!({ "class_name": "cds_combat_superheavy_suit_01_04_01",
+                    "geometry": [{ "source": "m_cds_combat_superheavy_core_01.skin" }],
+                    "attached": [{ "port": "Armor_Arms", "class_name": "cds_combat_superheavy_arms_01_04_01" },
+                                 { "port": "Armor_Legs", "class_name": "not_in_the_catalogue" }] }),
+            json!({ "class_name": "cds_combat_superheavy_arms_01_04_01",
+                    "geometry": [{ "source": "m_cds_combat_superheavy_arms_01.skin" }],
+                    "materials": ["m_cds_combat_superheavy_arms_01_04.mtl"], "attached": [] }),
+        ];
+        resolve_attached(&mut items);
+        let attached = items[0]["attached"].as_array().unwrap();
+        assert_eq!(attached.len(), 1, "a part the catalogue lacks is dropped");
+        assert_eq!(attached[0]["port"], "Armor_Arms");
+        assert_eq!(attached[0]["item"]["materials"][0], "m_cds_combat_superheavy_arms_01_04.mtl");
+        assert!(attached[0]["item"].get("attached").is_none(), "a part carries no parts of its own");
+        assert!(items[1]["attached"].as_array().unwrap().is_empty());
     }
 
     #[test]

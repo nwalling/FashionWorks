@@ -20,6 +20,7 @@ use super::{attach_first, component, first, flags_for, sets, tint, Localization,
 
 const PORT_COMPONENT: &str = "SItemPortContainerComponentParams";
 const BONE_IMPLEMENTATION: &str = "SItemPortDefAttachmentImplementationBone";
+const SKIN_IMPLEMENTATION: &str = "SItemPortDefAttachmentImplementationSkin";
 const LOADOUT_COMPONENT: &str = "SEntityComponentDefaultLoadoutParams";
 const WEAPON_COMPONENT: &str = "SCItemWeaponComponentParams";
 
@@ -53,6 +54,34 @@ fn non_empty(value: Option<&Value>) -> Value {
 
 /// The ports a record declares that hang an item off a bone. Skin-implemented
 /// ports -- how armour layers onto the body -- are not holsters.
+/// The parts a wearable's own skin ports carry by default, as `(port, class
+/// name)`: the Deadhead helmets' hair (`Hair_Ext_ItemPort`), the CDS superheavy
+/// suits' arms and legs. Each is a record of its own, worn with the piece.
+pub fn skin_parts_for(record: &Value) -> Vec<(String, String)> {
+    let Some(ports) = component(record, PORT_COMPONENT)
+        .and_then(|c| c.get("Ports"))
+        .and_then(Value::as_array)
+    else {
+        return Vec::new();
+    };
+    ports
+        .iter()
+        .filter(|p| {
+            p.get("AttachmentImplementation")
+                .and_then(|i| i.get("_Type_"))
+                .and_then(Value::as_str)
+                == Some(SKIN_IMPLEMENTATION)
+        })
+        .filter_map(|p| {
+            let port = p.get("Name")?.as_str().filter(|s| !s.is_empty())?;
+            let class = p.get("defaultItem")?.get("entityClass")?.as_str()?;
+            // A file reference: `file://./../…/srvl_helmet_01_06_01_hair_extension.json`.
+            let stem = class.rsplit('/').next()?.strip_suffix(".json")?;
+            (!stem.is_empty()).then(|| (port.to_string(), stem.to_ascii_lowercase()))
+        })
+        .collect()
+}
+
 pub fn ports_for(record: &Value) -> Value {
     let Some(ports) = component(record, PORT_COMPONENT)
         .and_then(|c| c.get("Ports"))
@@ -297,6 +326,29 @@ pub fn link_gear_variants(items: &mut [Value]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_skin_port_carries_a_part_worn_with_the_piece() {
+        let port = |name: &str, implementation: &str, class: &str| json!({
+            "_Type_": "SItemPortDef", "Name": name,
+            "AttachmentImplementation": { "_Type_": implementation },
+            "defaultItem": { "_Type_": "SItemPortDefaultItemDef", "entityClass": class },
+        });
+        let record = json!({ "_RecordValue_": { "Components": [
+            { "_Type_": "SItemPortContainerComponentParams", "Ports": [
+                port("Hair_Ext_ItemPort", SKIN_IMPLEMENTATION,
+                     "file://./../../medium/srvl_helmet_01_06_01_hair_extension.json"),
+                // A bone port's default is gear on a mount, not part of the piece.
+                port("radar", BONE_IMPLEMENTATION, "file://./radar.json"),
+                port("Armor_Legs", SKIN_IMPLEMENTATION, ""),
+            ]},
+        ]}});
+        assert_eq!(
+            skin_parts_for(&record),
+            vec![("Hair_Ext_ItemPort".to_string(), "srvl_helmet_01_06_01_hair_extension".to_string())]
+        );
+        assert!(skin_parts_for(&json!({})).is_empty());
+    }
 
     #[test]
     fn slots_follow_the_attach_type() {

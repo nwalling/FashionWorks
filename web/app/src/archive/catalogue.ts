@@ -38,6 +38,10 @@ export interface CatalogueItem {
   anim_set?: string | null;
   /** Gear only: what it ships with, by port -- a rifle's magazine. */
   default_children?: Array<{ port: string; class_name: string }>;
+  /** Armour: the parts its skin ports carry, worn with it -- the Deadhead
+   * helmets' hair, the CDS superheavy suits' arms and legs -- each with its
+   * own meshes and material. Absent on older cores. */
+  attached?: Array<{ port: string; class_name: string; item: CatalogueItem }>;
   /** `armour` or `clothing`; the slot decides it. CLOTHING.md. */
   outfit?: Outfit;
   /** The body zones this piece covers and at which layer: 0 the body, 1 shirt,

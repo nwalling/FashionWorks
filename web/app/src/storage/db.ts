@@ -25,7 +25,8 @@ export const STORE_HANDLES = 'handles';
  * a couple of minutes and migration code costs forever.
  */
 // 2: tint carries the palette's stencil decal.
-export const CATALOGUE_VERSION = 2;
+// 3: armour carries the parts its skin ports wear with it (`attached`).
+export const CATALOGUE_VERSION = 3;
 
 export interface CachedCatalogue {
   /** The archive fingerprint this was built from. */
