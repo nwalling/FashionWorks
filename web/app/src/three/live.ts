@@ -433,9 +433,10 @@ function pack(sub: Submaterial, material: MaterialPayload, library: Library): Pa
     const resolved = material.library[ref.path.toLowerCase()];
     const metal = resolved?.metal ?? false;
     tint.splice(slot * 4, 4, ref.tintColor[0]!, ref.tintColor[1]!, ref.tintColor[2]!, ref.paletteTint);
-    // A metal's response is its Specular, a dielectric's its Diffuse.
+    // A metal's response is its Specular, a dielectric's its Diffuse. A metal
+    // not stated as one (TintMode 0) is 2: a thin film takes its tint's place.
     const r = metal ? (resolved?.specular ?? [0.04, 0.04, 0.04]) : (resolved?.diffuse ?? [1, 1, 1]);
-    response.splice(slot * 4, 4, r[0]!, r[1]!, r[2]!, metal ? 1 : 0);
+    response.splice(slot * 4, 4, r[0]!, r[1]!, r[2]!, metal ? (resolved?.tintMode === 2 ? 1 : 2) : 0);
     const colour = resolved?.diffuseTex ? library.diffuseSlice.get(resolved.diffuseTex) : undefined;
     const normal = resolved?.normalTex ? library.normalSlice.get(resolved.normalTex) : undefined;
     tex.splice(slot * 4, 4,
@@ -493,15 +494,20 @@ void fwLayer(int i, vec2 uv, vec2 dx, vec2 dy, out vec3 colour, out float rough,
   vec4 response = fwLayerResponse[i];
   vec4 tex = fwLayerTex[i];
   vec2 gp = fwLayerGloss[i];
-  metal = response.a;
-  vec3 tint = tintRow.rgb;
+  metal = min(response.a, 1.0);
+  // Under a thin film a grey tint does not darken a weapon's bare metal: the
+  // S-38 "Scorched", tinted near-black, and the F55, tinted white, are the
+  // same pastel in game. A coloured one stays (the "Igniter" tan is orange).
+  float tintChroma = max(max(tintRow.r, tintRow.g), tintRow.b) - min(min(tintRow.r, tintRow.g), tintRow.b);
+  vec3 own = fwFilm.z > 0.0 && response.a > 1.5 && tintChroma < 0.1 ? vec3(1.0) : tintRow.rgb;
+  vec3 tint = own;
   float glossScale = 1.0;
   int index = int(tintRow.a + 0.5);
   if (index > 0 && index <= 3) {
     // A metal takes the entry's specular, a dielectric its colour; either
     // modulates the layer's own tint rather than replacing it.
     vec3 source = metal > 0.5 ? fwPaletteSpec[index - 1] : fwPaletteColor[index - 1];
-    tint = source * tintRow.rgb;
+    tint = source * own;
     glossScale = clamp(fwPaletteGloss[index - 1], 0.05, 1.0);
   }
   tint *= response.rgb;
@@ -687,7 +693,7 @@ export async function liveSurfaces(
     out.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, uniforms);
       shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', `#include <common>\n${DECLARE}\n${FILM_DECLARE}`)
+        .replace('#include <common>', `#include <common>\n${FILM_DECLARE}\n${DECLARE}`)
         .replace('#include <map_fragment>', `#include <map_fragment>\n${COMPOSITE}`)
         .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = fwRough;')
         .replace('#include <metalnessmap_fragment>', 'float metalnessFactor = fwMetal;')

@@ -1,12 +1,23 @@
 /** Thin films: LayerBlend compiled with `%IRIDESCENCE` (`material::Film`).
  *
- * A film colours what a metal reflects, and shows by how dark the metal is.
- * Films are mostly laid over near-black metals (the Starchaser's
- * `iridescence_metal`, the Scorched slide), which take all of it; the Aves
- * Shrike's light blue steel takes about half, and under its ramp's green is
- * the teal it is in game; the white anodised panels beside the Starchaser's
- * violet, in the same submaterial, stay silver. A non-metal's own reflection
- * is too faint to carry one at all.
+ * A film colours what a metal reflects. How much of it shows, checked
+ * against the wiki's in-game shots of 30 sets:
+ *
+ * - by how dark the metal is: a near-black one (the Starchaser's
+ *   `iridescence_metal`) takes all of it, and the white anodised panels
+ *   beside the Starchaser's violet, in the same submaterial, stay silver;
+ * - a plain grey one takes about half: the "Scorched" weapons are silver with
+ *   a pastel sheen in game, the armour bronze;
+ * - a colourful one takes it fully (the Aves Shrike's light blue steel, under
+ *   its ramp's green, is the teal it is in game) until it is colourful enough
+ *   to keep its paint (the Strata "Greycat" bronze, the Chiron "Heartthrob"
+ *   purple);
+ * - a weapon's bare metal (a layer not stated as metal, `TintMode` 0) is not
+ *   darkened by a grey tint under a film: the S-38 "Scorched" slide, tinted
+ *   near-black, is the same pastel as the F55, tinted white. A coloured tint
+ *   stays (live.ts).
+ *
+ * A non-metal's own reflection is too faint to carry one at all.
  *
  * Where the material names a ramp (`TexSlot5`), the ramp is the look: read
  * across by how squarely the surface faces the viewer, scaled by
@@ -19,10 +30,14 @@
  * blue near its bottom; the Shrike's ribs are teal head on and violet turning
  * away, from a ramp of green, mauve and grey.
  *
- * Where it names none (the Arclight "Glimmer", the Yubarev "Mirage"), the
- * colour is thin-film interference at the material's thickness, the ship
- * renders' ramp (`renders/sc_materials.py`, `_thin_film_ramp`): the Glimmer's
- * 0.09 is the gold it is in game. A grazing view reads the film thinner.
+ * Where it names none (the Arclight "Glimmer", the "Mirage" and "Venom"
+ * paints), the colour is thin-film interference at the material's thickness,
+ * the ship renders' ramp (`renders/sc_materials.py`, `_thin_film_ramp`), at
+ * the place `FILM_THICKNESS` fits to the three in game. A grazing view reads
+ * the film thinner.
+ *
+ * Still wrong: the Monolith "Shadowflux" ramp is a yellow-green stripe on
+ * grey, read here as the stripe, and the game's set is silver.
  */
 
 import { ClampToEdgeWrapping, DataTexture, LinearFilter, RGBAFormat, SRGBColorSpace, UnsignedByteType, Vector4 } from 'three';
@@ -36,8 +51,25 @@ export interface Film {
 /** How far across its ramp a film is read head on: the Scorched slide square
  * to the camera is the Fire Rats ramp's pink at 0.8, where its edge is blue. */
 const FILM_REACH = 0.8;
-/** How much thinner a film with no ramp reads at a grazing view (the ship renders'). */
-const FILM_EDGE = 0.7;
+/** How much thinner a film with no ramp reads at a grazing view. */
+const FILM_EDGE = 0.85;
+/** Where on the interference ramp a film with no ramp sits: this times the
+ * square root of its thickness. The three in the data are the Yubarev
+ * "Mirage" at 0.045, blue and violet in game, the "Venom" at 0.06, green, and
+ * the Arclight "Glimmer" at 0.09, gold; read straight, as the ship renders
+ * read theirs, all three are first-order gold. */
+const FILM_THICKNESS = 1.18;
+/** How much of its film a plain grey metal takes: the "Scorched" weapons and
+ * armour are silver and bronze in game, pastel over their grey, where the
+ * Shrike's blue steel, as bright, is the ramp's teal. A near-black metal
+ * takes all of it. The ship renders found the same on the Torchbearer: the
+ * film shows on a paint by how colourful it already is. */
+const FILM_GREY = 0.55;
+/** A metal already this colourful (its brightest channel less its dimmest,
+ * linear) keeps its paint: the Strata "Greycat" bronze and the Chiron
+ * "Heartthrob" purple are their paint in game, not their ramps' lavender and
+ * red. The Shrike's light blue steel, at 0.21, still takes its film. */
+const FILM_KEEPS = [0.25, 0.45] as const;
 
 /** Declarations for the fragment shader. */
 export const FILM_DECLARE = /* glsl */ `
@@ -56,9 +88,13 @@ export function filmFragment(metal: string): string {
       ? vec2( fwFilm.x * mix( ${FILM_EDGE.toFixed(2)}, 1.0, fwFacing ), 0.5 )
       : vec2( fwFacing * fwFilm.x, fwFilm.y );
     vec3 fwFilmColour = texture2D( fwFilmRamp, clamp( fwFilmUv, 0.0, 1.0 ) ).rgb;
-    // Shown by how dark the metal under it is: a bright one's own reflection drowns it.
+    // Shown by how dark the metal under it is: a bright one's own reflection
+    // drowns it. A colourful one keeps its paint.
     float fwUnder = dot( diffuseColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
-    float fwFilmAmount = fwFilm.z * ${metal} * clamp( 1.0 - fwUnder, 0.0, 1.0 );
+    float fwChroma = max( max( diffuseColor.r, diffuseColor.g ), diffuseColor.b ) - min( min( diffuseColor.r, diffuseColor.g ), diffuseColor.b );
+    float fwKeeps = 1.0 - smoothstep( ${FILM_KEEPS[0].toFixed(2)}, ${FILM_KEEPS[1].toFixed(2)}, fwChroma );
+    float fwTakes = max( 1.0 - smoothstep( 0.03, 0.15, fwUnder ), smoothstep( 0.05, 0.20, fwChroma ) );
+    float fwFilmAmount = clamp( fwFilm.z * ${metal} * ( 1.0 - fwUnder ) * mix( ${FILM_GREY.toFixed(2)}, 1.0, fwTakes ) * fwKeeps, 0.0, 1.0 );
     diffuseColor.rgb = mix( diffuseColor.rgb, fwFilmColour, fwFilmAmount );
   }
 `;
@@ -67,14 +103,16 @@ export function filmFragment(metal: string): string {
 /** The `fwFilm` uniform's value: no film is a zero amount. */
 export function filmValue(film: Film | undefined, ownRamp: boolean): Vector4 {
   if (!film) return new Vector4(0, 0, 0, 0);
-  const amount = Math.min(1, Math.max(0, film.strength));
+  // Strength scales the amount before it is clamped: the films with no ramp
+  // are at 5, and show over the Venom's mid grey metal as fully as the
+  // Starchaser's at 1 do over near black.
+  const strength = Math.max(0, film.strength);
   // The row counts up from the ramp's bottom edge.
-  if (ownRamp) return new Vector4(film.u * FILM_REACH, 1 - film.v * FILM_REACH, amount, 0);
-  // With no ramp there is no row, and `u` is the thickness, 0 to 1 across the
-  // ramp's 80 to 800 nm: the Glimmer's 0.09 is gold, the Mirage's 0.045 pale.
+  if (ownRamp) return new Vector4(film.u * FILM_REACH, 1 - film.v * FILM_REACH, strength, 0);
+  // With no ramp there is no row, and `u` is the thickness.
   // The template's 1 and 1 (20 armour materials) state no film at all.
   if (film.u >= 1 && film.v >= 1) return new Vector4(0, 0, 0, 0);
-  return new Vector4(film.u, 0.5, amount, 1);
+  return new Vector4(Math.min(1, FILM_THICKNESS * Math.sqrt(film.u)), 0.5, strength, 1);
 }
 
 let interference: DataTexture | null = null;

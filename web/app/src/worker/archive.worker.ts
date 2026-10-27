@@ -146,6 +146,9 @@ export interface LayerMaterial {
   specular: Float32Array;
   shininess: number;
   metal: boolean;
+  /** `PublicParams TintMode` where the layer states one: under a thin film
+   * a grey tint darkens only a mode 2 metal. Absent on older cores. */
+  tintMode?: number | null;
   diffuseTex: string | null;
   normalTex: string | null;
   /** The layer's own `TexMod` tiling, multiplied into the reference's. */

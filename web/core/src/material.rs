@@ -82,6 +82,9 @@ pub struct LayerMaterial {
     /// 0-1, the layer's own gloss before the armour's per-layer `GlossMult`.
     pub shininess: f32,
     pub metal: bool,
+    /// `PublicParams TintMode`, where the layer states one. Under a thin film
+    /// a grey tint darkens only a mode 2 metal (see `Film`).
+    pub tint_mode: Option<u8>,
     /// Tiling diffuse (`TexSlot1`), where it has one.
     pub diffuse_tex: Option<String>,
     /// Tiling `_ddna` (`TexSlot2`), which carries the per-pixel gloss in its
@@ -191,8 +194,9 @@ pub struct SubMaterial {
 /// from `PublicParams`: `IridescenceThicknessU`, `...V` and
 /// `IridescenceStrength`. With a ramp, `u` scales how far across it the view
 /// angle reads and `v` is the row; with none (the Arclight "Glimmer", the
-/// Yubarev "Mirage"), the two are the film's thickness. The app's `film.ts`
-/// draws it.
+/// Yubarev "Mirage"), `u` is the film's thickness. The app's `film.ts` draws
+/// it, over metals: a `TintMode` 2 one keeps its tint under it, any other
+/// keeps only a coloured one (`LayerMaterial::tint_mode`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Film {
     pub u: f32,
@@ -535,17 +539,21 @@ fn numeric_params(params: &[mtl::PublicParam]) -> Vec<(String, Vec<f32>)> {
         .collect()
 }
 
+/// A layer's `PublicParams TintMode`, where it states one.
+fn tint_mode_of(params: &[mtl::PublicParam]) -> Option<u8> {
+    params
+        .iter()
+        .find(|p| p.name.eq_ignore_ascii_case("TintMode"))
+        .and_then(|p| p.value.trim().parse::<f32>().ok())
+        .map(|v| v as u8)
+}
+
 /// Parse one detail-library `.mtl`.
 pub fn parse_layer(path: &str, bytes: &[u8]) -> Option<LayerMaterial> {
     let file: MtlFile = mtl::parse_mtl(bytes).ok()?;
     let sub = file.materials.first()?;
 
-    let tint_mode = sub
-        .public_params
-        .iter()
-        .find(|p| p.name.eq_ignore_ascii_case("TintMode"))
-        .and_then(|p| p.value.trim().parse::<f32>().ok())
-        .map(|v| v as u8);
+    let tint_mode = tint_mode_of(&sub.public_params);
 
     let mut diffuse_tex = None;
     let mut normal_tex = None;
@@ -569,6 +577,7 @@ pub fn parse_layer(path: &str, bytes: &[u8]) -> Option<LayerMaterial> {
         // The archive stores Shininess 0-255.
         shininess: (sub.shininess / 255.0).clamp(0.0, 1.0),
         metal: LayerMaterial::decide_metal(tint_mode, sub.diffuse, sub.specular),
+        tint_mode,
         diffuse_tex,
         normal_tex,
         tile_u: tex_mod_tile_u(&sub.authored_textures),
@@ -776,6 +785,22 @@ mod tests {
         assert_eq!(tex_mod_tile_u(&[texture("TexSlot2", "4")]), 1.0, "only the diffuse's");
         assert_eq!(tex_mod_tile_u(&[texture("TexSlot1", "0")]), 1.0, "a zero tiling is no tiling");
         assert_eq!(tex_mod_tile_u(&[]), 1.0);
+    }
+
+    #[test]
+    fn a_layer_keeps_the_tint_mode_it_states() {
+        let params = |mode: &str| {
+            vec![
+                mtl::PublicParam { name: "LayerTiling".into(), value: "1".into() },
+                mtl::PublicParam { name: "TintMode".into(), value: mode.into() },
+            ]
+        };
+        // iridescence_metal, the Starchaser's: its near-black violet tint stays under its film.
+        assert_eq!(tint_mode_of(&params("2")), Some(2));
+        // weapon_brushed_03, the S-38's: a metal by its numbers, its grey tint the film's to replace.
+        assert_eq!(tint_mode_of(&params("0")), Some(0));
+        assert!(LayerMaterial::decide_metal(Some(0), [0.0; 3], [0.28; 3]));
+        assert_eq!(tint_mode_of(&[]), None);
     }
 
     #[test]

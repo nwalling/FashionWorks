@@ -1233,6 +1233,11 @@ impl Archive {
             js_sys::Reflect::set(&value, &"metal".into(), &resolved.metal.into())?;
             js_sys::Reflect::set(
                 &value,
+                &"tintMode".into(),
+                &resolved.tint_mode.map_or(JsValue::NULL, |m| JsValue::from(m)),
+            )?;
+            js_sys::Reflect::set(
+                &value,
                 &"diffuseTex".into(),
                 &resolved.diffuse_tex.as_deref().map_or(JsValue::NULL, JsValue::from_str),
             )?;
