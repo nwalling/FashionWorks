@@ -53,7 +53,7 @@ import {
   Vector2,
 } from 'three';
 
-import { DEFAULT_PALETTE, linearMean } from '../../../gpu/bake.js';
+import { DEFAULT_PALETTE, linearMean, paletteEntryIsMetal } from '../../../gpu/bake.js';
 import type { ArchiveClient } from '../archive/client';
 import type { LayerRef, MaterialPayload, TexturePayload } from '../worker/archive.worker';
 import { FILM_DECLARE, filmFragment, filmValue, interferenceRamp } from './film';
@@ -468,6 +468,7 @@ uniform sampler2DArray fwDiffuse;
 uniform sampler2DArray fwNormalGloss;
 uniform vec3 fwPaletteColor[3];
 uniform vec3 fwPaletteSpec[3];
+uniform float fwPaletteMetal[3];
 uniform float fwPaletteGloss[3];
 uniform vec4 fwLayerTint[8];
 uniform vec4 fwLayerResponse[8];
@@ -503,14 +504,25 @@ void fwLayer(int i, vec2 uv, vec2 dx, vec2 dy, out vec3 colour, out float rough,
   vec3 tint = own;
   float glossScale = 1.0;
   int index = int(tintRow.a + 0.5);
+  vec3 resp = response.rgb;
   if (index > 0 && index <= 3) {
     // A metal takes the entry's specular, a dielectric its colour; either
     // modulates the layer's own tint rather than replacing it.
-    vec3 source = metal > 0.5 ? fwPaletteSpec[index - 1] : fwPaletteColor[index - 1];
+    // And an entry that is a metal on its own terms -- a black tint under a
+    // bright specular, which is what the game's spec-gloss paint means by bare
+    // metal -- makes a metal of whatever layer it paints: the standard P8-SC
+    // is a dielectric paint layer on such an entry and is silver in game, not
+    // the black its tint colour multiplies to.
+    bool entryMetal = metal < 0.5 && fwPaletteMetal[index - 1] > 0.5;
+    vec3 source = (metal > 0.5 || entryMetal) ? fwPaletteSpec[index - 1] : fwPaletteColor[index - 1];
     tint = source * own;
     glossScale = clamp(fwPaletteGloss[index - 1], 0.05, 1.0);
+    if (entryMetal) {
+      metal = 1.0;
+      resp = vec3(1.0);
+    }
   }
-  tint *= response.rgb;
+  tint *= resp;
   colour = tint;
   vec2 tuv = uv * tex.z;
   vec2 tdx = dx * tex.z;
@@ -634,6 +646,7 @@ export async function liveSurfaces(
   const paletteColor = entries.map((p) => new Color(srgbToLinear(p.color[0]), srgbToLinear(p.color[1]), srgbToLinear(p.color[2])));
   const paletteSpec = entries.map((p) => new Color(srgbToLinear(p.spec[0]), srgbToLinear(p.spec[1]), srgbToLinear(p.spec[2])));
   const paletteGloss = entries.map((p) => p.glossiness);
+  const paletteMetal = entries.map((p) => (paletteEntryIsMetal(p) ? 1 : 0));
 
   // An array sampler has to be bound even where unused, and to an array.
   const blank = placeholderArray();
@@ -670,6 +683,7 @@ export async function liveSurfaces(
       fwNormalGloss: { value: (library.normal ?? blank) as Texture },
       fwPaletteColor: { value: paletteColor },
       fwPaletteSpec: { value: paletteSpec },
+      fwPaletteMetal: { value: paletteMetal },
       fwPaletteGloss: { value: paletteGloss },
       fwLayerTint: { value: packed.tint },
       fwLayerResponse: { value: packed.response },

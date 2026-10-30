@@ -80,4 +80,11 @@ export function rasterise(image: TexImageSource, size: number): Uint8ClampedArra
 
 export function linearMean(rgba: Uint8Array | Uint8ClampedArray): number;
 
+/** Whether a palette entry is a metal on its own terms: a black tint under a
+ * bright specular. Such an entry makes a metal of whatever layer it paints. */
+export function paletteEntryIsMetal(entry: {
+  readonly color: readonly [number, number, number];
+  readonly spec: readonly [number, number, number];
+}): boolean;
+
 export function meanRgb(pixels: Uint8Array): [number, number, number];

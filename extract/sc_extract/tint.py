@@ -108,6 +108,22 @@ def safe_stem(value: str) -> str:
     return _UNSAFE.sub("_", value).strip("_")[:120] or "material"
 
 
+def palette_entry_is_metal(entry: Layer) -> bool:
+    """Whether a palette entry is a metal on its own terms: a black tint under a
+    bright specular, which is how the game's spec-gloss paints say bare metal
+    (the Behring weapon default: tint (0,0,0) under specular (143,143,143)).
+    Such an entry makes a metal of whatever layer it paints, dielectric or
+    not. Entries are sRGB 0-1; the thresholds are linear luminance. 425 of
+    the 7,269 palette entries in 4.10.2 qualify, most of them the default
+    weapon palettes, whose standard skins drew black instead of silver."""
+
+    def lum(c: tuple[float, float, float]) -> float:
+        r, g, b = (srgb_to_linear(np.array(c, dtype=np.float32))).tolist()
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+    return lum(entry.color) < 0.012 and lum(entry.spec) > 0.07
+
+
 def _luminance(rgb: tuple[float, float, float]) -> float:
     return 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]
 
@@ -462,7 +478,7 @@ def layered_key(sub, palette: list[Layer], wear: bool = True) -> str:
         )
     parts.append(
         f"wear:{WEAR_THRESHOLD}:{WEAR_FALLOFF}:metal:{METAL_F0_THRESHOLD}"
-        f":diffuse:buckets:{sorted(BLEND_BUCKETS.items())}:tintmul:metalnorm:tintmode2:palspec"
+        f":diffuse:buckets:{sorted(BLEND_BUCKETS.items())}:tintmul:metalnorm:tintmode2:palspec:entrymetal"
         f"{'' if wear else ':unworn'}"
     )
     return hashlib.sha1(";".join(parts).encode()).hexdigest()[:10]
@@ -590,7 +606,16 @@ def compose_layered(
             # five that differ only in specular came out pixel-identical.
             # Confirmed against CIG's own studio renders, which show the blue,
             # green, red and yellow the specular predicts.
-            source = chosen.spec if metallic else chosen.color
+            # And an entry that is a metal on its own terms -- a black tint
+            # under a bright specular, the game's spec-gloss way of saying bare
+            # metal -- makes a metal of whatever layer it paints, dielectric or
+            # not. The standard P8-SC's body is a dielectric paint layer on
+            # such an entry (tint 0,0,0 under spec 143,143,143) and is silver
+            # in game, not the black its tint colour multiplies to. 425 of
+            # 7,269 palette entries are of this kind, the default weapon
+            # palettes among them.
+            entry_metal = not metallic and palette_entry_is_metal(chosen)
+            source = chosen.spec if (metallic or entry_metal) else chosen.color
             # The palette modulates the layer's own TintColor, it does not
             # replace it. 966 of 1984 palette-tinted base layers carry a
             # non-white TintColor, median 0.50, so discarding it rendered half
@@ -602,10 +627,16 @@ def compose_layered(
             )
             gloss_scale = max(0.05, min(1.0, chosen.glossiness))
         else:
+            entry_metal = False
             tint = np.array(entry.tint_color, dtype=np.float32)
             gloss_scale = 1.0
 
-        if detail is not None:
+        if entry_metal:
+            # The entry's specular is the surface's F0; the layer's own diffuse
+            # (a paint's 0.88) is not a term in a metal, and the layer draws as
+            # one from here on, its texture as pattern.
+            metallic = 1.0
+        elif detail is not None:
             if metallic:
                 # Metal has no diffuse; its base colour is its reflectance.
                 tint = tint * np.array(detail.specular, dtype=np.float32)

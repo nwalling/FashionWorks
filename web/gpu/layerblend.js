@@ -120,6 +120,10 @@ uniform int uOwnerId;
 uniform vec3 uPaletteColor[3];
 uniform vec3 uPaletteSpec[3];
 uniform float uPaletteGloss[3];
+// 1 where the entry is a metal on its own terms: a black tint under a bright
+// specular, the game's spec-gloss way of saying bare metal. Such an entry
+// makes a metal of whatever layer it paints (see evaluateLayer).
+uniform float uPaletteMetal[3];
 
 // --- per layer --------------------------------------------------------------
 // rgb: the layer reference's own TintColor, linear, from the armour .mtl.
@@ -196,6 +200,7 @@ void evaluateLayer(int i, vec2 uv, out vec3 colour, out float rough, out float m
   metal = response.a;
 
   vec3 tint = tintRow.rgb;
+  vec3 resp = response.rgb;
   float glossScale = 1.0;
   int index = int(tintRow.a + 0.5);
   if (index > 0 && index <= 3) {
@@ -206,15 +211,25 @@ void evaluateLayer(int i, vec2 uv, out vec3 colour, out float rough, out float m
     // iron_scratched_* with TintColor white, so their entire colourway lives in
     // the palette specular; reading the tint colour rendered ten Lynx
     // colourways as the same grey arm.
-    vec3 source = metal > 0.5 ? uPaletteSpec[index - 1] : uPaletteColor[index - 1];
+    // An entry that is itself a metal -- a black tint under a bright specular
+    // -- makes a metal of a dielectric layer too: the standard P8-SC paints a
+    // dielectric layer with (0,0,0) under (143,143,143) and is silver in game,
+    // not the black the tint colour multiplies to. 425 of 7,269 palette entries
+    // are of this kind, most of them the default weapon palettes.
+    bool entryMetal = metal < 0.5 && uPaletteMetal[index - 1] > 0.5;
+    vec3 source = (metal > 0.5 || entryMetal) ? uPaletteSpec[index - 1] : uPaletteColor[index - 1];
     // The palette *modulates* the layer's own TintColor, it does not replace
     // it. 966 of 1984 palette-tinted base layers carry a non-white one, median
     // 0.50, so substituting rendered half of them up to twice as bright as the
     // game.
     tint = srgbToLinear(source) * tintRow.rgb;
     glossScale = clamp(uPaletteGloss[index - 1], 0.05, 1.0);
+    if (entryMetal) {
+      metal = 1.0;
+      resp = vec3(1.0);
+    }
   }
-  tint *= response.rgb;
+  tint *= resp;
 
   colour = tint;
   if (tex.x >= 0.0) {
@@ -358,7 +373,7 @@ void main() {
 export const UNIFORM_NAMES = [
   'uBlend', 'uWear', 'uHal', 'uHasBlend', 'uHasWear', 'uHasHal',
   'uDiffuse', 'uGloss',
-  'uPaletteColor', 'uPaletteSpec', 'uPaletteGloss',
+  'uPaletteColor', 'uPaletteSpec', 'uPaletteGloss', 'uPaletteMetal',
   'uLayerTint', 'uLayerResponse', 'uLayerTex', 'uLayerGlossParams',
   'uWearPair', 'uLayerCount', 'uWearThreshold', 'uWearFalloff', 'uWearAmount',
   'uUserTint', 'uFlatDetail', 'uLayerMean', 'uOwner', 'uHasOwner', 'uOwnerId',

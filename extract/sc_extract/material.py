@@ -149,8 +149,30 @@ class SubMaterial:
 
     @property
     def base_layers(self) -> list[MatLayer]:
-        """BaseLayer1..4, in slot order. The blend mask picks between them."""
-        return [layer for layer in self.layers if not layer.is_wear]
+        """BaseLayer1..4, in slot order. The blend mask picks between them.
+
+        Placed by the number in the name, not by position in the file: the
+        mask's channels address slots, so blue is the third slot whether or
+        not the first two exist. The Ketchum Beanie lists only ``BaseLayer3``
+        (its heather) and ``BaseLayer4`` (black); by position its 94%-blue
+        mask reached past the two it has and folded onto the black. 542 of
+        11,647 armour and clothing LayerBlend submaterials skip a number. A
+        slot nothing names is an empty layer, drawn in its white tint.
+        """
+        base = [layer for layer in self.layers if not layer.is_wear]
+        slots: list[MatLayer | None] = [None] * 4
+        rest: list[MatLayer] = []
+        for layer in base:
+            tail = layer.name[-1:]
+            slot = int(tail) - 1 if tail.isdigit() and 1 <= int(tail) <= 4 else None
+            if slot is not None and layer.name.lower().startswith("baselayer") and slots[slot] is None:
+                slots[slot] = layer
+            else:
+                rest.append(layer)
+        if not any(slots):
+            return base
+        last = max(i for i, s in enumerate(slots) if s is not None) + 1
+        return [s or MatLayer(name=f"BaseLayer{i + 1}") for i, s in enumerate(slots[:last])] + rest
 
     @property
     def wear_layers(self) -> list[MatLayer]:

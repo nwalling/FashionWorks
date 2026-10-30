@@ -70,6 +70,18 @@ export function linearMean(rgba) {
   return sum / (rgba.length / 4) / 3;
 }
 
+/// Whether a palette entry is a metal on its own terms: a black tint under a
+/// bright specular, which is how the game's spec-gloss paints say bare metal
+/// (the Behring default: tint (0,0,0), specular (143,143,143)). Such an entry
+/// makes a metal of whatever layer it paints, dielectric or not; the standard
+/// P8-SC's body is a dielectric paint layer on one and is silver in game.
+/// Entries as sRGB 0-1. 425 of the 7,269 palette entries in 4.10.2 qualify.
+export function paletteEntryIsMetal(entry) {
+  const lin = (c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  const lum = (c) => 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]);
+  return lum(entry.color) < 0.012 && lum(entry.spec) > 0.07;
+}
+
 /// Upload a set of rasterised layer images as one `TEXTURE_2D_ARRAY`.
 export function createLayerArray(gl, slices, size = LAYER_SIZE) {
   const texture = gl.createTexture();
@@ -219,6 +231,7 @@ export function render(gl, { program, uniforms }, target, size, material, arrays
   gl.uniform3fv(uniforms.uPaletteColor, palette.flatMap((p) => p.color));
   gl.uniform3fv(uniforms.uPaletteSpec, palette.flatMap((p) => p.spec));
   gl.uniform1fv(uniforms.uPaletteGloss, palette.map((p) => p.glossiness));
+  gl.uniform1fv(uniforms.uPaletteMetal, palette.map((p) => (paletteEntryIsMetal(p) ? 1 : 0)));
 
   gl.uniform4fv(uniforms.uLayerTint, packed.tint);
   gl.uniform4fv(uniforms.uLayerResponse, packed.response);

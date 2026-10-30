@@ -406,6 +406,54 @@ fn with_empty_layers(parsed: Vec<LayerRef>, raw: Option<&Vec<LayerRef>>) -> Vec<
     out
 }
 
+/// Base layers placed by the number in their name -- `BaseLayer3` in the third
+/// slot -- with the slots nothing names left as empty layers.
+///
+/// The blend mask's channels address slots, not list positions: blue is the
+/// third slot whether or not the first two exist. The Ketchum Beanie lists only
+/// `BaseLayer3` (its heather) and `BaseLayer4` (black), and placed by position
+/// its 94%-blue mask reached past the two it has and folded onto the black.
+/// 542 of 11,647 armour and clothing LayerBlend submaterials skip a number.
+fn by_slot(layers: Vec<LayerRef>) -> Vec<LayerRef> {
+    let slot_of = |name: &str| {
+        name.to_ascii_lowercase()
+            .strip_prefix("baselayer")
+            .and_then(|n| n.parse::<usize>().ok())
+            .filter(|n| (1..=4).contains(n))
+            .map(|n| n - 1)
+    };
+    if layers.iter().all(|l| slot_of(&l.name).is_none()) {
+        return layers;
+    }
+    let mut slots: Vec<Option<LayerRef>> = vec![None, None, None, None];
+    let mut rest = Vec::new();
+    for layer in layers {
+        match slot_of(&layer.name) {
+            Some(i) if slots[i].is_none() => slots[i] = Some(layer),
+            _ => rest.push(layer),
+        }
+    }
+    let last = slots.iter().rposition(|s| s.is_some()).map_or(0, |i| i + 1);
+    let mut out: Vec<LayerRef> = slots
+        .into_iter()
+        .take(last)
+        .enumerate()
+        .map(|(i, slot)| {
+            slot.unwrap_or_else(|| LayerRef {
+                name: format!("BaseLayer{}", i + 1),
+                path: String::new(),
+                tint_color: [1.0; 3],
+                palette_tint: 0,
+                gloss_mult: 1.0,
+                uv_tiling: 1.0,
+                is_wear: false,
+            })
+        })
+        .collect();
+    out.extend(rest);
+    out
+}
+
 /// Parse an armour `.mtl` into its submaterials.
 pub fn parse(bytes: &[u8]) -> Result<Vec<SubMaterial>, String> {
     let file: MtlFile = mtl::parse_mtl(bytes).map_err(|e| format!("parsing .mtl: {e}"))?;
@@ -452,13 +500,22 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<SubMaterial>, String> {
                 } else {
                     suffix_role(&binding.path).or_else(|| slot_role(&binding.slot))
                 };
+                // The `_hal` map is read by the shader only under
+                // `%HUE_AO_LUMINANCE_MAP`, and almost nothing sets it: 21 of
+                // 11,652 armour LayerBlend submaterials and 0 of 5,227 weapon
+                // ones, while 11,356 and 4,923 bind the map. Armour's maps are
+                // near-white, so applying them anyway never showed; a weapon's
+                // is a per-panel mask with whole panels black (the P8-SC), and
+                // read as occlusion it took a third of the light off every
+                // standard weapon.
+                let role = role.filter(|r| *r != "hal" || reads_hal(&sub.string_gen_mask));
                 if let Some(role) = role {
                     textures.entry(role.to_string()).or_insert_with(|| binding.path.clone());
                 }
             }
             let (wear_layers, base_layers): (Vec<_>, Vec<_>) =
                 sub.layers.iter().map(layer_ref).partition(|l| l.is_wear);
-            let mut base_layers = with_empty_layers(base_layers, raw.as_ref().and_then(|r| r.get(index)));
+            let mut base_layers = by_slot(with_empty_layers(base_layers, raw.as_ref().and_then(|r| r.get(index))));
             // HardSurface, the ship hull shader, carries no textures of its own:
             // a palette-tinted `Primary` layer, and a `Secondary` the game wears
             // through to by vertex colour and damage. A new part is the primary
@@ -584,6 +641,13 @@ pub fn parse_layer(path: &str, bytes: &[u8]) -> Option<LayerMaterial> {
     })
 }
 
+/// Whether the shader samples a bound `_hal` map at all: only under
+/// `%HUE_AO_LUMINANCE_MAP`. A bound slot without its flag is inert, as a
+/// texture slot is for any shader feature the gen mask leaves off.
+pub fn reads_hal(gen_mask: &str) -> bool {
+    gen_mask.split('%').any(|t| t.eq_ignore_ascii_case("HUE_AO_LUMINANCE_MAP"))
+}
+
 /// The layer diffuse's own `TexMod` tiling, or 1.
 ///
 /// 87 of the 495 library layers carry one on `TexSlot1`, from 1.5 to 20, and
@@ -688,6 +752,31 @@ mod tests {
         assert_eq!(slot_role("texslot13"), Some("hal"));
         assert_eq!(slot_role("TexSlot3"), Some("normal"));
         assert_eq!(slot_role("TexSlot42"), None);
+    }
+
+    #[test]
+    fn a_base_layer_sits_in_the_slot_its_name_says() {
+        // The Ketchum Beanie: BaseLayer3 and 4 only, under a 94%-blue mask.
+        let out = by_slot(vec![named("BaseLayer3", "cotton_02.mtl"), named("BaseLayer4", "cotton_02.mtl")]);
+        assert_eq!(out.iter().map(|l| l.name.as_str()).collect::<Vec<_>>(), ["BaseLayer1", "BaseLayer2", "BaseLayer3", "BaseLayer4"]);
+        assert!(out[0].path.is_empty() && out[1].path.is_empty());
+        assert_eq!(out[2].path, "cotton_02.mtl");
+        // A full, ordered stack is untouched, and so is one with no numbers.
+        let full = vec![named("BaseLayer1", "a"), named("BaseLayer2", "b"), named("BaseLayer3", "c"), named("BaseLayer4", "d")];
+        assert_eq!(by_slot(full.clone()), full);
+        let plain = vec![named("Primary", "a"), named("Secondary", "b")];
+        assert_eq!(by_slot(plain.clone()), plain);
+    }
+
+    #[test]
+    fn a_hal_map_is_read_only_under_its_flag() {
+        // 4,923 of 5,227 weapon LayerBlend submaterials bind TexSlot13 and
+        // none sets the flag; read as occlusion anyway, the P8-SC's per-panel
+        // mask blacked out whole panels the game draws silver.
+        assert!(!reads_hal("%NORMAL_MAP"));
+        assert!(!reads_hal(""));
+        assert!(reads_hal("%NORMAL_MAP%HUE_AO_LUMINANCE_MAP"));
+        assert!(reads_hal("%hue_ao_luminance_map"), "flags compare case-insensitively");
     }
 
     #[test]
