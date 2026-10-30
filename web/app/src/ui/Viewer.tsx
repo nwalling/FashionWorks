@@ -32,6 +32,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 
 import { createGround, groundLook, type Ground } from '../three/ground';
 import { applyTheme, isLight, untoneMapped } from '../three/sceneTheme';
+import type { CaptureResult, CaptureView } from '../three/portrait';
 import { readTokens, type Tokens } from '../theme';
 
 /** What a caller gets once the scene exists. */
@@ -54,7 +55,18 @@ export interface ViewerHandle {
    * so using it to light the armour would be wrong. The grid goes away while a
    * backdrop is up, because it reads as floating debris over a photo. */
   setBackdrop(url: string | null): void;
+  /** One square frame from `view`, rendered over each flat grey in `greys`
+   * (linear) through the same pipeline the screen uses, with the floor and
+   * grid out of it; and each grey as the screen shows it, from the same
+   * frame with nothing in it. For a portrait's cut-out.
+   *
+   * All in one task, size and camera put back before it returns, so the
+   * screen never shows any of it. The ambient fill is the preset's own, not
+   * the theme's adjustment, so a picture does not depend on the page colour. */
+  capture(view: CaptureView, size: number, greys: readonly number[]): CaptureResult;
 }
+
+
 
 /** RENDERING.md Phase 2: how much the renderer does per pixel.
  *
@@ -370,8 +382,86 @@ export function Viewer({ tokens, onScene, className }: ViewerProps): JSX.Element
       }
     };
 
+    const capture = (view: CaptureView, size: number, greys: readonly number[]): CaptureResult => {
+      const saved = {
+        position: camera.position.clone(),
+        quaternion: camera.quaternion.clone(),
+        fov: camera.fov,
+        near: camera.near,
+        far: camera.far,
+        layers: camera.layers.mask,
+        background: scene.background,
+        clearAlpha: renderer.getClearAlpha(),
+        grid: grid.visible,
+        ground: ground.mesh.visible,
+        fill: fill.intensity,
+      };
+      // Straight through the pipeline, without `compensate`, which would put
+      // the page colour back as the background.
+      const draw = () => (chain ? chain.composer.render() : renderer.render(scene, camera));
+      const canvas = renderer.domElement;
+      const reader = new OffscreenCanvas(size, size);
+      const context = reader.getContext('2d', { willReadFrequently: true })!;
+      const read = () => {
+        context.clearRect(0, 0, size, size);
+        context.drawImage(canvas, 0, 0);
+        return context.getImageData(0, 0, size, size).data;
+      };
+      const frames: Uint8ClampedArray[] = [];
+      const backgrounds: Array<[number, number, number]> = [];
+      try {
+        renderer.setPixelRatio(1);
+        renderer.setSize(size, size, false);
+        if (chain) {
+          chain.composer.setPixelRatio(1);
+          chain.composer.setSize(size, size);
+        }
+        camera.position.set(...view.position);
+        camera.lookAt(...view.target);
+        camera.fov = view.fov;
+        camera.aspect = 1;
+        camera.near = 0.05;
+        camera.far = 50;
+        camera.updateProjectionMatrix();
+        grid.visible = false;
+        ground.mesh.visible = false;
+        renderer.setClearAlpha(1);
+        fill.intensity = (fill.userData.base as number | undefined) ?? fill.intensity;
+        for (const grey of greys) {
+          scene.background = new Color().setRGB(grey, grey, grey);
+          camera.layers.mask = saved.layers;
+          draw();
+          frames.push(read());
+          // Nothing on layer 31: the grey alone, as the screen shows it.
+          camera.layers.set(31);
+          draw();
+          const empty = read();
+          backgrounds.push([empty[0]!, empty[1]!, empty[2]!]);
+        }
+      } finally {
+        camera.layers.mask = saved.layers;
+        camera.position.copy(saved.position);
+        camera.quaternion.copy(saved.quaternion);
+        camera.fov = saved.fov;
+        camera.near = saved.near;
+        camera.far = saved.far;
+        scene.background = saved.background;
+        renderer.setClearAlpha(saved.clearAlpha);
+        grid.visible = saved.grid;
+        ground.mesh.visible = saved.ground;
+        fill.intensity = saved.fill;
+        renderer.setPixelRatio(pixelRatioFor(quality));
+        // Size, aspect and the chain's targets back to the element's, and the
+        // ordinary frame drawn, so the canvas never holds the capture.
+        resize();
+        render();
+      }
+      return { frames, backgrounds };
+    };
+
     latestOnScene.current?.({
       scene, renderer, camera, controls, lights: { key, rim, fill }, setBackdrop,
+      capture,
       render,
       quality: () => quality,
       setQuality: (next) => {

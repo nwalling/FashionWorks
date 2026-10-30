@@ -555,3 +555,116 @@
     font-size: 13px;
   }
 }
+
+/* The portrait panel (Portrait.tsx): under the scene cluster, on the same
+ * mostly-opaque card surface as the other overlays. The previews are circles
+ * because that is how every Hangarworks client crops an avatar, the small
+ * one at the member list's 34 px. */
+.fw-kit-portrait {
+  position: absolute;
+  top: 56px;
+  right: 12px;
+  width: 280px;
+  max-height: calc(100% - 140px);
+  overflow-y: auto;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px 12px;
+  background: color-mix(in srgb, var(--sc-card) 94%, transparent);
+  border: 1px solid var(--sc-border);
+  border-radius: 10px;
+  color: var(--sc-text);
+  font-size: 13px;
+  pointer-events: auto;
+}
+
+.fw-kit-portrait-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.fw-kit-portrait-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.fw-kit-portrait-previews {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 12px;
+}
+
+.fw-kit-portrait-preview,
+.fw-kit-portrait-tiny {
+  border-radius: 50%;
+  background: var(--sc-field);
+  border: 1px solid var(--sc-border);
+}
+
+.fw-kit-portrait-preview {
+  width: 200px;
+  height: 200px;
+}
+
+.fw-kit-portrait-tiny {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+}
+
+.fw-kit-portrait-note {
+  position: absolute;
+  inset: auto 0 6px;
+  text-align: center;
+  color: var(--sc-subtle);
+  font-size: 12px;
+}
+
+.fw-kit-portrait-hint {
+  margin: 0;
+  color: var(--sc-subtle);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.fw-kit .fw-kit-portrait-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--sc-accent, var(--sc-text));
+  text-decoration: underline;
+  font-size: inherit;
+}
+
+.fw-kit-portrait-backgrounds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.fw-kit .fw-kit-portrait-swatch {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid var(--sc-border);
+}
+
+.fw-kit .fw-kit-portrait-swatch[aria-checked="true"] {
+  border-color: var(--sc-accent, var(--sc-text));
+  box-shadow: 0 0 0 2px var(--sc-card);
+}
+
+.fw-kit .fw-kit-portrait-save {
+  align-self: stretch;
+  padding: 8px 10px;
+  background: var(--sc-accent);
+  color: var(--sc-accent-ink, var(--sc-dark));
+  border-color: transparent;
+}

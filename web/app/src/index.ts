@@ -90,3 +90,8 @@ export {
 } from './three/kitbasher';
 export { SET_MATCH_THRESHOLD } from './three/kitbasher';
 export type { KitbasherState, KitbasherScene, Pose, SetPlan, Body } from './three/kitbasher';
+
+// The portrait: the backgrounds a host passes, and the default it falls back
+// to. WEB-INTEGRATION.md.
+export { DEFAULT_BACKGROUND, portraitBackgrounds } from './three/portrait';
+export type { PortraitBackground } from './three/portrait';

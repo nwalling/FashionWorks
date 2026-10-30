@@ -33,6 +33,15 @@ async function main(): Promise<void> {
   const catalogue = readCatalogue(opened.catalogueJson);
   say(`${catalogue.items.length.toLocaleString()} pieces`);
   const exposed: { engine?: Engine; loadout?: string } = {};
+  // `?backgrounds` stands in for a host passing its themes to the portrait,
+  // the current one first (WEB-INTEGRATION.md).
+  const portraitBackgrounds = new URLSearchParams(location.search).has('backgrounds')
+    ? [
+      { id: 'hangar', name: 'Hangar', from: '#2a3f52', to: '#0a1219' },
+      { id: 'ember', name: 'Ember', from: '#7a3b1c', to: '#150806' },
+      { id: 'dolomite', name: 'Dolomite', from: '#d9dde2', to: '#7d8691' },
+    ]
+    : undefined;
   createRoot(document.getElementById('mount')!).render(createElement(Kitbasher, {
     client,
     catalogue,
@@ -40,6 +49,7 @@ async function main(): Promise<void> {
     onEngine: (engine) => { exposed.engine = engine; },
     onLoadoutChange: (encoded) => { exposed.loadout = encoded; history.replaceState(null, '', `#${encoded}`); },
     initialLoadout: location.hash.slice(1) || undefined,
+    portraitBackgrounds,
   }));
   (window as unknown as { __kit: unknown }).__kit = { client, catalogue, exposed };
 }

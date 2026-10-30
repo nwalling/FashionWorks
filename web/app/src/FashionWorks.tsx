@@ -22,6 +22,7 @@ import { Onboarding } from './ui/Onboarding';
 import { Kitbasher } from './ui/Kitbasher';
 import './ui/onboarding.css';
 import { readTokens, watchTheme, type Tokens } from './theme';
+import type { PortraitBackground } from './three/portrait';
 
 export type FashionWorksErrorCode =
   | 'unsupported-browser'
@@ -45,6 +46,10 @@ export interface FashionWorksProps {
   onReady?: (info: { itemCount: number; buildFingerprint: string }) => void;
   /** Fatal errors. Never contains file paths or anything identifying. */
   onError?: (error: { code: FashionWorksErrorCode; message: string }) => void;
+  /** The backgrounds the Portrait panel offers: `#rrggbb` gradients, the first
+   * preselected (the host passes the visitor's current theme first). Without
+   * it, one neutral background. Malformed entries are dropped. */
+  portraitBackgrounds?: readonly PortraitBackground[];
 }
 
 /** Map an internal failure onto the host-facing code.
@@ -71,7 +76,7 @@ function errorCodeFor(state: State): FashionWorksErrorCode | null {
 }
 
 export function FashionWorks(props: FashionWorksProps): JSX.Element {
-  const { className, onReady, onError, initialLoadout, onLoadoutChange } = props;
+  const { className, onReady, onError, initialLoadout, onLoadoutChange, portraitBackgrounds } = props;
   const [state, setState] = useState<State>(initial);
   const [tokens, setTokens] = useState<Tokens | null>(null);
   const root = useRef<HTMLDivElement>(null);
@@ -209,6 +214,7 @@ export function FashionWorks(props: FashionWorksProps): JSX.Element {
           tokens={tokens}
           initialLoadout={initialLoadout}
           onLoadoutChange={onLoadoutChange}
+          portraitBackgrounds={portraitBackgrounds}
         />
       )}
     </div>

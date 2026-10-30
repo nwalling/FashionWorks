@@ -33,8 +33,10 @@ import {
 import { HAND, portLabel, portServes, portShort } from '../gear/ports';
 import { Kitbasher as Engine, type KitbasherState } from '../three/kitbasher';
 import { HEAD_SLOTS } from '../three/outfit';
+import { portraitBackgrounds, type PortraitBackground } from '../three/portrait';
 import type { Tokens } from '../theme';
 import { QUALITIES, Viewer, type Quality, type ViewerHandle } from './Viewer';
+import { Portrait } from './Portrait';
 import './kitbasher.css';
 
 /** How many rows to draw before asking for a search term.
@@ -57,6 +59,9 @@ export interface KitbasherProps {
   readonly onLoadoutChange?: (encoded: string) => void;
   /** Called once the engine exists, for a verification page to drive it. */
   readonly onEngine?: (engine: Engine) => void;
+  /** The backgrounds the portrait offers, the first preselected. A neutral
+   * one when absent. WEB-INTEGRATION.md. */
+  readonly portraitBackgrounds?: readonly PortraitBackground[];
 }
 
 /** A row's title: the words its whole line shares -- "Defiance Core". */
@@ -147,6 +152,7 @@ const POSE_TITLES: Record<string, (holding: boolean) => string> = {
 
 export function Kitbasher(props: KitbasherProps): JSX.Element {
   const { client, catalogue: initialCatalogue, tokens, initialLoadout, onLoadoutChange, onEngine } = props;
+  const backgrounds = useMemo(() => portraitBackgrounds(props.portraitBackgrounds), [props.portraitBackgrounds]);
   const engine = useRef<Engine | null>(null);
   const [state, setState] = useState<KitbasherState | null>(null);
   const [mode, setMode] = useState<Mode>('armour');
@@ -166,6 +172,13 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
   // and on More again -- never on a control inside it being used, since
   // someone flipping surface wants to see the result and flip it back.
   const [moreOpen, setMoreOpen] = useState(false);
+  // The portrait panel: desktop only, by Noel's decision; a window narrowed
+  // under it closes it.
+  const [portraitOpen, setPortraitOpen] = useState(false);
+  const closePortrait = useCallback(() => setPortraitOpen(false), []);
+  useEffect(() => {
+    if (narrow) setPortraitOpen(false);
+  }, [narrow]);
   const moreId = useId();
   const moreButton = useRef<HTMLButtonElement>(null);
   const sceneRef = useRef<HTMLDivElement>(null);
@@ -740,6 +753,21 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
               {!narrow && bodySwitch}
               {!narrow && lightSelect}
               {!narrow && qualitySelect}
+              {!narrow && (
+                <button
+                  type="button"
+                  className="fw-kit-portrait-button"
+                  aria-expanded={portraitOpen}
+                  disabled={!state}
+                  title="A head-and-shoulders picture of your character in this outfit, to download as an avatar"
+                  onClick={() => {
+                    setMoreOpen(false);
+                    setPortraitOpen((open) => !open);
+                  }}
+                >
+                  Portrait
+                </button>
+              )}
               <button
                 type="button"
                 ref={moreButton}
@@ -769,6 +797,15 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
                 {moreRows}
               </div>
             </div>
+            {portraitOpen && state && engine.current && (
+              <Portrait
+                engine={engine.current}
+                state={state}
+                backgrounds={backgrounds}
+                onLoadCharacter={() => chfPicker.current?.click()}
+                onClose={closePortrait}
+              />
+            )}
             <div className="fw-kit-dock">
               <span className="fw-kit-group" role="group" aria-label="Pose">
                 {poses.map((pose) => (

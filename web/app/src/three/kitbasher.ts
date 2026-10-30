@@ -97,6 +97,14 @@ import { ClipLoop, FADE_SECONDS, type LoopMode, smooth } from './idle';
 import { hasEight, padEight, skinEight } from './skin8';
 import { decalRoughness, padDecalUvs, withDecal } from './decal';
 import { showUncovered } from './zones';
+import {
+  CAPTURE_GREYS,
+  CAPTURE_SIZE,
+  portraitView,
+  solveCutout,
+  type CaptureResult,
+  type CaptureView,
+} from './portrait';
 import { HAIR_TAGS, layerOf, outfitFor, outfitSlots, portHidden, viewOf, type OutfitView } from './outfit';
 import { LIVE_DEFAULTS, liveSurfaces, releaseAfterUpload, takesS3tc } from './live';
 import { applyClip, bonePosition, boneRotation, buildRig, mountMatrix, type BuiltRig } from './rig';
@@ -407,6 +415,9 @@ export interface KitbasherScene {
     readonly rim: DirectionalLight;
     readonly fill: AmbientLight;
   };
+  /** Present when the view is the full viewer: a frame off screen, for a
+   * portrait (`ViewerHandle.capture`). */
+  readonly capture?: (view: CaptureView, size: number, greys: readonly number[]) => CaptureResult;
 }
 
 /** What the UI renders from. Replaced wholesale on every change, so React can
@@ -459,6 +470,10 @@ export interface KitbasherState {
 /** A stand-in item for the figure's parts: no palette, since skin is not
  * LayerBlend and takes the `.mtl`'s own colours. */
 const FIGURE_ITEM = { tint: null } as unknown as CatalogueItem;
+
+/** What a portrait's helmet toggle takes off: a helmet, or a hat with the
+ * clothing outfit. Eyewear stays, as part of the face. */
+const BARE_HEAD_SLOTS: ReadonlySet<WearSlot> = new Set<WearSlot>(['helmet', 'hat']);
 
 export function paletteOf(item: CatalogueItem): PaletteEntry[] {
   const hex = (value: string): [number, number, number] =>
@@ -1601,7 +1616,12 @@ export class Kitbasher {
    * feet to the chest. Then the zone rule: each drawn mesh, and the figure at
    * layer 0, loses the zone submeshes a piece on a higher layer covers. */
   private applyOutfit(): void {
-    const view = viewOf(this.wearing);
+    // A portrait with the helmet off draws the outfit as if nothing were on
+    // the head, so what it hid -- the hair -- shows again.
+    const shown = this.bareHead
+      ? new Map([...this.wearing].filter(([slot]) => !BARE_HEAD_SLOTS.has(slot)))
+      : this.wearing;
+    const view = viewOf(shown);
     const zoned = (objects: Object3D[], layer: number) => {
       for (const object of objects) {
         object.traverse((o) => {
@@ -1610,7 +1630,7 @@ export class Kitbasher {
       }
     };
     for (const [slot, loaded] of this.equipped) {
-      const drawn = !view.hiddenSlots.has(slot);
+      const drawn = !view.hiddenSlots.has(slot) && !(this.bareHead && BARE_HEAD_SLOTS.has(slot));
       for (const object of loaded.objects) object.visible = drawn;
       const item = this.wearing.get(slot);
       if (drawn && item) zoned(loaded.objects, layerOf(item));
@@ -1915,6 +1935,43 @@ export class Kitbasher {
     }
     rig.root.updateMatrixWorld(true);
     rig.skeleton.update();
+  }
+
+  /** Whether the helmet and hat are left out of the drawing. */
+  private bareHead = false;
+
+  /** Leave what is on the head out of the drawing -- a portrait's helmet
+   * toggle -- or put it back. Only the drawing changes: the slots, the
+   * loadout and the share link still hold the helmet. */
+  setBareHead(on: boolean): void {
+    if (this.bareHead === on) return;
+    this.bareHead = on;
+    this.applyOutfit();
+  }
+
+  /** The figure as a portrait's cut-out: head and shoulders from the `Head`
+   * bone, straight alpha, `CAPTURE_SIZE` square (`three/portrait.ts`). Waits
+   * for what is loading first, so the picture is of finished surfaces and
+   * the hair a bare head shows. Null without a full viewer or a rig. */
+  async portrait(): Promise<OffscreenCanvas | null> {
+    await this.settled();
+    const capture = this.view.capture;
+    const head = this.attachmentWorld('Head');
+    if (this.disposed || !capture || !head) return null;
+    const { frames, backgrounds } = capture(portraitView(head), CAPTURE_SIZE, CAPTURE_GREYS);
+    const pixels = solveCutout(frames[0]!, frames[1]!, backgrounds[0]!, backgrounds[1]!);
+    const canvas = new OffscreenCanvas(CAPTURE_SIZE, CAPTURE_SIZE);
+    canvas.getContext('2d')!.putImageData(new ImageData(pixels, CAPTURE_SIZE, CAPTURE_SIZE), 0, 0);
+    return canvas;
+  }
+
+  /** Until nothing is loading or refining, or a minute has passed. */
+  private async settled(timeout = 60_000): Promise<void> {
+    const start = performance.now();
+    while (!this.disposed && performance.now() - start < timeout
+      && (this.state.busy || this.refinePending || this.figureLoading.size > 0)) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
   }
 
   /** Where an attachment point is right now, in the scene. For checks. */

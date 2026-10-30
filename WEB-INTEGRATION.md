@@ -152,6 +152,16 @@ export interface FashionWorksProps {
 
   /** Fatal errors. Never contains file paths or anything identifying. */
   onError?: (error: { code: FashionWorksErrorCode; message: string }) => void;
+
+  /** The backgrounds the Portrait panel offers. Since 0.11.0; see §3.1. */
+  portraitBackgrounds?: readonly PortraitBackground[];
+}
+
+export interface PortraitBackground {
+  id: string;    // unique, stable
+  name: string;  // shown as the swatch's label
+  from: string;  // '#rrggbb', the light behind the head
+  to: string;    // '#rrggbb', the corners
 }
 
 export type FashionWorksErrorCode =
@@ -177,6 +187,50 @@ pieces are about 220 characters, and a full belt of twenty gear items adds
 about 1.1 KB. Still comfortably inside what browsers keep in a fragment, and
 nothing about how the host stores or passes it changes. Links made before
 0.6.0 still restore.
+
+### 3.1 Portraits
+
+Since 0.11.0 a **Portrait** button (desktop only, beside More) opens a panel
+that takes a head-and-shoulders picture of the figure: the visitor's own
+character if they loaded a `.chf`, otherwise the default face, wearing the
+outfit on screen. Any helmet or hat can be toggled off for the picture. It
+downloads as a **1024 px square JPEG of at most 500,000 bytes**, named after
+the character (`ilucide-portrait.jpg`). The head is framed large because an
+avatar is cropped to a circle and drawn down to 34 px; the panel previews both
+sizes.
+
+**It is a download and nothing else.** FashionWorks uploads nothing, calls no
+host API and asks for no account; the route stays account-free, which is a
+condition in `WEB-LEGAL.md`. A visitor who wants the picture as their avatar
+uses the site's own avatar picker, so the host needs no code for portraits at
+all beyond, optionally, the backgrounds.
+
+**Backgrounds are the host's choice.** Pass `portraitBackgrounds` and the panel
+offers each as a radial gradient, `from` round the head to `to` at the
+corners, blended in linear light. Order is kept and **the first is
+preselected**, so pass the visitor's current theme first and then the others
+their account owns -- the same rule as §4.1: FashionWorks does not know which
+themes exist or who owns them. Entries whose colours are not `#rrggbb`, or
+whose `id` is empty or repeated, are dropped. Without the prop, or with nothing
+valid in it, the panel offers one neutral slate gradient and no choice.
+
+```tsx
+<FashionWorks
+  portraitBackgrounds={[
+    { id: 'hangar', name: 'Hangar', from: '#2a3f52', to: '#0a1219' },
+    { id: 'ember', name: 'Ember', from: '#7a3b1c', to: '#150806' },
+  ]}
+/>
+```
+
+The array is read through `useMemo`, so a host that rebuilds it on every render
+costs nothing, but a stable reference is still tidier. Changing it while the
+panel is open keeps the visitor's pick if its `id` is still offered.
+
+While the panel is open the viewport shows what the picture will: the
+character creator's lighting and, with the helmet off, the bare head. Closing
+puts the visitor's lighting and outfit back. Neither is written to the
+loadout.
 
 ---
 
