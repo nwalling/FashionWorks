@@ -2192,6 +2192,69 @@ declares no tone.
 file name misreads a buzz cut's coat. Most caps are white RGB over an alpha
 density; read by red they draw as opaque sheets.
 
+### Items held against the game's own icons (2026-10-30)
+
+The Hangarworks item renders were put beside references for 32 items and 12
+ships, and three faults in the surfaces came out of it, each worth a class
+of items. The method matters as much as the faults.
+
+**The game's inventory icons are the reference for items, not the wiki.**
+`cstone.space/uifimages/<guid>.png` is the icon the game draws for the item
+in the current build (30 of 33 sampled items have one). The wiki's weapon
+"shop display" shots are from **2019** -- before the `weapons_v7` rework --
+while its armour and clothing shots are 2024; the file's upload date is in
+`imageinfo`, and a reference older than the asset is not one. For ships the
+wiki's `<Ship> in space - Isometric.jpg` series (one per ship and livery,
+3840x2160, the same camera for all) is the fair comparison. Cut the ship out
+of the black with a threshold, opening, closing and a hole fill, or every
+shadow below the threshold is left out and the reference reads brighter than
+it is.
+
+**A palette entry with a black tint under a bright specular is a metal, and
+makes a metal of whatever layer it paints.** The game's spec-gloss paints say
+bare metal that way: the Behring default is tint (0,0,0) under spec
+(143,143,143), and the standard P8-SC's body is a *dielectric* paint layer
+(`weapon_metal_01`, TintMode 0, reflectance 0.044) on that entry -- silver in
+game, black when the tint was multiplied in. 425 of 7,269 palette entries are
+of this kind, most of them the default weapon palettes, so every standard
+weapon skin drew black. `paletteEntryIsMetal` (bake.js) and
+`palette_entry_is_metal` (tint.py): tint luminance under 0.012 linear and spec
+over 0.07; such an entry takes its specular as the layer's F0 and draws it as
+metal. The ship pipeline reached the same place by the glTF spec-gloss
+conversion (`sc_materials.metal_rough`), which is the general rule this is the
+unambiguous corner of; the partial-metal cases are left as they were until a
+reference decides them.
+
+**The `_hal` map is read only under `%HUE_AO_LUMINANCE_MAP`, and almost
+nothing sets it.** 21 of 11,652 armour LayerBlend submaterials and 0 of 5,227
+weapon ones, while 11,356 and 4,923 bind the map. Armour's maps are near-white
+(the one decoded reads 245 mean green), so reading them as occlusion anyway
+never showed -- which is how the earlier "inferred, not confirmed" note above
+survived. A weapon's is a per-panel mask with whole panels black (the P8-SC's
+has its rails black and its receiver white), and read as occlusion it took a
+third of the light off every standard weapon. `material.rs` binds `hal` only
+under the flag; the Python bake has no gen mask to read and still applies it,
+which on armour is under 3%.
+
+**Base layers sit in the slot their name says.** The blend mask's channels
+address slots, so blue is the third slot whether or not the first two exist.
+The Ketchum Beanie lists only `BaseLayer3` (its heather) and `BaseLayer4`
+(black); placed by position, its 94%-blue mask reached past the two it has and
+folded onto the black, and the beanie drew black. 542 of 11,647 armour and
+clothing submaterials skip a number (most of those are empty-path layers the
+earlier fix already put back; about 60 are absent outright). `by_slot`
+(material.rs) and `SubMaterial.base_layers` (material.py) place by number and
+fill a gap with an empty layer.
+
+**Checked for regression** on the same sample: the armour and clothing rows
+are unchanged by all three, and ship parts too.
+
+**What was ruled out on the P8-SC.** Its wear mask is 81% above 224 -- under
+"dark is worn" barely worn -- so wear is not what darkened it; and the
+metal-entry fix alone moved its mean from 41 to 54 sRGB, the hal gate the
+rest of the way to a silver receiver. The remaining gap to the icon is
+lighting: a polished metal in the dark `hangar` probe reflects a dark room.
+
 ### Still unverified
 
 - Only one set has been converted end to end. `scx convert` has not been run
