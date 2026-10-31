@@ -31,10 +31,16 @@ fn socket_for(slot: &str, bind_mode: &str) -> Option<&'static str> {
 }
 
 /// Rigid meshes attach to a socket; skinned ones bind to the skeleton.
-fn bind_mode_for(geometry: &[String]) -> &'static str {
+///
+/// A backpack named by a `.cdf` is rigid too. The Novikov pack is a character
+/// definition whose model is a skeleton of its own, carrying the
+/// `backpack_attach_1_loc` a `.cga` pack carries as a node, and whose skin is
+/// weighted only to that skeleton -- the pack, a canister and a carabiner
+/// that swing. Bound to the body it has no bone to follow.
+fn bind_mode_for(slot: &str, geometry: &[String]) -> &'static str {
     let rigid = |s: &String| {
         let l = s.to_ascii_lowercase();
-        l.ends_with(".cga") || l.ends_with(".cgf")
+        l.ends_with(".cga") || l.ends_with(".cgf") || (slot == "backpack" && l.ends_with(".cdf"))
     };
     if !geometry.is_empty() && geometry.iter().all(rigid) {
         "socket"
@@ -257,7 +263,7 @@ pub fn build_item(
         flags.push("squadron42".to_string());
     }
 
-    let bind_mode = bind_mode_for(&geometry);
+    let bind_mode = bind_mode_for(slot, &geometry);
     let (code, maker_name) = manufacturer_for(record, makers, loc);
 
     Some(json!({
@@ -450,10 +456,14 @@ mod tests {
 
     #[test]
     fn a_rigid_piece_binds_to_a_socket_and_a_skinned_one_does_not() {
-        assert_eq!(bind_mode_for(&["backpack.cga".into()]), "socket");
-        assert_eq!(bind_mode_for(&["m_arms.skin".into()]), "skinned");
+        assert_eq!(bind_mode_for("backpack", &["backpack.cga".into()]), "socket");
+        assert_eq!(bind_mode_for("arms", &["m_arms.skin".into()]), "skinned");
         // No geometry is not rigid.
-        assert_eq!(bind_mode_for(&[]), "skinned");
+        assert_eq!(bind_mode_for("arms", &[]), "skinned");
+        // A pack drawn as a character still hangs on its socket; a helmet's
+        // definition binds skins to the head.
+        assert_eq!(bind_mode_for("backpack", &["m_clda_env_heavy_backpack_01.cdf".into()]), "socket");
+        assert_eq!(bind_mode_for("helmet", &["m_helmet.cdf".into()]), "skinned");
         assert_eq!(socket_for("backpack", "socket"), Some("backpack_attach_1_override"));
         assert_eq!(socket_for("backpack", "skinned"), None);
     }

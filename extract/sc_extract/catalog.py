@@ -508,9 +508,15 @@ def socket_for(slot: str, bind_mode: str) -> str | None:
     return SLOT_SOCKETS.get(slot) if bind_mode == "socket" else None
 
 
-def bind_mode_for(geometry: list[Geometry]) -> str:
-    """Rigid meshes attach to a socket; skinned ones bind to the skeleton."""
-    if geometry and all(g.source.lower().endswith(RIGID_SUFFIXES) for g in geometry):
+def bind_mode_for(slot: str, geometry: list[Geometry]) -> str:
+    """Rigid meshes attach to a socket; skinned ones bind to the skeleton.
+
+    A backpack named by a `.cdf` is rigid too: its skin is weighted to a
+    skeleton of the pack's own, not the body's. Mirrors `bind_mode_for` in
+    web/core/src/catalog/build.rs.
+    """
+    rigid = RIGID_SUFFIXES + ((".cdf",) if slot == "backpack" else ())
+    if geometry and all(g.source.lower().endswith(rigid) for g in geometry):
         return "socket"
     return "skinned"
 
@@ -868,8 +874,8 @@ def build_item(
         tags=tags_for(record, index),
         geometry=geometry,
         materials=materials,
-        bind_mode=bind_mode_for(geometry),
-        socket=socket_for(slot, bind_mode_for(geometry)),
+        bind_mode=bind_mode_for(slot, geometry),
+        socket=socket_for(slot, bind_mode_for(slot, geometry)),
         assets=Assets(glb=None, thumb=None),
         flags=flags,
         ports=ports_for(record),

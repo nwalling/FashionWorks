@@ -1411,26 +1411,29 @@ impl Archive {
     /// `null` mount means no locator was found. The prop still loads -- it will
     /// simply sit at the bone's origin, which is wrong but visible, rather than
     /// vanishing.
+    ///
+    /// `path` may be a `.cdf`: a prop the archive draws as a character. See
+    /// [`Archive::character_prop`].
     #[wasm_bindgen(js_name = loadProp)]
     pub fn load_prop(&self, path: &str, socket: &str) -> Result<JsValue, JsValue> {
-        let cga_index = self
-            .find_asset(path)
-            .ok_or_else(|| JsValue::from_str(&format!("not in this archive: {path}")))?;
-        let cga = p4k::read_entry(self.reader.source(), &self.entries[cga_index])
-            .map_err(|e| JsValue::from_str(&e))?
-            .bytes;
-        // The vertex half, as with `.skin`/`.skinm`.
-        let cgam = self
-            .find_asset(&format!("{path}m"))
-            .and_then(|i| p4k::read_entry(self.reader.source(), &self.entries[i]).ok())
-            .map(|e| e.bytes)
-            .unwrap_or_default();
+        let (loaded, prop) = if path.to_ascii_lowercase().ends_with(".cdf") {
+            self.character_prop(path)?
+        } else {
+            let cga = self.read_asset(path)?;
+            // The vertex half, as with `.skin`/`.skinm`.
+            let cgam = self
+                .find_asset(&format!("{path}m"))
+                .and_then(|i| p4k::read_entry(self.reader.source(), &self.entries[i]).ok())
+                .map(|e| e.bytes)
+                .unwrap_or_default();
 
-        let mut loaded = mesh::load(&cga, &cgam).map_err(|e| JsValue::from_str(&e))?;
-        let prop = socket::Prop::parse(&cga);
-        if let Some(prop) = &prop {
-            gear::place_nodes(&mut loaded, &prop.nodes);
-        }
+            let mut loaded = mesh::load(&cga, &cgam).map_err(|e| JsValue::from_str(&e))?;
+            let prop = socket::Prop::parse(&cga);
+            if let Some(prop) = &prop {
+                gear::place_nodes(&mut loaded, &prop.nodes);
+            }
+            (loaded, prop)
+        };
         let out = mesh_to_js(&loaded, None)?;
 
         let bone = self
@@ -1601,6 +1604,51 @@ impl Archive {
         let mount = if locator.is_empty() { None } else { gear::mount(&helpers, locator) };
         js_sys::Reflect::set(&out, &"mount".into(), &mount.as_ref().map_or(JsValue::NULL, flat))?;
         Ok(out.into())
+    }
+
+    /// A prop the archive draws as a character: a `.cdf` whose model is a
+    /// skeleton of its own ([`socket::Prop::from_skeleton`]) and whose skins
+    /// are the mesh. The Novikov pack is one, and the only worn one in 4.10.2.
+    ///
+    /// The skins are drawn at bind pose: what the pack's own bones do -- a
+    /// canister and a carabiner on pendulums -- is the game's simulation, and
+    /// none of them is a body bone to follow. A mesh hung on one of those
+    /// bones (`CA_BONE` with a binding) goes where the bone is, as a weapon's
+    /// do in [`Archive::load_gear`]; a model that is a `.cga` is the mesh
+    /// itself, with its helpers as nodes.
+    fn character_prop(&self, path: &str) -> Result<(mesh::LoadedMesh, Option<socket::Prop>), JsValue> {
+        let js = |e: String| JsValue::from_str(&e);
+        let cdf = gear::parse_cdf(&self.read_asset(path)?).map_err(js)?;
+        let mut loaded = mesh::LoadedMesh::default();
+        let prop = match cdf.model.as_deref() {
+            Some(model) if model.to_ascii_lowercase().ends_with(".chr") => {
+                self.read_asset(model).ok().and_then(|chr| socket::Prop::from_skeleton(&chr))
+            }
+            Some(model) => {
+                if let Ok(mesh) = self.load_raw_mesh(model) {
+                    loaded.append(mesh);
+                }
+                self.read_asset(model).ok().and_then(|cga| socket::Prop::parse(&cga))
+            }
+            None => None,
+        };
+        for attachment in cdf.attachments.iter().filter(|a| a.renderable()) {
+            let Ok(mut part) = self.load_raw_mesh(&attachment.binding) else { continue };
+            if attachment.kind == "CA_BONE" {
+                let bone = attachment
+                    .bone
+                    .as_deref()
+                    .and_then(|name| prop.as_ref()?.nodes.iter().find(|n| n.name.eq_ignore_ascii_case(name)))
+                    .map_or(socket::IDENTITY, |n| n.bone_to_world);
+                let rel = socket::from_quat(attachment.rel_rotation, attachment.rel_position);
+                gear::transform_mesh(&mut part, &socket::multiply(&bone, &rel));
+            }
+            loaded.append(part);
+        }
+        if loaded.vertex_count() == 0 {
+            return Err(js(format!("{path}: the definition draws no mesh")));
+        }
+        Ok((loaded, prop))
     }
 
     /// An asset's bytes, however its path is spelled.

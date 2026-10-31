@@ -193,6 +193,34 @@ impl Prop {
         Some(Prop { nodes })
     }
 
+    /// A `.chr`'s bones as a prop's nodes, at bind pose.
+    ///
+    /// Some props are drawn as characters: the Novikov pack is a `.cdf` whose
+    /// model is a skeleton of its own, and that skeleton carries what a `.cga`
+    /// carries as helper nodes -- `backpack_attach_1_loc`, the grips, the
+    /// rifle and gadget points. A bone's world transform is already in the
+    /// prop's own space, so nothing is composed.
+    pub fn from_skeleton(chr: &[u8]) -> Option<Prop> {
+        let bones = starbreaker_3d::skeleton::parse_skeleton(chr)?;
+        let nodes = bones
+            .into_iter()
+            .map(|bone| {
+                let m = from_quat(bone.world_rotation, bone.world_position);
+                nmc::NmcNode {
+                    name: bone.name,
+                    parent_index: None,
+                    world_to_bone: invert(&m),
+                    bone_to_world: m,
+                    scale: [1.0; 3],
+                    // A helper, as NMC numbers them: a bone carries no mesh.
+                    geometry_type: 3,
+                    properties: Default::default(),
+                }
+            })
+            .collect();
+        Some(Prop { nodes })
+    }
+
     pub fn helpers(&self) -> impl Iterator<Item = &nmc::NmcNode> {
         self.nodes.iter().filter(|n| is_helper(n))
     }

@@ -145,6 +145,54 @@ impl LoadedMesh {
         self.influences = MAX_INFLUENCES;
     }
 
+    /// Add another mesh's vertices and groups after this one's: a definition
+    /// that draws as several skins is one prop.
+    ///
+    /// Joint indices move up past this mesh's bones, so each part keeps its
+    /// own; a part loaded at another width comes in unweighted. A stream only
+    /// one side carries -- decal coordinates, colour -- is dropped, since half
+    /// a stream lines up with nothing. `material_file` stays the first part's.
+    pub fn append(&mut self, other: LoadedMesh) {
+        if self.vertex_count() == 0 {
+            *self = other;
+            return;
+        }
+        let base = self.vertex_count() as u32;
+        let first = self.indices.len() as u32;
+        let bones = self.bones.len();
+        let vertices = other.vertex_count();
+
+        self.positions.extend(other.positions);
+        self.normals.extend(other.normals);
+        self.uvs.extend(other.uvs);
+        self.indices.extend(other.indices.iter().map(|i| i + base));
+        let width = self.influences;
+        if other.influences == width {
+            self.joints.extend(other.joints.iter().map(|j| j + bones as u16));
+            self.weights.extend(other.weights);
+        } else {
+            self.joints.resize(self.joints.len() + vertices * width, 0);
+            self.weights.resize(self.weights.len() + vertices * width, 0.0);
+        }
+        if self.decal_uvs.is_empty() || other.decal_uvs.is_empty() {
+            self.decal_uvs.clear();
+        } else {
+            self.decal_uvs.extend(other.decal_uvs);
+        }
+        if self.colors.is_empty() || other.colors.is_empty() {
+            self.colors.clear();
+        } else {
+            self.colors.extend(other.colors);
+        }
+        self.bones.extend(other.bones);
+        self.bone_parents.extend(other.bone_parents.iter().map(|p| p.map(|p| p + bones)));
+        self.submeshes.extend(other.submeshes.into_iter().map(|s| Submesh { first_index: s.first_index + first, ..s }));
+        for axis in 0..3 {
+            self.min[axis] = self.min[axis].min(other.min[axis]);
+            self.max[axis] = self.max[axis].max(other.max[axis]);
+        }
+    }
+
     /// How many vertices carry no weight at all.
     ///
     /// Worth reporting rather than assuming zero: dropping unknown vertex
@@ -383,6 +431,39 @@ fn material_names(bytes: &[u8]) -> Vec<MaterialName> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn triangle(at: f32, bone: &str, decals: bool) -> LoadedMesh {
+        LoadedMesh {
+            positions: vec![at, 0.0, 0.0, at + 1.0, 0.0, 0.0, at, 1.0, 0.0],
+            normals: vec![0.0, 0.0, 1.0].repeat(3),
+            uvs: vec![0.0; 6],
+            indices: vec![0, 1, 2],
+            joints: vec![0; 12],
+            weights: [1.0, 0.0, 0.0, 0.0].repeat(3),
+            influences: MAX_INFLUENCES,
+            decal_uvs: if decals { vec![0.5; 6] } else { Vec::new() },
+            bones: vec![bone.into()],
+            bone_parents: vec![None],
+            submeshes: vec![Submesh { material_id: 0, first_index: 0, index_count: 3, node: 0, zone_word: None }],
+            min: [at, 0.0, 0.0],
+            max: [at + 1.0, 1.0, 0.0],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn an_appended_part_keeps_its_own_vertices_bones_and_groups() {
+        let mut prop = LoadedMesh::default();
+        prop.append(triangle(0.0, "root", true));
+        prop.append(triangle(5.0, "cannister", false));
+        assert_eq!(prop.vertex_count(), 6);
+        assert_eq!(prop.indices[3..], [3, 4, 5], "the second triangle's indices follow the first's vertices");
+        assert_eq!(prop.submeshes[1].first_index, 3);
+        assert_eq!(prop.bones, ["root", "cannister"]);
+        assert_eq!(prop.joints[12], 1, "the second part's joints address its own bone");
+        assert!(prop.decal_uvs.is_empty(), "half a stream lines up with nothing");
+        assert_eq!((prop.min[0], prop.max[0]), (0.0, 6.0));
+    }
 
     #[test]
     fn the_four_heaviest_influences_survive_and_sum_to_one() {
