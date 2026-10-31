@@ -2255,6 +2255,26 @@ metal-entry fix alone moved its mean from 41 to 54 sRGB, the hal gate the
 rest of the way to a silver receiver. The remaining gap to the icon is
 lighting: a polished metal in the dark `hangar` probe reflects a dark room.
 
+### A backpack can be a character, and still hangs on its socket (2026-10-31)
+
+The Novikov pack (`clda_env_heavy_backpack_01*`, 8 items, 7 looks) never
+drew: its only geometry is `m_clda_env_heavy_backpack_01.cdf`, the catalogue
+called it skinned because the path is not a `.cga`, and `loadMesh` read the
+definition's bytes as a mesh. In 4.10.2 it is the only worn `.cdf`.
+
+**Rebinding it to the body would be wrong.** Its `CA_SKIN` is weighted only to
+a skeleton of the pack's own -- `root`, `cannister`, `carabiner`, the last two
+on pendulums -- and sits at the pack's origin (z 0.00-0.36), not at body
+height. Its `.chr` carries exactly what a `.cga` pack carries as nodes:
+`backpack_attach_1_loc`, `grip_left_1`/`grip_right_1`, and the
+`wep_stocked_attach_2/3_override` and `gadget_attach_1_override` points. So a
+backpack named by a `.cdf` is a socket piece (`bind_mode_for`, both
+catalogues), and `loadProp` reads a `.cdf`: the skins at bind pose, the
+model's bones as the prop's nodes (`socket::Prop::from_skeleton`). Against the
+`.cga` pack in the same folder the locator has the same rotation and the grips
+land on the same sides (±0.228 against ±0.243 m); drawn, the outer face -- tray,
+plate, strapped pocket, canister -- matches the game's icon.
+
 ### Still unverified
 
 - Only one set has been converted end to end. `scx convert` has not been run
