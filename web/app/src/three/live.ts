@@ -659,14 +659,16 @@ export async function liveSurfaces(
     const out = new MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 1 });
     out.name = sub.name;
     // The normal map binding is what gives the shader its UVs and tangent
-    // frame; the maps it actually samples are the uniforms below.
-    // Only a HardSurface ship part, which is its primary layer and has no
-    // control map by design, gets the flat stand-in. A LayerBlend surface whose
-    // maps are missing still falls back to the bake: drawn live with no maps,
-    // gear surfaces (the HDGW rifle's magazine, the APAR knife's blade) vanished.
-    out.normalMap = b ?? a ?? c ?? (sub.shader.toLowerCase() === "hardsurface" || options.flatUnmapped ? flatControl() : null);
+    // frame; the maps it actually samples are the uniforms below. A surface
+    // with no control map at all gets the flat stand-in: a single-layer
+    // weapon paint (the WowBlast Desperado's teal, the CQ7, the Salvo
+    // magazine) binds only a `_hal`, and once the catalogue stopped handing
+    // that over unflagged (material.rs `reads_hal`) these had nothing to bind
+    // and fell through to the plain material -- white chrome, since a
+    // LayerBlend submaterial's own Specular is 1. A live surface with no maps
+    // draws its first layer, which is what such a paint is.
+    out.normalMap = b ?? a ?? c ?? flatControl();
     out.normalScale = new Vector2(1, 1);
-    if (!out.normalMap) continue;
     if (sub.glow > 0) {
       out.emissive = new Color(1, 1, 1);
       out.emissiveIntensity = 0;
