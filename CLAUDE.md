@@ -376,10 +376,12 @@ used to sit here described the first, refuted attempt.
 drops them.** Converted `_ddna` PNGs come out with a constant-255 alpha, which
 looks like "this texture has no gloss". It has to be decoded separately with
 `starbreaker dds decode --alpha`; `layers.gloss_for` does that and caches to
-`data/interim/gloss`. Real gloss is `that alpha x GlossMult x the palette
-entry's glossiness`, with `layer Shininess x GlossMult x glossiness` only where a
-layer ships no alpha stream (`tint.compose_layered`; the web shaders match),
-which replaced a hand-tuned 0.30-0.75 roughness band.
+`data/interim/gloss`. Real gloss is `layer Shininess x GlossMult x the palette
+entry's glossiness`, times that alpha where the layer ships one
+(`tint.layer_gloss`; the web shaders match), which replaced a hand-tuned
+0.30-0.75 roughness band. Until 2026-11-01 the alpha *replaced* Shininess
+instead of being scaled by it; see "A layer's Shininess scales its gloss map"
+below.
 
 **`.dds` and `.dds.N` are mips; `.dds.Na` are the alpha mips.** A `_ddn` name
 has no alpha stream at all and `--alpha` correctly errors on it. Only `_ddna`
@@ -2274,6 +2276,31 @@ model's bones as the prop's nodes (`socket::Prop::from_skeleton`). Against the
 `.cga` pack in the same folder the locator has the same rotation and the grips
 land on the same sides (±0.228 against ±0.243 m); drawn, the outer face -- tray,
 plate, strapped pocket, canister -- matches the game's icon.
+
+### A layer's Shininess scales its gloss map (2026-11-01)
+
+Reported by Noel through the Hangarworks item session: the Ambit Coverall drew
+as wet vinyl where the game's icon shows matte cloth. Its main layer is
+`nylon_01`, Shininess 91, over a `_ddna` gloss map averaging 0.93, and every
+port took the map *instead of* Shininess whenever a map existed -- smoothness
+0.93, roughness 0.07.
+
+**The library says the map is scaled.** Of 97 layers with a decoded gloss map,
+31 set Shininess below 255, and every one of them is a rough material whose
+map alone would be shiny: canvas, fleece, jersey, lace, lycra, thread, towel,
+tweed, cotton, leather, wicker, burlap, polyester, rust and nylon. `towel_03`
+is 135 over a 0.89 map, `jersey_04` 100 over 0.87, `nylon_01` 91 over 0.93 --
+read as the map alone, towels and jerseys come out glossier than most metals.
+The metal folder sits at 255 almost entirely, so metals do not move. The skin
+and `Illum` path (`materials.ts` `glossRoughness`) already read it as
+`alpha x Shininess`.
+
+Drawn through the Hangarworks item renderer on a 22-look bench: the Ambit
+Coverall moves by 10.6 (mean, of 255) and loses its wet sheen (99th
+percentile 215 -> 153), the Argus helmet 7.0, MacFlex legs and the Scaleweave
+undersuit 3.0; weapons and hard armour move by about 1, render noise.
+`tint.layer_gloss`, `layerblend.js` and the live `fwLayer` all apply it; the
+Python bake's cache key gains `:shinemap`.
 
 ### Still unverified
 

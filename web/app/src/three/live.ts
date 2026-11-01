@@ -537,7 +537,9 @@ void fwLayer(int i, vec2 uv, vec2 dx, vec2 dy, out vec3 colour, out float rough,
   detail = vec2(0.0);
   if (tex.y >= 0.0) {
     vec4 ng = textureGrad(fwNormalGloss, vec3(tuv, tex.y), tdx, tdy);
-    gloss = ng.a * gp.y * glossScale;
+    // Scaled by the layer's Shininess, not replacing it: nylon_01 is 91 over a
+    // map averaging 0.93, and read alone that is wet vinyl.
+    gloss = ng.a * gp.x * gp.y * glossScale;
     detail = ng.rg * 2.0 - 1.0;
   }
   rough = clamp(1.0 - gloss, 0.04, 1.0);

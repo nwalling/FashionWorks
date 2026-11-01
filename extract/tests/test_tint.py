@@ -571,3 +571,16 @@ def test_tint_mode_declares_metal_but_mode_zero_means_nothing() -> None:
     # No TintMode at all: reflectance decides, as before.
     assert LayerMaterial(path="x", specular=(0.84, 0.84, 0.84)).is_metal
     assert not LayerMaterial(path="x", specular=(0.04, 0.04, 0.04)).is_metal
+
+
+def test_a_layer_gloss_map_is_scaled_by_its_shininess():
+    # nylon_01: Shininess 91 over a gloss map averaging 0.93 is matte cloth,
+    # not the 0.93 of wet vinyl.
+    import numpy as np
+
+    from sc_extract.tint import layer_gloss
+    nylon = layer_gloss(91 / 255, 1.0, 1.0, np.full((2, 2, 1), 0.93, dtype=np.float32))
+    assert abs(float(nylon.mean()) - 0.93 * 91 / 255) < 1e-6
+    # A layer at 255 is unchanged by the rule, and without a map the constant stands.
+    assert abs(float(layer_gloss(1.0, 0.8, 0.5, np.full((1, 1, 1), 0.6, dtype=np.float32)).mean()) - 0.24) < 1e-6
+    assert abs(layer_gloss(0.5, 1.0, 1.0) - 0.5) < 1e-9

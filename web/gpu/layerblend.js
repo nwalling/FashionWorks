@@ -253,9 +253,12 @@ void evaluateLayer(int i, vec2 uv, out vec3 colour, out float rough, out float m
   // Per-pixel gloss lives in the layer's _ddna alpha, which the DDS-to-PNG
   // conversion drops -- a converted _ddna comes out with a constant-255 alpha,
   // which looks like "this texture has no gloss". It is decoded separately.
+  // The alpha is scaled by the layer's Shininess, not a replacement for it:
+  // every library layer set below 255 is a rough material whose map alone
+  // would be shiny (nylon_01: 91 over a map averaging 0.93).
   float gloss = glossParams.x * glossParams.y * glossScale;
   if (tex.y >= 0.0) {
-    gloss = texture(uGloss, vec3(uv * tex.z, tex.y)).r * glossParams.y * glossScale;
+    gloss *= texture(uGloss, vec3(uv * tex.z, tex.y)).r;
   }
   rough = clamp(1.0 - gloss, 0.04, 1.0);
 }

@@ -279,6 +279,22 @@ def compose(
 
 MIN_TILE_PX = 4  # below this a tiled detail texture aliases into mush
 
+
+def layer_gloss(shininess, gloss_mult, gloss_scale, gloss_map=None):
+    """A detail layer's smoothness: its ``Shininess`` times the armour's
+    ``GlossMult`` times the palette entry's glossiness, and times the ``_ddna``
+    alpha where the layer ships one.
+
+    The alpha does not replace ``Shininess``, it is scaled by it -- as the skin
+    and ``Illum`` paths already read it. Every one of the 31 library layers set
+    below 255 is a rough material whose gloss map alone would be shiny: nylon_01
+    is Shininess 91 over a map averaging 0.93, towel_03 135 over 0.89,
+    jersey_04 100 over 0.87. Read as the map alone, nylon drew as wet vinyl
+    where the game's icon shows matte cloth (the Ambit Coverall).
+    """
+    gloss = shininess * gloss_mult * gloss_scale
+    return gloss if gloss_map is None else gloss_map * gloss
+
 # Remapping the wear mask to a wear amount: wear = (THRESHOLD - mask) / FALLOFF,
 # clamped. LayerBlend_V2 exposes no wear parameters of its own -- of 2741 armour
 # submaterials only 8 carry any Wear* PublicParam, and those 8 are an unrelated
@@ -478,7 +494,7 @@ def layered_key(sub, palette: list[Layer], wear: bool = True) -> str:
         )
     parts.append(
         f"wear:{WEAR_THRESHOLD}:{WEAR_FALLOFF}:metal:{METAL_F0_THRESHOLD}"
-        f":diffuse:buckets:{sorted(BLEND_BUCKETS.items())}:tintmul:metalnorm:tintmode2:palspec:entrymetal"
+        f":diffuse:buckets:{sorted(BLEND_BUCKETS.items())}:tintmul:metalnorm:tintmode2:palspec:entrymetal:shinemap"
         f"{'' if wear else ':unworn'}"
     )
     return hashlib.sha1(";".join(parts).encode()).hexdigest()[:10]
@@ -669,8 +685,8 @@ def compose_layered(
                         linear = linear / mean
                 colour = linear * tint
 
-        gloss = (detail.glossiness if detail else 0.5) * entry.gloss_mult * gloss_scale
-        gloss_map = np.full((size, size, 1), gloss, dtype=np.float32)
+        shininess = detail.glossiness if detail else 0.5
+        gloss_map = np.full((size, size, 1), layer_gloss(shininess, entry.gloss_mult, gloss_scale), dtype=np.float32)
         if detail is not None and gloss_cache and p4k and starbreaker:
             path = layer_lib.gloss_for(
                 detail, p4k=p4k, starbreaker=starbreaker, cache_dir=gloss_cache
@@ -678,9 +694,9 @@ def compose_layered(
             if path is not None:
                 sample = _tiled(path, size, repeat, "L")
                 if sample is not None:
-                    gloss_map = (
-                        sample.astype(np.float32) / 255.0
-                    ) * entry.gloss_mult * gloss_scale
+                    gloss_map = layer_gloss(
+                        shininess, entry.gloss_mult, gloss_scale, sample.astype(np.float32) / 255.0
+                    )
         return (
             colour,
             np.clip(1.0 - gloss_map, 0.04, 1.0),
