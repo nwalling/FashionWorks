@@ -2194,6 +2194,18 @@ declares no tone.
 file name misreads a buzz cut's coat. Most caps are white RGB over an alpha
 density; read by red they draw as opaque sheets.
 
+**The customizer is the reference for hair colour, and its record says what
+the dye sliders are** (2026-11-02, CHARACTER.md "Hair, brows and skin, held
+to the customizer"). The natural-colour picker image
+(`root_color_graph_31_03_2025`) is Chiang's melanin curve at an azimuthal
+roughness of 0.82, not Blender's 0.3, which drew every head at a quarter of
+its colour. `DyeShift` and `DyeFadeout` are the two ends of one "Dye
+Gradient" slider, root to tip, read here against the vertex red a hair mesh
+counts its strands out in. A hair's highlight width comes from its
+`Smoothness` as a physical roughness, not CryEngine 5's `Hair.cfx` exponent,
+which put a white patch on every head. Skin reflects its `Specular` times its
+spec map, through the 30x pore detail map on slot 6 the core used to drop.
+
 ### Items held against the game's own icons (2026-10-30)
 
 The Hangarworks item renders were put beside references for 32 items and 12

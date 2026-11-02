@@ -41,6 +41,16 @@ describe('strandCoordinate', () => {
     expect(t.slice(8)).toEqual([0, 0, 1, 1]);
   });
 
+  it('carries the distance out from the root as the red itself', () => {
+    // What a dye's gradient is set against: the same step is the same
+    // distance on a long card and a short one.
+    const geometry = cards();
+    strandCoordinate(geometry, 0, geometry.getIndex()!.count);
+    const d = Array.from(geometry.getAttribute('fwStrandD').array as Float32Array);
+    expect(d.slice(0, 8)).toEqual([0, 0, 1, 1, 2, 2, 3, 3].map((s) => Math.fround(s / 255)));
+    expect(d.slice(8)).toEqual([0, 0, 1, 1].map((s) => Math.fround(s / 255)));
+  });
+
   it('does nothing without a vertex colour', () => {
     const geometry = cards();
     geometry.deleteAttribute('fwColor');

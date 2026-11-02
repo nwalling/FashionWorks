@@ -9,7 +9,9 @@
 
 import { BufferAttribute, BufferGeometry, type Material, SkinnedMesh, type Vector3 } from 'three';
 
-/** Each card's position from root to tip, 0 to 1, as `fwStrandT`.
+/** Each card's position from root to tip, 0 to 1, as `fwStrandT`, and its
+ * distance out from the root as the vertex red itself, 0 to 1, as
+ * `fwStrandD`.
  *
  * A hair mesh's vertex colour red is the vertex's step along its card: every
  * card of the beard starts at 0 where it leaves the skin and counts up to its
@@ -17,7 +19,11 @@ import { BufferAttribute, BufferGeometry, type Material, SkinnedMesh, type Vecto
  * 3,028 cards, its peak tracking the card's length. `hair_75` holds it on all
  * 4,464 cards and `brows_002` on 99%; lashes carry 0 throughout. So the position along a
  * strand is red over the peak of the card it belongs to, a card being the
- * triangles that share vertices. */
+ * triangles that share vertices. Walking each card's rows of equal red from
+ * the root gives 468 steps a metre on the beard, 461 on the brows and 495 on
+ * `hair_75` (`examples/strand_units.rs`): a step is about 2.1 mm, and the red
+ * as a shader reads it, 0 to 1, runs about 0.54 m. That is the unit the dye's
+ * gradient is set in (`dyeAt`). */
 export function strandCoordinate(geometry: BufferGeometry, start: number, count: number): boolean {
   const color = geometry.getAttribute('fwColor');
   const index = geometry.getIndex();
@@ -58,13 +64,16 @@ export function strandCoordinate(geometry: BufferGeometry, start: number, count:
   // as a tip. A mesh with no counting card at all gets no coordinate.
   let counts = false;
   const t = new Float32Array(vertices);
+  const d = new Float32Array(vertices);
   for (let v = 0; v < vertices; v += 1) {
     const top = used[v] ? peak[find(v)]! : 0;
     if (top > 0) counts = true;
     t[v] = top > 0 ? step(v) / top : 0.5;
+    d[v] = color.getX(v);
   }
   if (!counts) return false;
   geometry.setAttribute('fwStrandT', new BufferAttribute(t, 1));
+  geometry.setAttribute('fwStrandD', new BufferAttribute(d, 1));
   return true;
 }
 

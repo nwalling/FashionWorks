@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { coverageScale, hairColour } from '../src/three/materials';
+import { coverageScale, hairColour, hairLobeExponent } from '../src/three/materials';
 
 const luminance = (c: { r: number; g: number; b: number }) => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
 
@@ -23,12 +23,24 @@ describe('hairColour', () => {
     expect(red.r / red.g).toBeGreaterThan(plain.r / plain.g);
   });
 
-  it('mixes toward the dye by the share of strands it reaches', () => {
-    // A full amount reaches 45% of strands, each drawn at 30% of the dye
-    // colour: the average over a head of hair.
+  it('is the customizer picker’s colour', () => {
+    // Ilucide's melanin, 0.638 with no redness, reads (63, 40, 14) on
+    // `root_color_graph_31_03_2025`.
+    expect(hairColour({ BaseMelanin: 0.63824946, BaseMelaninRedness: 0 }).getHexString()).toBe('3f280e');
+  });
+
+  it('dyes to the root only where the gradient starts there', () => {
+    // A dye with no gradient is everywhere: the root mixes toward it, each
+    // dyed strand drawn at 30% of the dye colour.
     const base = hairColour({ BaseMelanin: 0.7 });
     const c = hairColour({ BaseMelanin: 0.7, DyeColor: new Float32Array([1, 1, 1]), DyeAmount: 1 });
-    expect(c.r).toBeCloseTo(base.r + (0.3 - base.r) * 0.45, 5);
+    expect(c.r).toBeCloseTo(0.3, 5);
+    // One that starts out along the strand leaves the root -- what a cap
+    // shades the skin with -- natural.
+    const shifted = hairColour({
+      BaseMelanin: 0.7, DyeColor: new Float32Array([1, 1, 1]), DyeAmount: 1, DyeShift: 0.015, DyeFadeout: 0.025,
+    });
+    expect(shifted.getHexString()).toBe(base.getHexString());
   });
 
   it('leaves no dye at amount zero', () => {
@@ -37,16 +49,27 @@ describe('hairColour', () => {
     expect(c.getHexString()).toBe(base.getHexString());
   });
 
-  it('gives hair_31 its dark brown', () => {
-    // m_hair_31.mtl's own parameters.
+  it('gives hair_31 its brown at the root', () => {
+    // m_hair_31.mtl's own parameters: a lighter brown dye from 0.19 out.
     const c = hairColour({
       BaseMelanin: 0.69207001,
       BaseMelaninRedness: 0,
       DyeColor: new Float32Array([0.16826943, 0.099898733, 0.057805438]),
       DyeAmount: 0.40782699,
+      DyeShift: 0.189495,
+      DyeFadeout: 0.30998999,
       BaseTintColor: new Float32Array([1, 1, 1]),
     });
-    expect(c.getHexString()).toBe('24160b');
+    expect(c.getHexString()).toBe(hairColour({ BaseMelanin: 0.69207001 }).getHexString());
+  });
+});
+
+describe('hairLobeExponent', () => {
+  it('is as wide as the smoothness says', () => {
+    // hair_75 at 0.57: a broad sheen, not CryEngine 5's exponent of 103.
+    expect(hairLobeExponent(0.568499)).toBeCloseTo(4.64, 1);
+    // Smoother is narrower.
+    expect(hairLobeExponent(0.788)).toBeGreaterThan(hairLobeExponent(0.568499));
   });
 });
 

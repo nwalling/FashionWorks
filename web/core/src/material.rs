@@ -535,6 +535,11 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<SubMaterial>, String> {
                     // black exactly where head and body meet. Read as the
                     // decal slot it would be drawn as a sticker sheet.
                     Some("tone_mask")
+                } else if skin && binding.slot.eq_ignore_ascii_case("TexSlot6") {
+                    // Skin's slot 6 is its detail map (`%DETAIL_MAPPING`),
+                    // tiled by its `TexMod`: CryEngine's packing, a pore-scale
+                    // normal in green and alpha, cavity in red, gloss in blue.
+                    Some("detail")
                 } else if layered && binding.slot.eq_ignore_ascii_case("TexSlot5") {
                     // A thin film's colour ramp (`%IRIDESCENCE`); nothing else
                     // on LayerBlend uses the slot.
@@ -625,7 +630,15 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<SubMaterial>, String> {
                         .filter(|(name, _)| name.to_ascii_lowercase().contains("decal"))
                         .collect()
                 } else {
-                    numeric_params(&sub.public_params)
+                    let mut params = numeric_params(&sub.public_params);
+                    // The detail map's tiling lives on its texture, not in the
+                    // parameter block: 30 by 30 on every head, which puts a
+                    // tile at about 8 mm, the scale of pores.
+                    if skin {
+                        let (u, v) = tex_mod_tile(&sub.authored_textures, "TexSlot6");
+                        params.push(("DetailTiling".to_string(), vec![u, v]));
+                    }
+                    params
                 },
             }
         })
@@ -705,16 +718,24 @@ pub fn reads_hal(gen_mask: &str) -> bool {
 /// coarse -- invisible while the bake averaged it away, and wrong the moment
 /// the detail is drawn at render time.
 fn tex_mod_tile_u(textures: &[mtl::AuthoredTexture]) -> f32 {
-    textures
-        .iter()
-        .filter(|t| t.slot.eq_ignore_ascii_case("TexSlot1"))
-        .flat_map(|t| t.child_blocks.iter())
-        .filter(|b| b.tag.eq_ignore_ascii_case("TexMod"))
-        .flat_map(|b| b.attributes.iter())
-        .find(|a| a.name.eq_ignore_ascii_case("TileU"))
-        .and_then(|a| a.value.trim().parse::<f32>().ok())
-        .filter(|v| v.is_finite() && *v > 0.0)
-        .unwrap_or(1.0)
+    tex_mod_tile(textures, "TexSlot1").0
+}
+
+/// A slot's `TexMod` tiling, U and V; 1 where it sets none.
+fn tex_mod_tile(textures: &[mtl::AuthoredTexture], slot: &str) -> (f32, f32) {
+    let read = |axis: &str| {
+        textures
+            .iter()
+            .filter(|t| t.slot.eq_ignore_ascii_case(slot))
+            .flat_map(|t| t.child_blocks.iter())
+            .filter(|b| b.tag.eq_ignore_ascii_case("TexMod"))
+            .flat_map(|b| b.attributes.iter())
+            .find(|a| a.name.eq_ignore_ascii_case(axis))
+            .and_then(|a| a.value.trim().parse::<f32>().ok())
+            .filter(|v| v.is_finite() && *v > 0.0)
+            .unwrap_or(1.0)
+    };
+    (read("TileU"), read("TileV"))
 }
 
 #[cfg(test)]
@@ -952,6 +973,10 @@ mod tests {
         };
         assert_eq!(tex_mod_tile_u(&[texture("TexSlot1", "4")]), 4.0);
         assert_eq!(tex_mod_tile_u(&[texture("TexSlot2", "4")]), 1.0, "only the diffuse's");
+        // A head's detail map: `TileU="30" TileV="30"` on TexSlot6. A slot
+        // that sets only one axis keeps 1 on the other.
+        assert_eq!(tex_mod_tile(&[texture("TexSlot6", "30")], "TexSlot6"), (30.0, 1.0));
+        assert_eq!(tex_mod_tile(&[texture("TexSlot1", "30")], "TexSlot6"), (1.0, 1.0));
         assert_eq!(tex_mod_tile_u(&[texture("TexSlot1", "0")]), 1.0, "a zero tiling is no tiling");
         assert_eq!(tex_mod_tile_u(&[]), 1.0);
     }

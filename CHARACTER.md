@@ -371,7 +371,9 @@ from matching angles, measured as ratios against the skin in the same image
   where the captures show it dense to the cheekbone. The first-first reading,
   hair colour with the dye mixed flat, painted it light grey: it was the flat
   dye, not the cap, that was wrong.
-- **Dye is per strand.** The beard in game is salt and pepper: black melanin,
+- **Dye is per strand** (superseded 2026-11-02: the dye is a gradient along
+  the strand, and `DyeAmount` is not a share of strands -- see "Hair, brows
+  and skin, held to the customizer" below). The beard in game is salt and pepper: black melanin,
   with white strands, lightest on the moustache and chin. Neither a flat mix
   (grey) nor absorption (black) draws that. `DyeAmount` is the share of
   strands the dye reaches, chosen by a second draw from the strand ID map,
@@ -579,6 +581,89 @@ the exponent falls: the environment is the whole sky, not a point. The
 moustache reads 1.03 with 6.5% near white; the beard 0.46 of the skin
 against the capture's 0.49. Head hair keeps the narrow lobe at half strength:
 broadened, the grey sheen the captures show across the crown went flat brown.
+
+### Hair, brows and skin, held to the customizer (2026-11-02)
+
+Reported by Noel from a Hangarworks render beside an in-game shot: brows
+white where the game's are dark, hair near black with a white patch on top
+where the game's is a mid ash-brown with a grey sheen, and skin that looked
+wet. Four causes, each settled by data the archive carries.
+
+**The melanin curve is the customizer's own picker.** The game ships its
+natural-colour picker as an image, `root_color_graph_31_03_2025` (melanin
+across, redness down). Chiang's curve fits it at an azimuthal roughness of
+**0.82**, with a log error of 0.53 over the whole picker against 1.32 at
+Blender's 0.3, which we used. Ilucide's melanin 0.638 reads (63, 40, 14) on
+the picker and now here. CIG's own colourways agree: `m_hair_75_brown` is
+melanin 0.665, `_black` 0.965, `_grey` melanin 0 under a grey
+`BaseTintColor`. At 0.3 every head drew at about a quarter of its colour,
+which is why Ilucide's brown read near black, and why `hair_31`'s "brown"
+was recorded above as "near black".
+
+**The dye is a gradient out from the root, in the vertex red's units.** The
+customizer (`charactercustomizer_pu`, `tc_charactercustomizer_haircolourdye`)
+draws `DyeShift` and `DyeFadeout` as the two handles of one slider, "Dye
+Gradient", labelled root to tip, and holds its far end out to at least 0.04
+(`hairDyeShiftMinFadeOut`). Ilucide's beard ends exactly there, 0.0152 +
+0.0248: dragged as near the root as the slider allows. The red counts 2.1 mm
+steps from the root (468 steps a metre on the beard, 461 on the brows, 495 on
+`hair_75`; `examples/strand_units.rs`), so in a shader's 0-1 that end is
+2 cm out. The dye starts at `DyeShift` and is full by `DyeShift +
+DyeFadeout`; a cap, being the hair at the root, stays natural.
+`DyePigmentVariation` ("Dye Variation") spreads each strand's amount either
+side of `DyeAmount`. Brows 4.5-14 mm long, gradient from 5.6 mm: dark, tips a
+little lighter, as in game. Beard 10-30 mm, longest on the chin and lower
+lip: grey on the moustache and chin, dark at the sides. Read three other
+ways, it failed against Ilucide:
+
+| reading | what it drew |
+| --- | --- |
+| `DyeAmount` as a share of strands (this file's earlier reading) | brows white: 41% of strands at 0.91 |
+| `DyePigmentVariation` as a share | fits Ilucide, but makes inert the pink, ginger and gold dyes the archive's artists set at variation 0 (`defensecon_*`, `isaac_kepler`) |
+| along each strand, 0 to 1 | brows and beard dyed to the root: white brows, a pale grey beard |
+| in metres | dye on the longest tenth of the beard only: a black beard |
+
+Seven archive characters carry a blue brow dye at amount 1 on a gradient to
+0.21 (the masculine default among them); this reading leaves a brow at most
+4% blue. **Inferred**: the shader is compiled into the engine, and a
+character whose dye is set near the root would settle it -- see
+"Still open" below.
+
+**A hair's highlight is as wide as its roughness.** The white patch was the
+primary lobe. CryEngine 5's `Hair.cfx` turns gloss into an exponent of
+2^(10 gloss + 1): 103 at `hair_75`'s smoothness 0.57, a lobe about 6 degrees
+wide, which the normalisation made 20 times brighter at its peak. HairPBR is
+not that shader. As a longitudinal roughness `1 - Smoothness`, with d'Eon et
+al.'s variance, the lobe is 4.6 on `hair_75`, 3.2 on the beard and 28 on the
+brows, the secondary four times as wide; the materials' own
+`SpecularMultiplier` now scales it (0.60 on `hair_31`, 1.09 on the brows).
+The beard's broadened environment lobe (`BEARD_ENV_SPREAD` 16) existed only
+to soften the narrow one and is gone.
+
+**Skin reflects what its material says, through its pores.**
+`HumanSkin_V2` declares `Specular` 0.032 under a spec map
+(`male36_t1_head_spec`, sRGB 223): about 2.3% where three.js's standard
+material reflects 4% everywhere. And the head's slot 6 is a detail map
+(`%DETAIL_MAPPING`) tiled 30 by 30 -- a tile about 8 mm across, pore scale --
+which the core dropped. It is CryEngine's packing: the normal's X in green
+and Y in alpha (the pair that integrates, curl 0.022 against 0.068 swapped),
+cavity in red, gloss in blue centred on 0.5 (they correlate 0.69, pores
+darker and duller). Applied at the material's `DetailBumpScale` 0.9,
+`DetailGlossScale` 0.9 and `DetailCavityScale` 0.3, the face's highlight
+breaks into pores instead of lying across it as one smooth sheet: the 95th
+percentile of the face under the hangar light 105 -> 90, the 99th 123 -> 104.
+How each weight is applied is inferred.
+
+Not changed, and why: the head's gloss map is the archive's (median
+smoothness 0.46, the T-zone authored to 0.65), and a flat roughness of 0.75
+looked more like the capture only because it threw that away. What is left
+of the shine, and the skin's tone, is light: the captures' hangar has a
+bright overhead light and a teal cast that no preset has (RENDERING.md).
+
+**Still open.** The game's beard is greyer than ours across the chin, the one
+place the gradient does not yet reach far enough. A character whose dye
+gradient is dragged to the root, or a beard with its variation at 0 and 1,
+captured in the customizer, would settle the dye reading outright.
 
 ### Phase 4: the file, the body, the link
 
