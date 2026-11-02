@@ -300,10 +300,22 @@ export function Viewer({ tokens, onScene, className }: ViewerProps): JSX.Element
       untoneMapped(scratch, renderer.toneMappingExposure, renderer.toneMapping, scratch);
       gridMaterial().color.copy(scratch).multiplyScalar(1 / GRID_MINOR);
     };
+    // **A capture backdrop is a display level, not light.** Two alpha solves
+    // -- the portrait's and the Hangarworks item renderer's -- draw the figure
+    // over two flat greys and need both on the straight part of the tone
+    // curve. Exposure is metered now (`lighting.ts`) and runs 1.3-2.6, which
+    // put the light grey on the shoulder and solved a half-covered pixel as a
+    // third covered. So a flat backdrop goes through the curve at the exposure
+    // the solves were built for, whatever the preset's.
+    const backdropScale = () => BACKDROP_EXPOSURE / Math.max(renderer.toneMappingExposure, 1e-4);
     const render = () => {
       if (chain) {
         compensate();
+        const flat = state.backdrop && (scene.background as Color | null)?.isColor ? (scene.background as Color) : null;
+        const held = flat?.clone();
+        if (flat) flat.multiplyScalar(backdropScale());
         chain.composer.render();
+        if (flat && held) flat.copy(held);
       } else {
         renderer.render(scene, camera);
       }
@@ -459,7 +471,7 @@ export function Viewer({ tokens, onScene, className }: ViewerProps): JSX.Element
         renderer.setClearAlpha(1);
         fill.intensity = (fill.userData.base as number | undefined) ?? fill.intensity;
         for (const grey of greys) {
-          scene.background = new Color().setRGB(grey, grey, grey);
+          scene.background = new Color().setRGB(grey, grey, grey).multiplyScalar(chain ? backdropScale() : 1);
           camera.layers.mask = saved.layers;
           frames.push(resolved());
           // Nothing on layer 31: the grey alone, as the screen shows it.
@@ -529,6 +541,10 @@ export function Viewer({ tokens, onScene, className }: ViewerProps): JSX.Element
 
   return <div ref={host} className={className} data-fashionworks-view="" />;
 }
+
+/** The exposure the capture backdrops were designed at: both greys of a
+ * capture, 0.2 and 0.8 linear, then sit on the Neutral curve's straight part. */
+const BACKDROP_EXPOSURE = 0.7;
 
 /** sRGB bytes to linear, for averaging frames. */
 const SRGB_TO_LINEAR = Float32Array.from({ length: 256 }, (_, i) => {

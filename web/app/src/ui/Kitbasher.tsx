@@ -577,10 +577,10 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
         <span className="fw-kit-label">surface</span>
         <button
           type="button"
-          aria-pressed={state?.wear ?? true}
+          aria-pressed={state?.wear ?? false}
           disabled={busy}
           title="Worn in, or as it left the factory"
-          onClick={() => void engine.current?.setWear(!(state?.wear ?? true))}
+          onClick={() => void engine.current?.setWear(!(state?.wear ?? false))}
         >
           {state?.wear === false ? 'factory' : 'worn'}
         </button>

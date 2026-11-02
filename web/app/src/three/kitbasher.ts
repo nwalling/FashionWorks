@@ -810,7 +810,11 @@ export class Kitbasher {
       aside: new Map(),
       pose: 'rest',
       lighting: DEFAULT_PRESET,
-      wear: true,
+      // As it left the factory, as the game shows a piece in its icons, its
+      // store renders and on a new character: the Zeus, Stirling, CSP-68H,
+      // Lynx and Artimex icons are clean where the worn surface paints bright
+      // chips over every painted plate (WEAR in CLAUDE.md). Wear is the toggle.
+      wear: false,
       status: '',
       busy: false,
       rigBones: 0,

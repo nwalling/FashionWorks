@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { convergence, probeStatistics } from '../src/three/lighting';
+import { DEFAULT_PRESET, LIGHT_PRESETS, PROBES, convergence, probeStatistics } from '../src/three/lighting';
 
 describe('lighting', () => {
   it('finds the point an authored rig is aimed at', () => {
@@ -27,5 +27,21 @@ describe('lighting', () => {
     const { key, mean } = probeStatistics(size, rgba);
     expect(key.y).toBeGreaterThan(0.95);
     expect(mean).toBeGreaterThan(0.01);
+  });
+
+  it('lights every preset from a probe the archive ships, metered but for the baseline', () => {
+    const ids = LIGHT_PRESETS.map((p) => p.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toContain(DEFAULT_PRESET);
+    // The Hangarworks item renderer asks for these by name.
+    expect(ids).toEqual(expect.arrayContaining(['studio', 'hangar', 'inventory', 'creator']));
+    for (const p of LIGHT_PRESETS) {
+      if (p.probe) expect(PROBES[p.probe]).toMatch(/_cm\.dds$/);
+      // Metered presets carry a mood either side of the design point, not a
+      // fixed exposure; only the old invented rig keeps one.
+      if (p.metered !== false) expect(p.exposure).toBeGreaterThan(0.5);
+      if (p.metered !== false) expect(p.exposure).toBeLessThanOrEqual(1.5);
+    }
+    expect(LIGHT_PRESETS.filter((p) => p.metered === false).map((p) => p.id)).toEqual(['classic']);
   });
 });

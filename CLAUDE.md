@@ -8,7 +8,9 @@ A Star Citizen FPS-armor kitbasher. Pipeline:
 Data.p4k -> catalog (JSON) -> geometry/textures -> Blender normalize -> .glb + manifest.json -> React/Three.js viewer
 ```
 
-`LIGHTING.md` holds a deferred plan for the viewer's lighting model.
+`LIGHTING.md` is the web kitbasher's lighting: the 2026-11-02 review, the
+metered exposure, the presets as the game's own scenes; the local viewer's
+older deferred plan is kept at its end.
 `WEB-LEGAL.md` holds the Phase 0 legal research: what CIG's EULA and
 Fandom FAQ actually say, the options, and **the go/no-go, which is decided and
 is go** — with the conditions recorded under "Legal" at the foot of this file.
@@ -2412,6 +2414,64 @@ change of tone.
   and 300 series; the Pulse's sponsor logos, where vertex alpha x
   `DecalAlphaMult` under `AlphaTest` explained most but not all of the hidden
   logos). Neither is a rule to port blind.
+
+### The Neutral curve's toe, and exposure metered (2026-11-02)
+
+Reported by Noel: the RSI Zeus Exploration Backpack Starscape drew near-black
+and glossy under `hangar` where the game shows a matte warm grey. The pack
+was not at fault; the light was, on every piece.
+
+**three.js's Neutral curve squares what falls below 0.08.** Khronos PBR
+Neutral subtracts a 4% floor meant to cancel the Fresnel a dielectric gains
+under unit light, eased in as `6.25 x^2` below 0.08 linear. The presets were
+fixed at exposure 0.63-0.7, tuned to one dim capture's absolute levels, which
+put an 18% grey card at the figure at 0.27-0.5 of the curve's design point.
+Dark-to-mid surfaces came out squared and their highlights did not: the Zeus
+shell at sRGB 9 against the game's 52, Ilucide's hair at 0.28 of his forehead
+against 0.45. A plain grey material on the shell drew the same 9, so it was
+not the layer shader; switching off the normal map, the decal sheet, the
+shadow and the occlusion pass each changed nothing. The key delivered what
+its angle says (0.153 linear on a 0.5 grey, 0.120 computed).
+
+**Exposure is metered now** (`lighting.ts` `StudioLighting.meter`): an 18%
+grey sphere at the figure, rendered from six sides with nothing else drawn,
+sets the exposure so the card shows as 18% grey; a preset's `exposure` is a
+mood either side of that. The shell reads 35-47, the hair 0.51 and 0.15 at
+p10 against 0.07. Neutral stays the curve: both alpha solves need it affine
+between their backdrop greys. **The Hangarworks item renderer's `--exposure
+2` and its weapon and ship environment scales were compensating for the
+toe**; against a metered preset its exposure wants to be 1. `LIGHTING.md`
+has the review and the presets, which are now the game's own scenes.
+
+The lesson is the one "Compare contrast, not absolute luminance" already
+states: an absolute level fitted through a non-linear curve fits the curve.
+Sunchaser contrast moves from 3.22 to 2.38 (band 2.48-3.47) and the Defiance
+torso from mean 34 to 54 against the dim capture's 34; the old figures were
+read through the toe, which squares ratios. Gold coverage is unchanged.
+
+**A capture backdrop is a display level, not light.** The portrait and the
+Hangarworks item renderer solve alpha from two flat greys, 0.2 and 0.8
+linear, which at exposure 0.7 sat on the curve's straight part. Metered
+exposure runs 1.3-2.6 and put the light grey on the shoulder (0.8 x 1.41 shows
+as 0.91, not 1.13), where a half-covered pixel solves as a third covered. A
+flat backdrop now goes through the curve at 0.7 whatever the preset
+(`Viewer.tsx` `BACKDROP_EXPOSURE`). The portrait barely noticed -- it averages
+hashed frames whose pixels are mostly whole -- but single-frame captures,
+edges and visors, would.
+
+### A piece is drawn as it left the factory (2026-11-02)
+
+The white chips on that backpack were its wear: the shell's paint pairs with
+polished aluminium, and the chosen wear curve (`WEAR_THRESHOLD`) bares it in
+every dark patch of the mask. The game shows pieces new -- in its icons, its
+store renders and on a new character. Held against cstone icons, the Zeus,
+Zeus Solar, Starscape and Stirling packs, the CSP-68H Red Alert, the Lynx arms
+and the Artimex core are all clean, where worn they carry bright chips over
+every painted plate (the Artimex core most of all). **Wear is off by
+default** in the web engine (`state.wear`), which every path reads -- live
+surfaces, baked atlases, swatches, carried gear, and the Hangarworks item
+renders through it -- and in the local viewer, whose pipeline already bakes
+both surfaces. It stays a toggle.
 
 ### Still unverified
 

@@ -1,4 +1,158 @@
-# Lighting model — deferred plan
+# Lighting
+
+The web kitbasher's lighting: what the 2026-11-02 review found, what it is
+now, and what it was measured against. The local viewer's older, deferred
+plan is kept at the end. `RENDERING.md` Phase 1 is where the presets came
+from: the game's own probes, decoded from the visitor's archive.
+
+## The review (2026-11-02)
+
+Noel's report: the RSI Zeus Exploration Backpack Starscape drew near-black,
+glossy and chipped under `hangar`, where the game shows a matte warm grey.
+Taken apart, it was two systemic faults and no fault in the backpack.
+
+**1. Every preset sat in the tone curve's toe.** three.js's Neutral curve
+(Khronos PBR Neutral) subtracts a 4% floor meant to cancel the Fresnel a
+dielectric gains under unit light, and below 0.08 it eases that in as a
+square: `6.25 x^2`. The presets were fixed at exposure 0.63-0.7, calibrated
+against one dim in-game capture, and that put an 18% grey card at the figure
+at **0.27-0.5 of the curve's design point** -- inside the toe. A dark-to-mid
+surface came out squared; its highlights did not. That is "darker and
+shinier", and it was everywhere:
+
+| | game | before | after |
+| --- | --- | --- | --- |
+| Zeus Starscape shell, back view (sRGB median / p10 / p90) | 52 / 32 / 81 | 9 / 3 / 24 | 35 / 16 / 66 (hangar), 47 / 15 / 83 (inventory) |
+| Ilucide's hair against his forehead (p50 / p10) | 0.45 / 0.26 | 0.28 / 0.07 | 0.51 / 0.15 |
+| hair luminance spread (std / median) | 0.40 | 1.37 | 0.67 |
+
+A plain grey material on the pack's shell, same albedo and roughness, drew
+the same sRGB 9: the layer shader, the normals, the decals and the shadow
+were each ruled out by switching them off. The key light delivered what its
+angle says (0.153 linear on a 0.5 grey against 0.120 computed); the curve
+took it away.
+
+The Hangarworks item renderer had been compensating from outside: it
+re-exposes every card x2 through the Neutral curve's inverse ("the
+game-calibrated preset reads too dark on the site's cards"), and scales the
+environment x1.5 for weapons and x4 for ship parts. Its notes describe the
+old `hangar` as "a standard weapon black with hot highlights" -- the toe.
+Studio x2 is 0.98 of the design point: Noel's eye had found it.
+
+**2. Wear was on by default.** See `CLAUDE.md`, "A piece is drawn as it
+left the factory".
+
+**Also found:**
+
+* The character creator's rig sat at **2.5 times** the design point and
+  clipped -- why portrait captures under it came back byte-identical.
+* `studio` lights from the game's own item-preview probe
+  (`Data/UI/Textures/ItemPreview/EnvironmentProbes`, the Idris medical room),
+  whose cool cast shows on a neutral grey (saturation 0.36 on the Zeus
+  shell). Kept: it is how the game previews an item. It now loads that copy.
+* `hangar` aims its key at the Idris probe's brightest patch, a bright wall
+  behind the figure. An overhead key matched Ilucide's capture a little
+  better (hair p10 0.19 against 0.15) and halved the light on the pack's back
+  (13 against 35); the two captures are different hangars at different
+  angles, so the probe's own direction stays.
+* The archive ships more of the game's light than the presets used: a
+  player hangar's probe (the asteroid hangar, teal), station interiors, and a
+  planet time-of-day set (morning to night, overcast).
+
+## What it is now
+
+**Exposure is metered** (`StudioLighting.meter`). After a preset's lights
+are set, a rough 18% grey sphere at 1.45 m is rendered from six sides into a
+small float target with everything else hidden and no tone curve, and the
+mean is the light the preset puts on the figure -- key, rim, ambient, probe
+and the customizer's spots alike, whatever the outfit. Exposure is set so the
+card shows as 18% grey, the Neutral curve's design point, times the preset's
+`exposure`, which is now only a mood either side of it. Incident, not
+reflective: a black suit is not brightened. `classic` alone is unmetered.
+
+Neutral stays the curve. Both alpha solves -- the portrait's and the item
+renderer's -- rely on it being affine between their two backdrop greys, and
+at its design point it reproduces a base colour as authored, which is what
+the palette work in `CLAUDE.md` is measured in.
+
+**A flat capture backdrop is not lit, so it is not metered.** Those greys,
+0.2 and 0.8 linear, were placed for exposure 0.7; at a metered 1.41 the light
+one lands on the shoulder and shows 0.91 for 1.13, and a half-covered pixel
+solves as a third covered. The viewer passes a flat backdrop through the
+curve at 0.7 whatever the preset (`BACKDROP_EXPOSURE`), in its own capture
+and in backdrop mode, which is how the item renderer draws.
+
+**The presets are places the game lights things**, each by the game's probe:
+
+| preset | probe | key | mood | metered exposure |
+| --- | --- | --- | --- | --- |
+| inventory *(reference)* | inventory screen, hue dropped | probe | 1 | 1.39 |
+| studio | item preview (Idris medical room) | front right | 1 | 1.41 |
+| hangar | Idris hangar | probe | 1 | 1.79 |
+| asteroid hangar | a player hangar's own probe, teal | overhead, chosen | 1 | 1.72 |
+| station | a station interior (`PU/cubemaps/lowtech`) | probe | 1 | 1.65 |
+| daylight | Daymar, sunny | probe, warm | 1 | 1.34 |
+| dusk | planet time-of-day set, dusk | probe, amber | 0.9 | 1.75 |
+| night | the same set, night | probe, cool | 0.7 | 1.55 |
+| space | Stanton, open space | probe | 1 | 2.57 |
+| character creator | the customizer's ten spots | -- | 1 | 0.28 |
+| classic | none: the original invented rig | fixed | -- | 1.0, unmetered |
+
+The asteroid hangar's own brightest patch is low and behind, which left the
+face at 0.42 of the Idris hangar's; its key is the ceiling floods instead.
+
+## Measured
+
+`npm run harness`, inventory, high quality (`RENDERING.md` Phase 0):
+
+| measure | target | main | metered |
+| --- | --- | --- | --- |
+| Sunchaser gold, pooled | -- | 21.3% | 21.3% |
+| Sunchaser contrast, pooled | 2.48-3.47 | 3.22 | 2.38 |
+| Sunchaser back, gold | 33.0% | 42.6% | 43.2% |
+| Corbel Halcyon hue | 46.8 | 46.3 | 45.4 |
+| Beacon Orange hue | 30.2 | 31.5 | 27.5 |
+| Lynx Arms Blue hue | 235.6 | 238.4 | 237.7 |
+| Defiance Tactical torso mean / median | 34 / 29 | 34 / 28 | 54 / 49 |
+
+Coverage and two of three hues hold. The contrast falls just under the band
+because the toe was squaring it: a ratio read through `6.25 x^2` is the ratio
+squared, which flatters an accent. The Defiance torso now reads brighter than
+the dim capture it was once tuned to, an absolute level `CLAUDE.md` already
+says not to trust. Beacon's bright orange (median 171 of 255) loses 2.7
+degrees at the curve's shoulder.
+
+Item renders, the 46-look render-review bench through the Hangarworks item
+renderer, main at its default x2 against this branch at x1:
+
+| | main, renderer x2 | branch, metered, renderer x1 |
+| --- | --- | --- |
+| median of the looks' median luminance | 77 | 73 |
+| median shadow-to-highlight spread (p90 / p10, linear) | 34 | 34 |
+| median share of blown pixels | 0.96% | 1.08% |
+| looks over 2% blown | 16 | 15 |
+
+The two draw items alike, so the renderer's x2 had been standing in for
+exactly this exposure: **once this is on main the item renderer wants
+`--exposure 1`**, or every card doubles. Its weapon and ship environment
+scales are reflective, not exposure, and stay. What does change on the cards
+is wear: painted armour loses its chips (the CDS Legacy arms' saturation 0.52
+-> 0.59, the GSB boots 51 -> 55).
+
+## Not done
+
+* **Hair at full-figure distance reads light grey for Ilucide.** His `.chf`
+  sets his hair's melanin variation to 1.0, and in melanin units a fifth of
+  his strands carry none (`HAIR.md` §9); at portrait size it measures 0.51 of
+  his forehead against the game's 0.45. Lighting does not decide it.
+* **The local viewer** (`viewer/`) still lights with ACES at 0.85, calibrated
+  on the same dim capture. ACES has no Fresnel floor, so the squaring above is
+  Neutral's; its levels are the plan below.
+* **The asteroid hangar's key** is chosen, not read.
+
+---
+
+# The local viewer: lighting model, deferred plan (2026-09-16)
 
 Parked 2026-09-16 to work on the catalogue first. **Nothing here is
 implemented.** The findings come from reading the current rig and drei's

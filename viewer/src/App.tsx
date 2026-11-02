@@ -24,9 +24,10 @@ export function App() {
   const [capture, setCapture] = useState<Capture | null>(null);
   const [preset, setPreset] = useState<HdrPreset>('warehouse');
   const [backdrop, setBackdrop] = useState<BackdropChoice>('hangar');
-  // Armour ships scuffed; this shows it as it left the factory instead. Both
-  // surfaces are baked, so the toggle swaps textures rather than recomputing.
-  const [wear, setWear] = useState(true);
+  // As it left the factory by default, as the game's icons and store renders
+  // show it; the toggle shows it scuffed. Both surfaces are baked, so the
+  // toggle swaps textures rather than recomputing.
+  const [wear, setWear] = useState(false);
   const [customBackdrop, setCustomBackdrop] = useState<string | null>(null);
   const [pose, setPose] = useState<string>('idle');
 

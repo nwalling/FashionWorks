@@ -734,7 +734,7 @@ export async function liveSurfaces(
         // gold, steel and champagne aluminium flat white under any light.
         .replace('#include <emissivemap_fragment>', `${filmFragment('fwMetal')}\n#include <emissivemap_fragment>\n  totalEmissiveRadiance += fwColour * (1.0 - fwMetal) * fwGlow;`)
         .replace('#include <aomap_fragment>', '#include <aomap_fragment>\n  reflectedLight.indirectDiffuse *= fwAo;\n  reflectedLight.indirectSpecular *= fwAo;')
-        .replace('#include <dithering_fragment>', '#include <dithering_fragment>\n  if (fwDebug == 1) gl_FragColor = vec4(fwColour, 1.0);');
+        .replace('#include <dithering_fragment>', '#include <dithering_fragment>\n  if (fwDebug == 1) gl_FragColor = vec4(fwColour, 1.0);\n  if (fwDebug == 2) gl_FragColor = vec4(vec3(fwMetal), 1.0);\n  if (fwDebug == 3) gl_FragColor = vec4(vec3(fwRough), 1.0);\n  if (fwDebug == 4) gl_FragColor = vec4(normalize(vNormal) * 0.5 + 0.5, 1.0);\n  if (fwDebug == 5) gl_FragColor = vec4(normal * 0.5 + 0.5, 1.0);');
     };
     out.customProgramCacheKey = () => 'fw-live';
     materials.set(sub.name, out);

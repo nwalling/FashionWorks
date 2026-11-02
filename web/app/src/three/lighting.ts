@@ -12,6 +12,12 @@
  * brightest direction aims the shadow-casting key, so the shadow falls the way
  * the environment says the light comes from.
  *
+ * **Exposure is metered** (`StudioLighting.meter`): an 18% grey card at the
+ * figure shows as 18% grey under every preset, the Neutral curve's design
+ * point, and a preset's `exposure` is only its mood. Fixed exposures had put
+ * every preset in the curve's toe, which squares what falls in it
+ * (`LIGHTING.md`).
+ *
  * **Orientation was measured, not assumed.** The probes are standard Y-up
  * cubes, so three.js reads them with no rotation: in the Idris hangar the face
  * labelled -Y is the one dim, even face (the floor), and all four side faces
@@ -35,17 +41,21 @@ import {
   Group,
   LinearFilter,
   LinearSRGBColorSpace,
+  Mesh,
+  MeshStandardMaterial,
   NeutralToneMapping,
   NoToneMapping,
   Object3D,
+  PerspectiveCamera,
   PMREMGenerator,
   RGBAFormat,
   Scene,
+  SphereGeometry,
   SpotLight,
   Vector3,
+  WebGLRenderTarget,
   type ToneMapping,
   type WebGLRenderer,
-  type WebGLRenderTarget,
 } from 'three';
 
 import type { ArchiveClient } from '../archive/client';
@@ -53,11 +63,16 @@ import type { RigLight } from '../worker/archive.worker';
 
 export const PROBES = {
   inventory: 'Data/Textures/cubemaps/inventory_setup/cm_inventory_probe_cm.dds',
-  medical: 'Engine/EngineAssets/Textures/LookDevelopmentMode/envprobes/environmentprobe_idris_medical_room_cm.dds',
+  // The item preview's own copy of the Idris medical-room probe.
+  medical: 'Data/UI/Textures/ItemPreview/EnvironmentProbes/environmentprobe_idris_medical_room_cm.dds',
   hangar: 'Engine/EngineAssets/Textures/LookDevelopmentMode/envprobes/environmentprobe_idris_hangar_cm.dds',
   daymar: 'Engine/EngineAssets/Textures/LookDevelopmentMode/envprobes/environmentprobe_stanton2b_sunny_cm.dds',
   yela: 'Engine/EngineAssets/Textures/LookDevelopmentMode/envprobes/environmentprobe_stanton2c_sunny_cm.dds',
   space: 'Engine/EngineAssets/Textures/LookDevelopmentMode/envprobes/environmentprobe_SOL_cm.dds',
+  asteroid: 'Data/Objects/buildingsets/hangar/asteroid/textures/cubemaps/asteroidhangar_environmentprobe01_cm.dds',
+  station: 'Data/Textures/PU/cubemaps/lowtech/cubemap_hightech_4x2_cm.dds',
+  dusk: 'Data/Textures/cubemaps/bhvr/environmentprobedusk_cm.dds',
+  night: 'Data/Textures/cubemaps/bhvr/environmentprobenight_cm.dds',
 } as const;
 
 export const CUSTOMIZER = {
@@ -77,7 +92,13 @@ export interface LightPreset {
    * which tints every piece it lights; as grey it keeps where the light comes
    * from and lets the item's own colour read. */
   readonly neutral?: boolean;
+  /** Exposure against the incident meter (`StudioLighting.meter`): at 1 an
+   * 18% grey card where the figure stands shows as 18% grey -- the Neutral
+   * curve's design point, where it reproduces a base colour as authored.
+   * Below 1 darker, the mood. A preset with `metered: false` takes it as the
+   * renderer's exposure as it is. */
   readonly exposure: number;
+  readonly metered?: boolean;
   readonly toneMapping: ToneMapping;
   /** The shadow-casting key. `direction` toward the light, or `probe` for
    * the probe's brightest direction. */
@@ -90,12 +111,22 @@ export interface LightPreset {
 
 /** Everything a preset needs, all of it reproducible from the archive.
  *
- * **Calibrated on the render harness**, not by eye: `inventory` is the
- * reference and was tuned until the Sunchaser's gold-to-non-gold contrast sat
- * mid-band (2.88 against CIG's 2.48-3.47) with the Defiance Tactical torso at
- * mean 36 / median 27 against the in-game 34 / 29. Environment and exposure
- * then came down by the same 0.7 on every other preset so their moods stay
- * relative to it. */
+ * **Each is a place the game lights things**, by the game's own probe: the
+ * inventory screen, the item preview, the Idris look-development hangar, the
+ * asteroid player hangar, a station interior, a planet by day, at dusk and at
+ * night, open space, and the character customizer's rig. `classic` is the
+ * viewer's original invented rig, kept as a baseline.
+ *
+ * **Exposure is metered, not chosen** (`StudioLighting.meter`): every preset
+ * sits at the Neutral curve's design point, an 18% grey card at the figure
+ * showing as 18% grey, and `exposure` is only the mood either side of it. They
+ * used to be fixed at 0.63-0.7, calibrated against one dim in-game capture,
+ * and that put a grey card at 0.27-0.5 of the design point -- inside the
+ * curve's toe, which squares what falls in it (`6.25 x^2` below 0.08). Every
+ * dark-to-mid surface went near-black and kept its highlights: the RSI Zeus
+ * pack's grey shell drew at sRGB 9 against the game's 52, and Ilucide's hair
+ * at 0.28 of his forehead against 0.45. Metered, 35-47 and 0.51. The
+ * customizer's rig sat at 2.5 times the design point and clipped. */
 export const LIGHT_PRESETS: readonly LightPreset[] = [
   {
     id: 'inventory',
@@ -103,18 +134,20 @@ export const LIGHT_PRESETS: readonly LightPreset[] = [
     probe: 'inventory',
     neutral: true,
     environment: 0.35,
-    exposure: 0.7,
+    exposure: 1,
     toneMapping: NeutralToneMapping,
     key: { intensity: 1.6, direction: 'probe' },
     rim: 0.5,
     ambient: 0.35,
   },
   {
+    // The game's own item-preview probe (`Data/UI/Textures/ItemPreview`), the
+    // Idris medical room: a broad bright panel and a cool cast.
     id: 'studio',
     label: 'studio',
     probe: 'medical',
     environment: 0.385,
-    exposure: 0.7,
+    exposure: 1,
     toneMapping: NeutralToneMapping,
     key: { intensity: 2.0, direction: [0.8, 1.4, -1.2] },
     rim: 0.9,
@@ -125,29 +158,80 @@ export const LIGHT_PRESETS: readonly LightPreset[] = [
     label: 'hangar',
     probe: 'hangar',
     environment: 0.35,
-    exposure: 0.7,
+    exposure: 1,
     toneMapping: NeutralToneMapping,
     key: { intensity: 1.4, direction: 'probe' },
     rim: 0.3,
     ambient: 0.2,
   },
   {
+    // A player hangar's own probe: teal walls, as in Noel's captures of
+    // Ilucide. Its brightest patch is low and behind and left the face dark
+    // (0.42 of the Idris hangar's forehead), so the key is the ceiling's
+    // floods, overhead and a little in front. Chosen.
+    id: 'asteroid',
+    label: 'asteroid hangar',
+    probe: 'asteroid',
+    environment: 0.35,
+    exposure: 1,
+    toneMapping: NeutralToneMapping,
+    key: { intensity: 1.6, direction: [0.15, 1, -0.3] },
+    rim: 0.2,
+    ambient: 0.15,
+  },
+  {
+    // A station's interior: a bright, even, neutral room.
+    id: 'station',
+    label: 'station',
+    probe: 'station',
+    environment: 0.35,
+    exposure: 1,
+    toneMapping: NeutralToneMapping,
+    key: { intensity: 1.2, direction: 'probe' },
+    rim: 0.2,
+    ambient: 0.1,
+  },
+  {
     id: 'daylight',
     label: 'daylight',
     probe: 'daymar',
     environment: 0.42,
-    exposure: 0.63,
+    exposure: 1,
     toneMapping: NeutralToneMapping,
     key: { intensity: 3.2, direction: 'probe', color: 0xfff4e6 },
     rim: 0,
     ambient: 0.1,
   },
   {
+    // A planet's time-of-day set: a low warm sun under a blue sky.
+    id: 'dusk',
+    label: 'dusk',
+    probe: 'dusk',
+    environment: 0.35,
+    exposure: 0.9,
+    toneMapping: NeutralToneMapping,
+    key: { intensity: 2.4, direction: 'probe', color: 0xffc890 },
+    rim: 0,
+    ambient: 0.05,
+  },
+  {
+    // The same set by night: a cool sky and a dim moon.
+    id: 'night',
+    label: 'night',
+    probe: 'night',
+    environment: 0.35,
+    exposure: 0.7,
+    toneMapping: NeutralToneMapping,
+    key: { intensity: 0.8, direction: 'probe', color: 0xb0c4ff },
+    rim: 0.2,
+    ambient: 0.05,
+  },
+  {
     id: 'space',
     label: 'space',
     probe: 'space',
     environment: 0.105,
-    exposure: 0.7,
+    exposure: 1,
     toneMapping: NeutralToneMapping,
     key: { intensity: 3.0, direction: 'probe' },
     rim: 0.15,
@@ -159,7 +243,7 @@ export const LIGHT_PRESETS: readonly LightPreset[] = [
     probe: 'inventory',
     neutral: true,
     environment: 0.14,
-    exposure: 0.7,
+    exposure: 1,
     toneMapping: NeutralToneMapping,
     key: { intensity: 0, direction: [0, 1, 0] },
     rim: 0,
@@ -174,6 +258,7 @@ export const LIGHT_PRESETS: readonly LightPreset[] = [
     probe: null,
     environment: 0,
     exposure: 1.0,
+    metered: false,
     toneMapping: NoToneMapping,
     key: { intensity: 2.2, direction: [1.2, 2.0, 1.6] },
     rim: 0.6,
@@ -244,6 +329,11 @@ export interface LightingView {
   readonly fill: AmbientLight;
 }
 
+/** The incident meter's grey and where it stands: an 18% card at chest-to-head
+ * height, where the customizer's spots are aimed. */
+const METER_ALBEDO = 0.18;
+const METER_AT = new Vector3(0, 1.45, 0);
+
 /** Where the key sits when it follows a direction: far enough that the
  * shadow camera the viewer framed stays centred on the figure. */
 const KEY_DISTANCE = 6;
@@ -282,7 +372,6 @@ export class StudioLighting {
     if (ticket !== this.asked) return false;
 
     renderer.toneMapping = preset.toneMapping;
-    renderer.toneMappingExposure = preset.exposure;
     if (probe) {
       scene.environment = probe.target.texture;
       scene.environmentIntensity = preset.environment / Math.max(probe.mean, 1e-6);
@@ -311,6 +400,12 @@ export class StudioLighting {
 
     this.rig.clear();
     for (const light of lights) this.rig.add(light);
+
+    // Exposed for the light the preset actually puts on the figure.
+    const metered = preset.metered ?? true;
+    renderer.toneMappingExposure = metered
+      ? (preset.exposure * METER_ALBEDO) / Math.max(this.meter(), 1e-4)
+      : preset.exposure;
 
     // The materials' programs depend on tone mapping and on whether an
     // environment is bound; three recompiles on its own when either changes.
@@ -383,6 +478,65 @@ export class StudioLighting {
       out.push(spot, spot.target);
     }
     return out;
+  }
+
+  /** **Incident metering**: the mean linear radiance a rough grey sphere of
+   * `METER_ALBEDO` sends back from where the figure stands, averaged over six
+   * views, so every light the preset has -- key, rim, ambient, probe, the
+   * customizer's spots -- counts once, whatever the outfit. Rendered straight
+   * to a small float target with everything else hidden and no tone curve. */
+  meter(): number {
+    const { scene, renderer } = this.view;
+    const size = 32;
+    const target = new WebGLRenderTarget(size, size, { type: FloatType });
+    const sphere = new Mesh(
+      new SphereGeometry(0.12, 48, 24),
+      new MeshStandardMaterial({ color: new Color(METER_ALBEDO, METER_ALBEDO, METER_ALBEDO), roughness: 1, metalness: 0 }),
+    );
+    sphere.position.copy(METER_AT);
+    const hidden: Object3D[] = [];
+    scene.traverse((o) => {
+      if (o !== sphere && o.visible && ((o as Mesh).isMesh || (o as { isLine?: boolean }).isLine)) {
+        hidden.push(o);
+        o.visible = false;
+      }
+    });
+    scene.add(sphere);
+    const background = scene.background;
+    scene.background = null;
+    const before = { target: renderer.getRenderTarget(), alpha: renderer.getClearAlpha(), colour: renderer.getClearColor(new Color()) };
+    const camera = new PerspectiveCamera(20, 1, 0.05, 10);
+    const pixels = new Float32Array(size * size * 4);
+    let sum = 0;
+    let count = 0;
+    try {
+      renderer.setRenderTarget(target);
+      renderer.setClearColor(0x000000, 0);
+      for (const d of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]] as const) {
+        camera.position.set(METER_AT.x + d[0], METER_AT.y + d[1], METER_AT.z + d[2]);
+        camera.up.set(0, d[1] ? 0 : 1, d[1] ? 1 : 0);
+        camera.lookAt(METER_AT);
+        renderer.clear();
+        renderer.render(scene, camera);
+        renderer.readRenderTargetPixels(target, 0, 0, size, size, pixels);
+        for (let i = 0; i < size * size; i += 1) {
+          if (pixels[i * 4 + 3]! < 0.5) continue;
+          sum += 0.2126 * pixels[i * 4]! + 0.7152 * pixels[i * 4 + 1]! + 0.0722 * pixels[i * 4 + 2]!;
+          count += 1;
+        }
+      }
+    } finally {
+      renderer.setRenderTarget(before.target);
+      renderer.setClearColor(before.colour, before.alpha);
+      scene.remove(sphere);
+      scene.background = background;
+      for (const o of hidden) o.visible = true;
+      sphere.geometry.dispose();
+      (sphere.material as MeshStandardMaterial).dispose();
+      target.dispose();
+      renderer.shadowMap.needsUpdate = true;
+    }
+    return count ? sum / count : 0;
   }
 
   dispose(): void {

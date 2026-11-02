@@ -403,7 +403,12 @@ and this one agree; a customizer swatch would still settle it.
 
 **What is still short of the game.** Hair against skin: p50 0.28 against
 0.45, p10 0.07 against 0.26 -- the base is still dark and the game's broad
-grey sheen across the crown is only partly there. The moustache reads less
+grey sheen across the crown is only partly there. *Later the same day:* most
+of that was the tone curve, not the hair. Every preset sat in the Neutral
+curve's toe, which squares what falls in it, ratios included (`LIGHTING.md`);
+metered, the same hair under `hangar` reads p50 0.51, p10 0.15 and a spread of
+0.67 against the game's 0.45, 0.26 and 0.40. At full-figure distance it now
+resolves to a light grey, from the fifth of his strands at no melanin. The moustache reads less
 grey than before the build, though no thinner: coverage of the region was
 36% before, 33% after steps 1-2, 32% with the depth offset and 34% resolved,
 its top edge now single strands. The dye on the tips is unchanged; the old
