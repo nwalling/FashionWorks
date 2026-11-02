@@ -2519,15 +2519,37 @@ tried and refuted: 282 LOD0 meshes are under half in the encoding and still
 place real decals (10,690 vertices on the female CDS medium arms).
 `examples/decal_coding.rs` surveys the archive.
 
+**Thin films with no ramp -- fixed (`film.ts`).** Five looks paint
+`%IRIDESCENCE` with no ramp of their own: the Arclight "Glimmer" and the
+Yubarev and Atzkav "Mirage" and "Venom". Their thickness was read on the
+interference ramp as its square root, fitted to the wiki's 2021-23 shots,
+which drew the Glimmer gold where the game's icon is violet-blue. It is now
+in proportion, `FILM_NM_PER_UNIT` 4,700 nm per unit of
+`IridescenceThicknessU`: Mirage 212 nm blue-violet, Venom 282 nm green,
+Glimmer 423 nm violet-blue, all three as their icons show. Two more things
+the Venom needed:
+
+* *A saturated metal keeps its paint, measured by saturation as well as
+  chroma.* A weapon's bare metal reflects 25-40% (`weapon_bare_05`), so the
+  Venom's green -- (0.27, 0.44, 0.07) under Specular 0.40 -- has a chroma of
+  0.15 and the film painted it mint. `FILM_KEEPS_SAT` counts saturation above
+  near-black (the Starchaser's near-black violet still takes its film).
+* *Strength scales before the clamp, the paint's claim after it.* At strength
+  5 the clamp undid the kept paint.
+
+Held across all 88 film looks (Starchaser, Shrike, Greycat, Heartthrob,
+Scorched, Shadowflux among them), 13 move: the five, the Chiron Heartthrob set
+and Cambio SRT, which lose the ramp's magenta for a purer purple (their paint,
+as the "keeps its paint" rule was written for), and the Aril Scorched
+accents, slightly more bronze. Still short: the Venom reads a paler green
+than its icon.
+
 **Found and left:**
 
-- *Thin films with no ramp.* The Arclight "Glimmer" draws gold, its icon
-  violet-blue; `film.ts` `FILM_THICKNESS` was fitted to the wiki's 2021-23
-  shots, older than the asset. Three looks (Glimmer, Mirage, Venom).
-- *Tinted bare metal on weapons* (the Yubarev "Igniter" and "Venom" bodies)
-  reads near black under the studio probe where the icons show orange and
-  green panels. A light question, not a data one: the Yubarev's own body is
-  palette entry A at (42, 42, 42), dark in both.
+- *A weapon's housing reads dark* (the Yubarev). Its body is palette entry A
+  at (42, 42, 42), dark in both. Taking a weapon metal's tint as its F0 in
+  place of tint x Specular was tried and changed nothing visible; the
+  "panels" that differed were the films above.
 - *Helmet glass.* The Odyssey II Racing domes read dark teal in the item
   renders because nothing is inside them; the icon has the mannequin's head
   behind the same teal glass. Presentation, not material.

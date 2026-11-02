@@ -32,9 +32,9 @@
  *
  * Where it names none (the Arclight "Glimmer", the "Mirage" and "Venom"
  * paints), the colour is thin-film interference at the material's thickness,
- * the ship renders' ramp (`renders/sc_materials.py`, `_thin_film_ramp`), at
- * the place `FILM_THICKNESS` fits to the three in game. A grazing view reads
- * the film thinner.
+ * the ship renders' ramp (`renders/sc_materials.py`, `_thin_film_ramp`), the
+ * thickness in proportion to `IridescenceThicknessU` (`FILM_NM_PER_UNIT`,
+ * fitted to the game's icons). A grazing view reads the film thinner.
  *
  * Still wrong: the Monolith "Shadowflux" ramp is a yellow-green stripe on
  * grey, read here as the stripe, and the game's set is silver.
@@ -53,12 +53,18 @@ export interface Film {
 const FILM_REACH = 0.8;
 /** How much thinner a film with no ramp reads at a grazing view. */
 const FILM_EDGE = 0.85;
-/** Where on the interference ramp a film with no ramp sits: this times the
- * square root of its thickness. The three in the data are the Yubarev
- * "Mirage" at 0.045, blue and violet in game, the "Venom" at 0.06, green, and
- * the Arclight "Glimmer" at 0.09, gold; read straight, as the ship renders
- * read theirs, all three are first-order gold. */
-const FILM_THICKNESS = 1.18;
+/** How thick a film with no ramp is, in nanometres per unit of
+ * `IridescenceThicknessU`: proportional, as a thickness is. The three in the
+ * data, against the game's own icons: the "Mirage" paints at 0.045 (212 nm
+ * head on) are blue and violet, the "Venom" at 0.06 (282 nm) green, and the
+ * Arclight "Glimmer" at 0.09 (423 nm) violet-blue -- second order, past the
+ * gold of the first. Seen across a panel the film reads a few percent thinner
+ * (`FILM_EDGE`), which is why the Venom wants 282 and not 270: at 4,500 it
+ * drew cyan. An earlier fit to the wiki's 2021-23 shots read the square root
+ * of the thickness and drew the Glimmer gold. */
+const FILM_NM_PER_UNIT = 4700;
+/** The interference ramp's span, nanometres (`interferenceRamp`). */
+const RAMP_NM = [80, 800] as const;
 /** How much of its film a plain grey metal takes: the "Scorched" weapons and
  * armour are silver and bronze in game, pastel over their grey, where the
  * Shrike's blue steel, as bright, is the ramp's teal. A near-black metal
@@ -70,6 +76,14 @@ const FILM_GREY = 0.55;
  * "Heartthrob" purple are their paint in game, not their ramps' lavender and
  * red. The Shrike's light blue steel, at 0.21, still takes its film. */
 const FILM_KEEPS = [0.25, 0.45] as const;
+/** The same, by saturation rather than chroma, for a metal that is not
+ * near black: a weapon's bare metal reflects 25-40% (`weapon_bare_05`), so
+ * the "Venom" paints' saturated green -- (0.27, 0.44, 0.07) under Specular
+ * 0.40 -- has a chroma of 0.15 and was painted over in mint, where the game
+ * shows the green. Above `FILM_KEEPS_FROM` brightness only: the Starchaser's
+ * near-black violet is as saturated and takes its film. */
+const FILM_KEEPS_SAT = [0.7, 0.9] as const;
+const FILM_KEEPS_FROM = [0.04, 0.1] as const;
 
 /** Declarations for the fragment shader. */
 export const FILM_DECLARE = /* glsl */ `
@@ -92,9 +106,14 @@ export function filmFragment(metal: string): string {
     // drowns it. A colourful one keeps its paint.
     float fwUnder = dot( diffuseColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
     float fwChroma = max( max( diffuseColor.r, diffuseColor.g ), diffuseColor.b ) - min( min( diffuseColor.r, diffuseColor.g ), diffuseColor.b );
-    float fwKeeps = 1.0 - smoothstep( ${FILM_KEEPS[0].toFixed(2)}, ${FILM_KEEPS[1].toFixed(2)}, fwChroma );
+    float fwSat = fwChroma / max( max( max( diffuseColor.r, diffuseColor.g ), diffuseColor.b ), 1e-4 );
+    float fwKeeps = ( 1.0 - smoothstep( ${FILM_KEEPS[0].toFixed(2)}, ${FILM_KEEPS[1].toFixed(2)}, fwChroma ) )
+      * ( 1.0 - smoothstep( ${FILM_KEEPS_SAT[0].toFixed(2)}, ${FILM_KEEPS_SAT[1].toFixed(2)}, fwSat )
+        * smoothstep( ${FILM_KEEPS_FROM[0].toFixed(2)}, ${FILM_KEEPS_FROM[1].toFixed(2)}, fwUnder ) );
     float fwTakes = max( 1.0 - smoothstep( 0.03, 0.15, fwUnder ), smoothstep( 0.05, 0.20, fwChroma ) );
-    float fwFilmAmount = clamp( fwFilm.z * ${metal} * ( 1.0 - fwUnder ) * mix( ${FILM_GREY.toFixed(2)}, 1.0, fwTakes ) * fwKeeps, 0.0, 1.0 );
+    // Strength scales before the clamp, a paint kept after it: at strength 5
+    // (the films with no ramp) the clamp otherwise undid the paint's claim.
+    float fwFilmAmount = clamp( fwFilm.z * ${metal} * ( 1.0 - fwUnder ) * mix( ${FILM_GREY.toFixed(2)}, 1.0, fwTakes ), 0.0, 1.0 ) * fwKeeps;
     diffuseColor.rgb = mix( diffuseColor.rgb, fwFilmColour, fwFilmAmount );
   }
 `;
@@ -112,7 +131,8 @@ export function filmValue(film: Film | undefined, ownRamp: boolean): Vector4 {
   // With no ramp there is no row, and `u` is the thickness.
   // The template's 1 and 1 (20 armour materials) state no film at all.
   if (film.u >= 1 && film.v >= 1) return new Vector4(0, 0, 0, 0);
-  return new Vector4(Math.min(1, FILM_THICKNESS * Math.sqrt(film.u)), 0.5, strength, 1);
+  const at = (FILM_NM_PER_UNIT * film.u - RAMP_NM[0]) / (RAMP_NM[1] - RAMP_NM[0]);
+  return new Vector4(Math.min(1, Math.max(0, at)), 0.5, strength, 1);
 }
 
 let interference: DataTexture | null = null;
