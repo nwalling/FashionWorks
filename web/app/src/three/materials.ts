@@ -394,8 +394,9 @@ export function plainMaterial(
  * (`%DIRECTION_MAP`). A cap (`%HAIR_CAP`) or a coat (`%HAIR_COAT`, a buzz
  * cut's short hair) is shade on the skin: the pigment, matte, blended through
  * its density mask. */
-function hairMaterial(sub: Submaterial, textures: SurfaceTextures, siblings: readonly Submaterial[]): Material {
-  const params = sub.params ?? {};
+function hairMaterial(given: Submaterial, textures: SurfaceTextures, siblings: readonly Submaterial[]): Material {
+  const sub = { ...given, params: hairParams(given) };
+  const params = sub.params;
   // The flags say which kind; a core too old to send them leaves the name,
   // where the cards' mask is the one named `_opac` -- which a coat's
   // (`hair_02_shaved_opac`) is too, drawn as a solid band on the forehead.
@@ -404,11 +405,68 @@ function hairMaterial(sub: Submaterial, textures: SurfaceTextures, siblings: rea
   // The cap declares only smoothness and specular; its colour is the hair's.
   const pigment = params.BaseMelanin !== undefined
     ? params
-    : siblings.find((s) => s.params?.BaseMelanin !== undefined)?.params ?? params;
-  return cap ? hairCap(sub, mask, pigment, sub.hair === 'coat' ? 'coat' : 'cap') : hairCards(sub, mask, textures, pigment);
+    : siblings.map(hairParams).find((p) => p.BaseMelanin !== undefined) ?? params;
+  // CryEngine's own hair shader keeps its colour in a texture, not in melanin.
+  const painted = isPaintedHair(sub) ? mask : undefined;
+  // HairPBR's 2022 scalps carry no pigment either, but are flagged into the
+  // melanin model with their cards: they take the hair's colour.
+  const melaninModel = params.MelaninBase !== undefined || siblings.some((s) => s.params?.MelaninBase !== undefined);
+  return cap
+    ? hairCap(sub, mask, pigment, sub.hair === 'coat' ? 'coat' : 'cap', painted, melaninModel)
+    : hairCards(sub, mask, textures, pigment, painted);
 }
 
-function hairCap(sub: Submaterial, mask: Texture | undefined, pigment: HairParams, kind: 'cap' | 'coat'): Material {
+/** CryEngine's own `Hair` shader, the archive's first generation (67 styles
+ * under `heads/shared/hair/`): its colour is the `_diff` texture in slot 1,
+ * its opacity that texture's alpha, and it carries no melanin to recolour. */
+function isPaintedHair(sub: Submaterial): boolean {
+  return sub.shader.toLowerCase() === 'hair';
+}
+
+/** What a painted hair's texture is multiplied by: its `Diffuse`. CryEngine's
+ * `Hair` styles ship one light ash texture -- `m_combedback_hair_01`'s
+ * strands average sRGB (173, 159, 139) -- and each of their colourways under
+ * `mtl_var/` sets only `Diffuse`: (0.17, 0.08, 0.04) for `_10`'s dark brown,
+ * (0.81, 0.71, 0.56) for `_02`'s blond. */
+function paintedTint(sub: Submaterial): Color {
+  const d = sub.diffuse;
+  return d ? new Color().setRGB(d[0]!, d[1]!, d[2]!) : new Color(1, 1, 1);
+}
+
+/** A hair submaterial's parameters in HairPBR's 2019 names.
+ *
+ * **The 2022 set (`%MELANIN_MODEL`) renames them**: `MelaninBase`,
+ * `MelaninRedness`, `MelaninVariation` and `TintColor` for `BaseMelanin`,
+ * `BaseMelaninRedness`, `BaseMelaninVariation` and `BaseTintColor`, and drops
+ * `Smoothness` for the material's own `Shininess` (160-170 of 255 on
+ * `m_parting_hair_01`). It adds `BleachAmount`, read here as melanin taken
+ * out -- inferred: bleaching is the oxidation of melanin, and CIG's January
+ * 2020 report names the colour model "base melanin and bleach/dye layers".
+ * `BleachVariation`, `MelaninGraying`, `SpecularBreakup` and
+ * `AmbientOcclusionRescale` are not read. CryEngine's `Hair` has no
+ * smoothness either, and takes `Shininess` the same way. */
+function hairParams(sub: Submaterial): HairParams {
+  const p: HairParams = { ...(sub.params ?? {}) };
+  if (p.MelaninBase !== undefined && p.BaseMelanin === undefined) {
+    p.BaseMelanin = scalar(p.MelaninBase, 0.5) * (1 - Math.min(1, Math.max(0, scalar(p.BleachAmount, 0))));
+    if (p.MelaninRedness !== undefined) p.BaseMelaninRedness = p.MelaninRedness;
+    if (p.MelaninVariation !== undefined) p.BaseMelaninVariation = p.MelaninVariation;
+    if (p.TintColor !== undefined) p.BaseTintColor = p.TintColor;
+  }
+  if (p.Smoothness === undefined && (p.MelaninBase !== undefined || isPaintedHair(sub)) && sub.shininess > 0) {
+    p.Smoothness = sub.shininess;
+  }
+  return p;
+}
+
+function hairCap(
+  sub: Submaterial,
+  mask: Texture | undefined,
+  pigment: HairParams,
+  kind: 'cap' | 'coat',
+  painted?: Texture,
+  melaninModel = false,
+): Material {
   // **A cap with no pigment of its own is a shadow.** The beard's is named
   // `facial_hair_011_scalp_shadow`: `%HAIR_CAP`, `Diffuse` black, smoothness
   // and specular 0, no melanin -- the darkening a mass of hair lays on the
@@ -416,20 +474,28 @@ function hairCap(sub: Submaterial, mask: Texture | undefined, pigment: HairParam
   // in the hair's colour instead, a blond beard laid a blond stain over the
   // jaw. A coat (`hair_scalp_m` on `hair_75`) is short hair and carries its
   // own melanin, so it stays a colour, and a character's looks recolour it.
-  const shadow = kind === 'cap' && sub.params?.BaseMelanin === undefined && sub.diffuse !== undefined;
+  // A painted cap (CryEngine's `Hair`) is its texture's colour.
+  const shadow = !painted && !melaninModel && kind === 'cap'
+    && sub.params?.BaseMelanin === undefined && sub.diffuse !== undefined;
   const tint: [number, number, number] = [1, 1, 1];
-  const material = new MeshStandardMaterial({
+  // **A cap's highlight is its own `SpecularMultiplier`**: 0 on the beard's
+  // shadow, whose black otherwise took a grey-blue sheen from the
+  // environment at every grazing angle.
+  const material = new MeshPhysicalMaterial({
+    specularIntensity: Math.min(1, Math.max(0, scalar(sub.params?.SpecularMultiplier, 1))),
     name: sub.name,
     color: shadow
       ? new Color().setRGB(sub.diffuse![0]!, sub.diffuse![1]!, sub.diffuse![2]!)
-      : hairColour(pigment).multiply(new Color(tint[0], tint[1], tint[2])),
+      : painted ? paintedTint(sub) : hairColour(pigment).multiply(new Color(tint[0], tint[1], tint[2])),
+    map: painted ?? null,
     roughness: 1,
     metalness: 0,
     side: DoubleSide,
   });
   // What the colour was made from, so a character's own melanin and dye can
-  // be laid over it (CHARACTER.md Phase 2). A shadow takes no looks.
-  if (!shadow) {
+  // be laid over it (CHARACTER.md Phase 2). A shadow takes no looks, nor does
+  // a painted cap.
+  if (!shadow && !painted) {
     material.userData.hairPigment = pigment;
     material.userData.hairTint = tint;
   }
@@ -448,7 +514,7 @@ function hairCap(sub: Submaterial, mask: Texture | undefined, pigment: HairParam
       #endif`,
     );
   };
-  material.customProgramCacheKey = () => 'fw-hair-cap';
+  material.customProgramCacheKey = () => `fw-hair-cap${painted ? '-painted' : ''}`;
   return material;
 }
 
@@ -457,6 +523,7 @@ function hairCards(
   mask: Texture | undefined,
   textures: SurfaceTextures,
   pigment: HairParams,
+  painted?: Texture,
 ): Material {
   const smoothness = scalar(sub.params?.Smoothness, 0.5);
   const strandId = sub.textures.strand_id ? textures.byPath.get(sub.textures.strand_id) : undefined;
@@ -521,7 +588,8 @@ function hairCards(
   const make = (fringe: boolean): Material => {
     const material = new MeshPhysicalMaterial({
       name: sub.name,
-      color: hairColour(pigment),
+      color: painted ? paintedTint(sub) : hairColour(pigment),
+      map: painted ?? null,
       roughness: Math.min(1, Math.max(HAIR_MIN_ROUGHNESS, 1 - smoothness)),
       metalness: 0,
       side: DoubleSide,
@@ -533,7 +601,8 @@ function hairCards(
       anisotropyRotation: direction ? 0 : Math.PI / 2,
       specularIntensity: HAIR_SPECULAR,
     });
-    material.userData.hairPigment = pigment;
+    // A painted strand takes no looks: there is no melanin to move.
+    if (!painted) material.userData.hairPigment = pigment;
     material.userData.hairStrands = uniforms;
     if (!alphaMap) return material;
     material.alphaMap = alphaMap;
@@ -676,6 +745,35 @@ function hairCards(
         // the direction map's tangent; each strand's shift is jittered by its
         // id so the highlight breaks up strand by strand instead of lying
         // across the cards as one band.
+        // **Hair's own shadow is filtered wide.** The key's map resolves about
+        // 1.2 mm a texel and every card casts its cut-out into it, so a head
+        // of hair took its own shadow as hard black flecks; a mass of fibres
+        // passes light and shades softly, and Karis (2016) calls the filtered
+        // shadow "vital". Hair alone reads the map through a 16-tap Poisson
+        // disc of HAIR_SHADOW_TEXELS -- the skin and armour keep three.js's.
+        .replace(
+          '#include <shadowmap_pars_fragment>',
+          `#include <shadowmap_pars_fragment>
+          #if defined( USE_SHADOWMAP ) && defined( FW_HAIR_KK ) && NUM_DIR_LIGHT_SHADOWS > 0
+            const vec2 FW_POISSON[ 16 ] = vec2[](
+              vec2( -0.613, 0.617 ), vec2( 0.170, -0.040 ), vec2( -0.299, -0.792 ), vec2( 0.645, 0.493 ),
+              vec2( -0.651, -0.110 ), vec2( 0.421, -0.716 ), vec2( -0.074, 0.396 ), vec2( 0.890, -0.212 ),
+              vec2( 0.230, 0.917 ), vec2( -0.932, 0.297 ), vec2( 0.513, 0.135 ), vec2( -0.400, 0.207 ),
+              vec2( 0.032, -0.477 ), vec2( -0.200, 0.900 ), vec2( 0.840, -0.520 ), vec2( -0.770, -0.590 )
+            );
+            float fwHairShadow( sampler2D shadowMap, vec2 shadowMapSize, float shadowIntensity, float shadowBias, float shadowRadius, vec4 shadowCoord ) {
+              shadowCoord.xyz /= shadowCoord.w;
+              shadowCoord.z += shadowBias;
+              bool inFrustum = shadowCoord.x >= 0.0 && shadowCoord.x <= 1.0 && shadowCoord.y >= 0.0 && shadowCoord.y <= 1.0;
+              if ( !inFrustum || shadowCoord.z > 1.0 ) return 1.0;
+              vec2 reach = ${HAIR_SHADOW_TEXELS.toFixed(1)} / shadowMapSize;
+              float lit = 0.0;
+              for ( int i = 0; i < 16; i ++ ) lit += texture2DCompare( shadowMap, shadowCoord.xy + FW_POISSON[ i ] * reach, shadowCoord.z );
+              return mix( 1.0, lit / 16.0, shadowIntensity );
+            }
+            #define getShadow fwHairShadow
+          #endif`,
+        )
         .replace(
           '#include <lights_physical_pars_fragment>',
           `#include <lights_physical_pars_fragment>
@@ -1151,6 +1249,9 @@ export function hairLobeExponent(smoothness: number): number {
   const deviation = 0.726 * beta + 0.812 * beta ** 2 + 3.7 * beta ** 20;
   return 1 / deviation ** 2;
 }
+/** How wide, in shadow-map texels (about 1.2 mm each), hair reads the
+ * key's shadow it falls in: 6 is about 7 mm. Chosen. */
+const HAIR_SHADOW_TEXELS = 6;
 /** How much light passes through a strand, against Karis's (2016) form of
  * Marschner's TT lobe at one. Not in the data: HairPBR's own scattering
  * ("improved scattering for blonde and bright hair", April 2020) is not
@@ -1711,8 +1812,9 @@ export function texturesWanted(sub: Submaterial): Array<{ path: string; srgb: bo
   if (isSkin(sub) && sub.textures.specular) out.push({ path: sub.textures.specular, srgb: true });
   if (isSkin(sub) && sub.textures.detail) out.push({ path: sub.textures.detail, srgb: false });
   // Hair's slot 1 is a mask, not a colour, and an sRGB decode would thin it.
+  // CryEngine's own `Hair` paints its colour there, opacity in alpha.
   const hair = sub.shader.toLowerCase().includes('hair');
-  if (!sub.tintable && sub.textures.base_color) out.push({ path: sub.textures.base_color, srgb: !hair });
+  if (!sub.tintable && sub.textures.base_color) out.push({ path: sub.textures.base_color, srgb: !hair || isPaintedHair(sub) });
   // An Illum metal's colour is in its specular map; see `withSpecGloss`.
   if (specGloss(sub)) out.push({ path: sub.textures.specular!, srgb: true });
   // A relief's height map: data, not color.

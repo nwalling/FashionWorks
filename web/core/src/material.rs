@@ -94,6 +94,31 @@ fn hair_role(slot: &str, path: &str) -> Option<&'static str> {
     }
 }
 
+/// Which kind of hair surface a submaterial is, from its shader and flags.
+///
+/// **A cap flag wins.** HairPBR's 2022 scalps (`m_parting_hair_01`'s
+/// `scalp_m`) carry `%HAIR_CAP` and `%HAIR_CARDS` together, and read cards
+/// first they drew as strands.
+///
+/// **CryEngine's own `Hair` shader flags only its caps.** Its strands
+/// (`f_bobcut_hair_01`'s `strands_m`: `%ANISO_SPECULAR%OIT`, a `_diff` in
+/// slot 1) carry no hair flag at all, so a `Hair` surface that is not a cap
+/// is cards. 67 of the archive's styles under `heads/shared/hair/` are this
+/// shader.
+fn hair_kind(shader: &str, gen_mask: &str) -> Option<&'static str> {
+    let flags: Vec<&str> = gen_mask.split('%').collect();
+    let has = |f: &str| flags.iter().any(|t| t.eq_ignore_ascii_case(f));
+    if has("HAIR_CAP") {
+        Some("cap")
+    } else if has("HAIR_COAT") {
+        Some("coat")
+    } else if has("HAIR_CARDS") || shader.eq_ignore_ascii_case("Hair") {
+        Some("cards")
+    } else {
+        None
+    }
+}
+
 /// Reflectance above which a detail layer is bare metal.
 ///
 /// CryEngine's Layer shader states it: a metal carries `Specular` near its F0
@@ -630,19 +655,7 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<SubMaterial>, String> {
                             .map(|b| b.path.clone())
                     })
                     .flatten(),
-                hair: {
-                    let flags: Vec<&str> = sub.string_gen_mask.split('%').collect();
-                    let has = |f: &str| flags.iter().any(|t| t.eq_ignore_ascii_case(f));
-                    if has("HAIR_CARDS") {
-                        Some("cards")
-                    } else if has("HAIR_CAP") {
-                        Some("cap")
-                    } else if has("HAIR_COAT") {
-                        Some("coat")
-                    } else {
-                        None
-                    }
-                },
+                hair: hair_kind(&sub.shader, &sub.string_gen_mask),
                 hologram: is_hologram(&sub.shader, &sub.string_gen_mask),
                 relief,
                 vertex_ao: has_vertex_ao(&sub.shader, &sub.string_gen_mask),
@@ -764,6 +777,19 @@ fn tex_mod_tile(textures: &[mtl::AuthoredTexture], slot: &str) -> (f32, f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hair_kinds_follow_the_flags_and_the_shader() {
+        assert_eq!(hair_kind("HairPBR", "%DIRECTION_MAP%HAIR_CARDS%PIXEL_DEPTH_OFFSET%CARD_ID_MAP"), Some("cards"));
+        assert_eq!(hair_kind("HairPBR", "%HAIR_CAP"), Some("cap"));
+        assert_eq!(hair_kind("HairPBR", "%DIRECTION_MAP%HAIR_COAT"), Some("coat"));
+        // A 2022 scalp carries both.
+        assert_eq!(hair_kind("HairPBR", "%SCALP_TEX_COORDS%HAIR_CAP%HAIR_CARDS%MELANIN_MODEL"), Some("cap"));
+        // CryEngine's Hair: strands carry no hair flag.
+        assert_eq!(hair_kind("Hair", "%NORMAL_MAP%VERTCOLORS%ANISO_SPECULAR%OIT"), Some("cards"));
+        assert_eq!(hair_kind("Hair", "%NORMAL_MAP%ANISO_SPECULAR%HAIR_CAP"), Some("cap"));
+        assert_eq!(hair_kind("Illum", "%DECAL"), None);
+    }
 
     #[test]
     fn hair_maps_are_named_by_suffix_before_slot() {

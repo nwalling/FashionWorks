@@ -4,8 +4,9 @@ Research, 2026-11-02, on branch `character-shine`. Noel's verdict on that
 branch's hair work: better, still below the quality he wants. This file is
 what was found when the question was put properly: what the game's hair is
 made of, what its shader does with it, what we do instead, and which of the
-published methods would close the distance. Nothing here is built except one
-prototype, recorded in §7 and reverted.
+published methods would close the distance. §1-§8 are the research as it
+stood before anything was built; §9 is the build, the same day, and what it
+measured. §3 describes the shader before §9.
 
 The companion files: CHARACTER.md "Hair, brows and skin, held to the
 customizer" (the colour model, the dye gradient, the highlight width);
@@ -358,3 +359,50 @@ ones are.
 * A per-frame sort of cards or an OIT pass before the cut-out core is right:
   the engine's own order is opaque, back faces, front faces, and it ships
   `%OIT` only on gen 1.
+
+## 9. Built (2026-11-02, the same day)
+
+The §5 order, built on `character-shine` and measured the way §5 says:
+Ilucide under the hangar probe, the hair masked by a second capture with it
+hidden, ratios against the forehead (`hair p50` below). The game's forehead
+reads 244 and is clipped, so its ratios are overstated; the order holds.
+
+| step | built | measured |
+| --- | --- | --- |
+| 1. frame | `hair.strandFrame`: where a card group's normal stream sits at less than half the triangles' normal, it moves to `tangent` and the normals come from the triangles. Decided per mesh: hair, beard and brows take it; the lashes carry a real normal and are left alone. `HAIR_SPHERE` 0 for framed cards. | frame alone: hair p50 0.23 (was 0.24) -- the sphere had been standing in |
+| 1. occlusion | head hair takes its vertex occlusion like the beard; `ShadowDensity` only where declared (`hair_75` declares none) | p50 0.23 -> 0.16 under the hangar light, where ambient is most of it; kept, as authored |
+| 1. brows | `material::hair_role`: `_id` and `_dir` by suffix, slot as fallback | affects the 11 NPC brow materials; Ilucide's `brows_002` was never swapped |
+| 1. cap | a cap with no pigment draws its own `Diffuse` (the beard's black shadow); caps take their own `SpecularMultiplier` (0 on that shadow, which had a grey-blue sheen) | |
+| 2. strands | melanin per strand in the shader, `BaseMelaninVariation` in melanin units, the far-distance average the strands' true mean colour; `SpecularVariation` as the shift jitter; `SpecularRootOcclusion` linear from the root (shape chosen) | hair saturation 0.91 -> 0.69 (game 0.27, under its teal light) |
+| 3. depth offset | `gl_FragDepth` pushed back by `(1 - alpha) x PixelDepthOffset` | jaw and chin coverage -3 points; the beard's edge scatters into strands |
+| 4. resolve | the portrait hashes hair per layer, steps the threshold through 16 jittered frames and averages them in linear light; the blended pass is off while it runs; hashed opacity is the authored density x 1.5, as the blended pass takes it | hair std/median 1.81 -> 1.26 (game 0.40); the beard's chin 0.86 of the bare skin against the cut-out's 0.81; a portrait takes 5-11 s against 1.7 |
+| 5. transmission | Karis's TT lobe, `sqrt(albedo)`, width roughness^2 / 2, gated by the direction out from the head (the rim light casts no shadow) | hair p90 0.76 -> 0.97; a warm edge along the crown where the key comes from above and behind |
+| 6. generations | `material::hair_kind`: a cap flag wins (2022 scalps carry both), CryEngine's `Hair` is cards unless a cap. TS: gen-1 colour is its `_diff` (sRGB) times `Diffuse` -- its 33 colourways set only that; gen-3 names folded into gen 2's (`MelaninBase` and the rest), `Shininess` for smoothness, `BleachAmount` as melanin taken out (inferred); a melanin-model scalp takes the hair's colour | `m_combedback_hair_01` default and `_10` dark brown, `m_spiky_fade_hair_01` gen 3: all draw as full heads of hair; before, gen-1 strands drew as a cap |
+| 6. shadow | hair reads the key's shadow through a 16-tap Poisson disc of 6 texels (about 7 mm) | barely moves Ilucide under the hangar (612 pixels by more than 30 of 255) |
+
+**Ilucide's `.chf` sets his hair's variation to 1.0**, the slider's top --
+a full unit of melanin either way, a third of his strands at none. Read so,
+at the game's head size his hair is the grey-brown ash of the captures,
+where step 1's was a saturated brown; magnified, it is visibly salt and
+pepper, which the back capture also shows. The grey colourway reading (§2.2)
+and this one agree; a customizer swatch would still settle it.
+
+**Not built, and why:**
+
+* *View-aligned strands.* 97 materials carry `%VIEW_ALIGNED_STRANDS` and
+  none sets `StrandWidth`, so all would take the engine's 1 cm default; the
+  gen-3 cards already have width and draw as hair without it. Ilucide's
+  brows are gen 2 and unflagged, so the game does not ribbon them either.
+* *Deep opacity maps.* The filtered shadow barely moved Ilucide under the
+  hangar; the next lever is the light, not the shadow.
+* *A temporal resolve in the live view.* The kitbasher renders every frame
+  and is orbited constantly; it keeps the cut-out and blended pass.
+* *`BleachVariation`, `MelaninGraying`, `SpecularBreakup`,
+  `AmbientOcclusionRescale`, `RadialShadowFadeout`.* Read nowhere; the
+  first two want a strand id gen 3 does not ship.
+
+**What is still short of the game.** Hair against skin: p50 0.28 against
+0.45, p10 0.07 against 0.26 -- the base is still dark and the game's broad
+grey sheen across the crown is only partly there. With the strand colour,
+frame, occlusion and resolve now taken from the data, what is left is the
+light: the capture's strong top light and teal cast are not any preset.
