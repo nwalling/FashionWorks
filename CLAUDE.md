@@ -29,6 +29,10 @@ mapping, the game's own probes as IBL, per-pixel LayerBlend, a body -- with
 the archive measurements it rests on and the boundaries it keeps.
 `LAYOUT.md` is the plan for rearranging the kitbasher's controls: the toolbar
 folded into the left column and two overlays on the viewport, layout only.
+`HAIR.md` is the research on hair and facial hair: the three generations of
+hair material in the archive, what a card's inputs and vertex streams are --
+the normal stream is the strand, not the card's normal -- and the methods
+ranked against that data.
 
 `PLAN.md` is the design document. This file is the operational one: what is
 decided, what is verified, and what to run. When the two disagree, this file wins
