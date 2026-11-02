@@ -17,6 +17,15 @@ export interface CaptureView {
   readonly fov: number;
 }
 
+/** How a capture resolves what one frame cannot: `samples` frames, each
+ * jittered within its pixel and told which it is (`onSample`) before it is
+ * drawn, averaged in linear light. Hair hashes its strands per frame
+ * (`materials.setHairResolve`), and this is what resolves them. */
+export interface CaptureResolve {
+  readonly samples: number;
+  readonly onSample?: (index: number, samples: number) => void;
+}
+
 /** A capture's frames, RGBA, one per grey, and each grey as displayed. */
 export interface CaptureResult {
   readonly frames: Uint8ClampedArray[];

@@ -77,6 +77,91 @@ export function strandCoordinate(geometry: BufferGeometry, start: number, count:
   return true;
 }
 
+/** Give hair cards their real frame: the strand as the tangent, the card's
+ * normal from its triangles. True when the mesh needed it.
+ *
+ * **A hair mesh's normal stream is the strand, not the card's normal.** On
+ * `hair_75`, the beard and the brows the vertex "normal" lies along the card
+ * from root to tip (|n . root->tip| median 0.97, 0.96, 0.95), perpendicular
+ * to the tangent, and at a median 0.12 to the triangle's own normal -- which
+ * is the cross product of the two (`examples/hair_frame.rs`). CryEngine's
+ * `Hair.cfx` never reads a normal: it builds one as tangent x bitangent and
+ * takes the hair's direction from the bitangent. Bound as three.js's normal,
+ * every card was lit with its normal pointing along the strand.
+ *
+ * Decided by the data, card groups only: where the stream sits at less than
+ * half the triangles' normal on average it is the strand, and it moves to
+ * `tangent` (w 1, skinned with the mesh) while the normals are rebuilt from
+ * the triangles. A mesh whose stream is a real normal is left alone. */
+export function strandFrame(geometry: BufferGeometry, ranges: ReadonlyArray<{ start: number; count: number }>): boolean {
+  const index = geometry.getIndex();
+  const position = geometry.getAttribute('position');
+  const normal = geometry.getAttribute('normal');
+  if (!index || !position || !normal || !ranges.length) return false;
+  let sum = 0;
+  let n = 0;
+  const a = [0, 0, 0];
+  const b = [0, 0, 0];
+  for (const { start, count } of ranges) {
+    for (let i = start; i < start + count; i += 3) {
+      const v0 = index.getX(i);
+      const v1 = index.getX(i + 1);
+      const v2 = index.getX(i + 2);
+      for (let k = 0; k < 3; k += 1) {
+        a[k] = position.getComponent(v1, k) - position.getComponent(v0, k);
+        b[k] = position.getComponent(v2, k) - position.getComponent(v0, k);
+      }
+      const fx = a[1]! * b[2]! - a[2]! * b[1]!;
+      const fy = a[2]! * b[0]! - a[0]! * b[2]!;
+      const fz = a[0]! * b[1]! - a[1]! * b[0]!;
+      const fl = Math.hypot(fx, fy, fz);
+      if (fl < 1e-12) continue;
+      for (const v of [v0, v1, v2]) {
+        const nx = normal.getX(v);
+        const ny = normal.getY(v);
+        const nz = normal.getZ(v);
+        const nl = Math.hypot(nx, ny, nz);
+        if (nl < 1e-6) continue;
+        sum += Math.abs(fx * nx + fy * ny + fz * nz) / (fl * nl);
+        n += 1;
+      }
+    }
+  }
+  if (!n || sum / n >= 0.5) return false;
+  const vertices = normal.count;
+  const tangent = new Float32Array(vertices * 4);
+  for (let v = 0; v < vertices; v += 1) {
+    const x = normal.getX(v);
+    const y = normal.getY(v);
+    const z = normal.getZ(v);
+    const l = Math.hypot(x, y, z) || 1;
+    tangent[v * 4] = x / l;
+    tangent[v * 4 + 1] = y / l;
+    tangent[v * 4 + 2] = z / l;
+    tangent[v * 4 + 3] = 1;
+  }
+  geometry.setAttribute('tangent', new BufferAttribute(tangent, 4));
+  geometry.deleteAttribute('normal');
+  geometry.computeVertexNormals();
+  // A vertex no triangle reaches, or one whose triangles cancel, keeps a
+  // normal across its strand rather than none.
+  const rebuilt = geometry.getAttribute('normal');
+  for (let v = 0; v < vertices; v += 1) {
+    if (Math.hypot(rebuilt.getX(v), rebuilt.getY(v), rebuilt.getZ(v)) > 0.5) continue;
+    const tx = tangent[v * 4]!;
+    const ty = tangent[v * 4 + 1]!;
+    const tz = tangent[v * 4 + 2]!;
+    // Any unit vector perpendicular to the strand.
+    const px = Math.abs(ty) < 0.9 ? -tz : 0;
+    const py = Math.abs(ty) < 0.9 ? 0 : tz;
+    const pz = Math.abs(ty) < 0.9 ? tx : -ty;
+    const pl = Math.hypot(px, py, pz) || 1;
+    rebuilt.setXYZ(v, px / pl, py / pl, pz / pl);
+  }
+  rebuilt.needsUpdate = true;
+  return true;
+}
+
 /** Put a range's triangles innermost first, by distance from `centre`, so a
  * blended pass lays the outer strands over the inner. A beard is seen from
  * outside, so one order holds from every side and nothing is sorted per
@@ -137,5 +222,6 @@ export function fringeOf(
   // After the cap, which lies on the skin under it.
   mesh.renderOrder = 1;
   mesh.userData.noAo = true;
+  mesh.userData.hairFringe = true;
   return mesh;
 }

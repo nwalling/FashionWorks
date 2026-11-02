@@ -65,6 +65,35 @@ pub fn suffix_role(path: &str) -> Option<&'static str> {
     None
 }
 
+/// A hair shader's strand maps: the ID map (`%CARD_ID_MAP`), a random grey
+/// per strand that the melanin varies by, and the direction map
+/// (`%DIRECTION_MAP`), each strand's tangent for the highlight across it.
+///
+/// **The suffix decides, the slot is the fallback.** Most `HairPBR` cards put
+/// the `_id` in TexSlot4 and the `_dir` in TexSlot6, but 11 brow materials
+/// (the NPC `m_brows_*` and `f_brows_*`, one boss's) put them the other way
+/// round, and read by slot their strand id was a direction map's flat red
+/// and their highlight ran along random grey. A file whose suffix names some
+/// other role (`Hair`'s `_spec` in TexSlot4) is left to the general rules.
+fn hair_role(slot: &str, path: &str) -> Option<&'static str> {
+    let lower = path.to_ascii_lowercase().replace('\\', "/");
+    let stem = lower.rsplit('/').next()?.split('.').next()?;
+    if stem.ends_with("_id") {
+        return Some("strand_id");
+    }
+    if stem.ends_with("_dir") || stem.ends_with("_dirm") {
+        return Some("strand_direction");
+    }
+    if suffix_role(path).is_some() {
+        return None;
+    }
+    match slot.to_ascii_lowercase().as_str() {
+        "texslot4" => Some("strand_id"),
+        "texslot6" => Some("strand_direction"),
+        _ => None,
+    }
+}
+
 /// Reflectance above which a detail layer is bare metal.
 ///
 /// CryEngine's Layer shader states it: a metal carries `Specular` near its F0
@@ -521,14 +550,8 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<SubMaterial>, String> {
                 if binding.path.is_empty() {
                     continue;
                 }
-                let role = if hair_shader && binding.slot.eq_ignore_ascii_case("TexSlot4") {
-                    // `HairPBR`'s strand ID map (`%CARD_ID_MAP`): a random grey
-                    // per strand, which the melanin varies by.
-                    Some("strand_id")
-                } else if hair_shader && binding.slot.eq_ignore_ascii_case("TexSlot6") {
-                    // Its direction map (`%DIRECTION_MAP`): each strand's
-                    // tangent, for the highlight that runs across it.
-                    Some("strand_direction")
+                let role = if let Some(role) = hair_shader.then(|| hair_role(&binding.slot, &binding.path)).flatten() {
+                    Some(role)
                 } else if skin && binding.slot.eq_ignore_ascii_case("TexSlot7") {
                     // Skin's slot 7 is its tone mask, whose green says where
                     // the texture shows and where the flat skin tone does --
@@ -741,6 +764,22 @@ fn tex_mod_tile(textures: &[mtl::AuthoredTexture], slot: &str) -> (f32, f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hair_maps_are_named_by_suffix_before_slot() {
+        // Most cards: ID in 4, direction in 6.
+        assert_eq!(hair_role("TexSlot4", "hair_v2/textures/texture_6_1-25px_id.tif"), Some("strand_id"));
+        assert_eq!(hair_role("TexSlot6", "hair_v2/textures/texture_6_1-25px_dir.tif"), Some("strand_direction"));
+        // The NPC brows swap them.
+        assert_eq!(hair_role("TexSlot4", "brows/male/npc/m_brows_002_dir.tif"), Some("strand_direction"));
+        assert_eq!(hair_role("TexSlot6", "brows/male/npc/m_brows_002_id.tif"), Some("strand_id"));
+        // CryEngine's own Hair keeps a specular map in 4.
+        assert_eq!(hair_role("TexSlot4", "hair/m_hair_01_spec.tif"), None);
+        assert_eq!(hair_role("TexSlot6", "hair/m_hair_01_dirm.tif"), Some("strand_direction"));
+        // An unnamed file falls back to the slot; the mask in 1 is not a strand map.
+        assert_eq!(hair_role("TexSlot4", "hair/strands.tif"), Some("strand_id"));
+        assert_eq!(hair_role("TexSlot1", "hair/texture_6_opac.tif"), None);
+    }
 
     fn named(name: &str, path: &str) -> LayerRef {
         LayerRef {

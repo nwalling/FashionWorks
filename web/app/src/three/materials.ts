@@ -409,22 +409,30 @@ function hairMaterial(sub: Submaterial, textures: SurfaceTextures, siblings: rea
 }
 
 function hairCap(sub: Submaterial, mask: Texture | undefined, pigment: HairParams, kind: 'cap' | 'coat'): Material {
-  // A cap is the shade a head of hair gives the skin beneath it: the hair's
-  // colour at the root -- natural, where the dye starts out along the strand
-  // -- through the cap's density. Every cap's `Diffuse` is black, which is
-  // not the hair's colour but the shader's placeholder, so it is not read.
+  // **A cap with no pigment of its own is a shadow.** The beard's is named
+  // `facial_hair_011_scalp_shadow`: `%HAIR_CAP`, `Diffuse` black, smoothness
+  // and specular 0, no melanin -- the darkening a mass of hair lays on the
+  // skin under it. 994 caps carry a black `Diffuse`, 156 a dark brown; drawn
+  // in the hair's colour instead, a blond beard laid a blond stain over the
+  // jaw. A coat (`hair_scalp_m` on `hair_75`) is short hair and carries its
+  // own melanin, so it stays a colour, and a character's looks recolour it.
+  const shadow = kind === 'cap' && sub.params?.BaseMelanin === undefined && sub.diffuse !== undefined;
   const tint: [number, number, number] = [1, 1, 1];
   const material = new MeshStandardMaterial({
     name: sub.name,
-    color: hairColour(pigment).multiply(new Color(tint[0], tint[1], tint[2])),
+    color: shadow
+      ? new Color().setRGB(sub.diffuse![0]!, sub.diffuse![1]!, sub.diffuse![2]!)
+      : hairColour(pigment).multiply(new Color(tint[0], tint[1], tint[2])),
     roughness: 1,
     metalness: 0,
     side: DoubleSide,
   });
   // What the colour was made from, so a character's own melanin and dye can
-  // be laid over it (CHARACTER.md Phase 2).
-  material.userData.hairPigment = pigment;
-  material.userData.hairTint = tint;
+  // be laid over it (CHARACTER.md Phase 2). A shadow takes no looks.
+  if (!shadow) {
+    material.userData.hairPigment = pigment;
+    material.userData.hairTint = tint;
+  }
   if (!mask) return material;
   material.alphaMap = densityMask(mask, kind);
   material.transparent = true;
@@ -457,8 +465,19 @@ function hairCards(
   const exponent = hairLobeExponent(smoothness);
   const uniforms = {
     uStrandId: { value: strandId ?? null },
-    uHairLight: { value: strands.light },
-    uHairDark: { value: strands.dark },
+    // The pigment, strand by strand (`fwMelaninColour`): melanin and its
+    // spread in melanin units, redness, the tint over it, and the mean
+    // colour of all the strands, which is what a pixel spanning several sees.
+    uMelanin: { value: strands.melanin },
+    uMelaninSpread: { value: strands.spread },
+    uMelaninRedness: { value: strands.redness },
+    uHairTint: { value: strands.tint },
+    uHairMean: { value: strands.mean },
+    // Each strand's highlight moves along the normal by up to this much
+    // either way (`SpecularVariation`), and the highlight fades toward the
+    // root by `SpecularRootOcclusion`.
+    uSpecularVariation: { value: scalar(sub.params?.SpecularVariation, HAIR_SHIFT_JITTER) },
+    uSpecularRootOcclusion: { value: scalar(sub.params?.SpecularRootOcclusion, 0) },
     uDye: { value: strands.dye },
     uDyeAmount: { value: strands.amount },
     uDyeShift: { value: strands.shift },
@@ -473,14 +492,28 @@ function hairCards(
     uHairCentre: { value: new Vector3() },
     uHairSphere: { value: 0 },
     // How hard the cards' baked occlusion bites: `AmbientOcclusion` on the
-    // ambient and environment light, `ShadowDensity` on the key.
+    // ambient and environment light, `ShadowDensity` on the key. A material
+    // that declares no `ShadowDensity` (`hair_75`) takes no shadow from the
+    // vertex blue -- inferred; measured, it is a point of the hair's median
+    // either way under the hangar light, where ambient is most of it.
     uHairAo: { value: scalar(sub.params?.AmbientOcclusion, 1) },
-    uHairShadow: { value: scalar(sub.params?.ShadowDensity, 1) },
+    uHairShadow: { value: scalar(sub.params?.ShadowDensity, 0) },
     uHairExp1: { value: exponent },
     // The secondary lobe passes through the strand twice and is twice as
     // rough: four times the variance (Marschner et al.).
     uHairExp2: { value: exponent / 4 },
     uHairEnvSheen: { value: HAIR_ENV_SHEEN },
+    // Light through the strand (RE_Direct_Hair): its strength, and its
+    // longitudinal width -- Karis's half of the reflection's, the
+    // roughness squared over two.
+    uHairTransmission: { value: HAIR_TRANSMISSION },
+    uHairTtWidth: { value: Math.max(0.02, (1 - smoothness) ** 2 / 2) },
+    // How far back a fragment's depth goes at no opacity, metres
+    // (`PixelDepthOffset`): 2.7 mm on `hair_75`, 9.2 on the beard.
+    uPixelDepthOffset: { value: Math.max(0, scalar(sub.params?.PixelDepthOffset, 0)) },
+    // Where the temporal resolve is in its frames, 0 to 1, shared by every
+    // hair material (setHairHashFrame).
+    uHashFrame: HAIR_HASH_FRAME,
   };
   // One mask serves both passes: red scaled so the cut-out keeps its
   // coverage down the mips, green the density as authored for the blend.
@@ -517,6 +550,7 @@ function hairCards(
       material.alphaTest = HAIR_ALPHA_TEST;
       material.alphaToCoverage = true;
     }
+    if (uniforms.uPixelDepthOffset.value > 0) material.defines = { ...material.defines, FW_HAIR_DEPTH_OFFSET: '' };
     material.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, uniforms);
       // Hair cards lie every which way, and lit by their own normals a head of
@@ -529,6 +563,9 @@ function hairCards(
         .replace('#include <common>', `#include <common>
           uniform vec3 uHairCentre;
           uniform float uHairSphere;
+          #ifdef FW_HAIR_KK
+            varying vec3 vHairRadial;
+          #endif
           #ifdef FW_HAIR_OCCLUSION
             attribute vec4 fwColor;
             varying vec2 vHairOcclusion;
@@ -539,8 +576,19 @@ function hairCards(
             varying float vStrandT;
             varying float vStrandD;
           #endif`)
+        // Which way is out from the head, carried through the skinning as a
+        // normal is, in view space: transmission comes only through hair the
+        // light can reach without crossing the head.
+        .replace('#include <defaultnormal_vertex>', `#include <defaultnormal_vertex>
+          #ifdef FW_HAIR_KK
+            #ifdef USE_SKINNING
+              fwRadial = ( skinMatrix * vec4( fwRadial, 0.0 ) ).xyz;
+            #endif
+            vHairRadial = normalize( normalMatrix * fwRadial );
+          #endif`)
         .replace('#include <beginnormal_vertex>', `#include <beginnormal_vertex>
-          objectNormal = normalize(mix(objectNormal, normalize(position - uHairCentre), uHairSphere));
+          vec3 fwRadial = normalize(position - uHairCentre);
+          objectNormal = normalize(mix(objectNormal, fwRadial, uHairSphere));
           #ifdef FW_HAIR_OCCLUSION
             vHairOcclusion = fwColor.gb;
           #endif
@@ -573,16 +621,52 @@ function hairCards(
             varying float vStrandT;
             varying float vStrandD;
           #endif
-          uniform vec3 uHairLight;
-          uniform vec3 uHairDark;
+          uniform float uMelanin;
+          uniform float uMelaninSpread;
+          uniform float uMelaninRedness;
+          uniform vec3 uHairTint;
+          uniform vec3 uHairMean;
+          uniform float uSpecularVariation;
+          uniform float uSpecularRootOcclusion;
+          uniform float uPixelDepthOffset;
+          uniform mat4 projectionMatrix;
+          uniform float uHairTransmission;
+          uniform float uHairTtWidth;
+          #ifdef FW_HAIR_KK
+            varying vec3 vHairRadial;
+          #endif
+          #ifdef FW_HAIR_HASH
+            uniform float uHashFrame;
+            uint fwPcg( uint v ) {
+              uint state = v * 747796405u + 2891336453u;
+              uint word = ( ( state >> ( ( state >> 28u ) + 4u ) ) ^ state ) * 277803737u;
+              return ( word >> 22u ) ^ word;
+            }
+            float fwHashThreshold( const in vec2 uv ) {
+              uvec2 p = uvec2( gl_FragCoord.xy );
+              uvec2 t = uvec2( fract( uv ) * 8192.0 );
+              uint h = fwPcg( p.x + fwPcg( p.y + fwPcg( t.x + fwPcg( t.y ) ) ) );
+              return fract( float( h ) * ( 1.0 / 4294967296.0 ) + uHashFrame );
+            }
+          #endif
+          // A strand's colour from its melanin: Chiang's parametrisation at
+          // the customizer's azimuthal roughness, as hairColour on the CPU.
+          vec3 fwMelaninColour( float m ) {
+            float q = -log( max( 1.0 - clamp( m, 0.0, 0.999 ), 1e-4 ) );
+            vec3 sigma = q * ( 1.0 - uMelaninRedness ) * vec3( 0.506, 0.841, 1.653 )
+              + q * uMelaninRedness * vec3( 0.343, 0.733, 1.924 );
+            return exp( -sqrt( sigma ) * ${chiangK().toFixed(5)} ) * uHairTint;
+          }
           uniform vec3 uDye;
           uniform float uDyeAmount;
           uniform float uDyeShift;
           uniform float uDyeFade;
           uniform float uDyeVariation;
           uniform float uHairSpecular;
-          // This strand's highlight shift, set with its colour.
+          // This strand's highlight shift, set with its colour, and how much
+          // of its highlight reaches it along the strand.
           float fwHairShift = 0.0;
+          float fwSpecRoot = 1.0;
           ${strandId ? 'uniform sampler2D uStrandId;' : ''}`,
         )
         // CryEngine's hair lighting (`Hair.cfx`, `shadeLib.cfi`):
@@ -616,7 +700,30 @@ function hairCards(
                 + ${HAIR_SECONDARY_TINT.toFixed(3)} * material.diffuseColor * fwKajiyaKay( T2, H, uHairExp2 );
               // CryEngine adds these to an unnormalised diffuse; three.js's
               // carries 1/pi, and the ratio between them is what is kept.
-              reflectedLight.directSpecular += directLight.color * lobes * uHairSpecular * saturate( dotNL ) * RECIPROCAL_PI;
+              reflectedLight.directSpecular += directLight.color * lobes * uHairSpecular * fwSpecRoot * saturate( dotNL ) * RECIPROCAL_PI;
+              // **Transmission** (Marschner's TT, in Karis's 2016 form for
+              // games): light that passes once through a strand and leaves on
+              // the far side, which is what lights hair from behind and gives
+              // a head of brown hair its warm rim. Longitudinally a Gaussian
+              // of half the reflection's width about the mirror angle;
+              // azimuthally strongest straight through, exp(-3.65 cos phi -
+              // 3.98); coloured by one pass through the fibre, the square root
+              // of its colour, less what the two surfaces reflect. Only
+              // through hair the light reaches without crossing the head.
+              {
+                vec3 Ts = normalize( material.anisotropyT );
+                float sinL = dot( Ts, directLight.direction );
+                float sinV = dot( Ts, geometryViewDir );
+                vec3 Lp = directLight.direction - sinL * Ts;
+                vec3 Vp = geometryViewDir - sinV * Ts;
+                float cosPhi = dot( Lp, Vp ) * inversesqrt( max( dot( Lp, Lp ) * dot( Vp, Vp ), 1e-6 ) );
+                float Np = exp( -3.65 * cosPhi - 3.98 );
+                float x = sinL + sinV;
+                float Mp = exp( -0.5 * x * x / ( uHairTtWidth * uHairTtWidth ) ) / ( 2.5066 * uHairTtWidth );
+                float reach = smoothstep( -0.1, 0.35, dot( directLight.direction, normalize( vHairRadial ) ) );
+                vec3 Tp = sqrt( max( material.diffuseColor, vec3( 0.0 ) ) );
+                reflectedLight.directSpecular += directLight.color * Mp * Np * 0.9 * Tp * reach * uHairTransmission;
+              }
             }
             #undef RE_Direct
             #define RE_Direct RE_Direct_Hair
@@ -638,7 +745,7 @@ function hairCards(
             vec3 T2 = normalize( material.anisotropyT + ( fwHairShift + ${HAIR_SECONDARY_SHIFT.toFixed(3)} ) * geometryNormal );
             vec3 lobes = ${HAIR_PRIMARY_REFLECTANCE.toFixed(4)} * fwKajiyaKay( T1, H, uHairExp1 )
               + ${HAIR_SECONDARY_TINT.toFixed(3)} * material.diffuseColor * fwKajiyaKay( T2, H, uHairExp2 );
-            reflectedLight.indirectSpecular = lobes * uHairSpecular * iblIrradiance * RECIPROCAL_PI * uHairEnvSheen;
+            reflectedLight.indirectSpecular = lobes * uHairSpecular * fwSpecRoot * iblIrradiance * RECIPROCAL_PI * uHairEnvSheen;
           }
           #endif`,
         )
@@ -651,8 +758,10 @@ function hairCards(
           '#include <map_fragment>',
           `#include <map_fragment>
           ${strandId ? `{
+            // The strand's melanin, either side of the pigment by up to
+            // BaseMelaninVariation, in melanin units (strandLooks).
             float id = texture2D(uStrandId, vAlphaMapUv).r;
-            vec3 natural = mix(uHairLight, uHairDark, id);
+            vec3 natural = fwMelaninColour(uMelanin + uMelaninSpread * (2.0 * id - 1.0));
             // Which strand this is, read from the nearest texel: an id is a
             // label, and filtered between two strands it names neither, so
             // the dye draw below scattered single-pixel white specks along
@@ -673,18 +782,26 @@ function hairCards(
             // in a 2048 map, and at a portrait's distance a pixel covers
             // several, so each drew as a near-white or near-black speck -- a
             // salt-and-pepper beard where the captures show a soft grey. The
-            // map's strands average to an id of 0.50 and draw the variation
-            // uniformly, so the average is exact, and a close view keeps every
-            // strand.
+            // map's ids are uniform, so the average is the mean colour over
+            // them (uHairMean) -- not the colour of the mean melanin, which
+            // with the spread in melanin units is darker -- and a close view
+            // keeps every strand.
             float footprint = max(length(dFdx(vAlphaMapUv) * texels), length(dFdy(vAlphaMapUv) * texels)) / ${STRAND_TEXELS.toFixed(1)};
             float resolved = smoothstep(0.5, 2.0, footprint);
-            vec3 average = mix(mix(uHairLight, uHairDark, 0.5), uDye, gradient);
+            vec3 average = mix(uHairMean, uDye, gradient);
             diffuseColor.rgb = mix(mix(natural, uDye, dyed), average, resolved);
-            fwHairShift = (fract(strand * 13.37 + 0.61) - 0.5) * ${HAIR_SHIFT_JITTER.toFixed(3)} * (1.0 - resolved);
+            fwHairShift = (fract(strand * 13.37 + 0.61) - 0.5) * uSpecularVariation * (1.0 - resolved);
           }` : ''}
-          // Root to tip along the card: darker where the strand leaves the
-          // skin, lighter toward the end.
           #ifdef FW_HAIR_ROOT
+            // The highlight fades toward the root, where the strand lies
+            // under the rest (SpecularRootOcclusion, linear from the root:
+            // the shape is chosen).
+            fwSpecRoot = 1.0 - uSpecularRootOcclusion * (1.0 - vStrandT);
+          #endif
+          // Root to tip along the card: darker where the strand leaves the
+          // skin, lighter toward the end -- the stand-in for a mesh whose
+          // baked occlusion is not drawn.
+          #if defined( FW_HAIR_ROOT ) && !defined( FW_HAIR_OCCLUSION )
             diffuseColor.rgb *= mix(${HAIR_ROOT_SHADE.toFixed(3)}, ${HAIR_TIP_SHADE.toFixed(3)}, vStrandT);
           #endif`,
         )
@@ -694,6 +811,13 @@ function hairCards(
           // density as authored, which is what a blend wants.
           `#ifdef USE_ALPHAMAP
             #ifdef FW_HAIR_FRINGE
+              diffuseColor.a *= saturate(texture2D(alphaMap, vAlphaMapUv).g * ${HAIR_FRINGE_GAIN.toFixed(3)});
+            #elif defined( FW_HAIR_HASH )
+              // Hashed, the opacity is the density as the blended pass takes
+              // it: one hashed layer stands for the cut-out and the blend
+              // over it, and at the density as authored the beard came out
+              // thinner than the two passes draw it (0.89 of the bare chin's
+              // brightness against 0.81).
               diffuseColor.a *= saturate(texture2D(alphaMap, vAlphaMapUv).g * ${HAIR_FRINGE_GAIN.toFixed(3)});
             #else
               diffuseColor.a *= texture2D(alphaMap, vAlphaMapUv).r;
@@ -705,6 +829,23 @@ function hairCards(
             diffuseColor.a *= 1.0 - ${HAIR_TIP_FADE.toFixed(3)} * smoothstep(${HAIR_TIP_FROM.toFixed(3)}, 1.0, vStrandT);
           #endif`,
         )
+        // **The temporal resolve** (setHairResolve): instead of a fixed
+        // cut-out with alpha to coverage, each fragment passes when its
+        // opacity beats a threshold, and frames averaged together resolve
+        // the strands to their real coverage -- CIG's "temporally dithered"
+        // cards. The threshold is per pixel and per layer (the card's own
+        // texel goes into the hash, so two cards over one pixel draw
+        // independently) and steps evenly through the frames being averaged
+        // (uHashFrame), so N frames give each layer exactly its opacity
+        // to 1/N.
+        .replace(
+          '#include <alphatest_fragment>',
+          `#ifdef FW_HAIR_HASH
+            if ( diffuseColor.a <= fwHashThreshold( vAlphaMapUv ) ) discard;
+          #else
+            #include <alphatest_fragment>
+          #endif`,
+        )
         // The mesh's baked occlusion, in its vertex colour: green is how open a
         // strand is to its surroundings, blue how far the key reaches it
         // through the hair around it -- both dark at the roots and deep in
@@ -714,6 +855,22 @@ function hairCards(
         .replace(
           '#include <aomap_fragment>',
           `#include <aomap_fragment>
+          // **Pixel depth offset** (%PIXEL_DEPTH_OFFSET, on 1,880 of
+          // HairPBR's cards): each fragment's depth pushed back along the
+          // view ray by how transparent it is, times the material's offset.
+          // Where a card meets the skin or crosses another card, the thin
+          // edges of its strands fall behind and the solid middles stay in
+          // front, so the meeting is a scatter of strands instead of a cut
+          // line -- the hairline, the jaw under a beard. Written here, before
+          // the lighting reads anything, from the opacity the mask gave.
+          #ifdef FW_HAIR_DEPTH_OFFSET
+          {
+            vec3 viewAt = -vViewPosition;
+            float back = uPixelDepthOffset * (1.0 - saturate(diffuseColor.a));
+            vec4 clip = projectionMatrix * vec4(viewAt * (1.0 + back / max(length(viewAt), 1e-4)), 1.0);
+            gl_FragDepth = 0.5 * clip.z / clip.w + 0.5;
+          }
+          #endif
           #ifdef FW_HAIR_OCCLUSION
             float hairAo = pow(max(vHairOcclusion.x, 1e-3), uHairAo);
             float hairShadow = pow(max(vHairOcclusion.y, 1e-3), uHairShadow);
@@ -725,6 +882,7 @@ function hairCards(
         );
     };
     material.customProgramCacheKey = () => `fw-hair${strandId ? '-id' : ''}${fringe ? '-fringe' : ''}`;
+    if (!fringe) material.userData.hairCut = true;
     return material;
   };
   const cut = make(false);
@@ -736,11 +894,47 @@ function hairCards(
 
 type HairParams = Record<string, number | Float32Array>;
 
-/** What a head of strands is made of: the lightest and darkest natural
- * strand -- the pigment with its melanin moved either way by
- * `BaseMelaninVariation` -- and the dye, laid along each strand by its
- * gradient (`dyeAt`): `DyeAmount` at most, from `DyeShift` to `DyeShift +
+/** The temporal resolve's frame, shared by every hair material. */
+const HAIR_HASH_FRAME = { value: 0 };
+
+/** Where the temporal resolve is in the frames being averaged, 0 to 1. */
+export function setHairHashFrame(at: number): void {
+  HAIR_HASH_FRAME.value = at - Math.floor(at);
+}
+
+/** Draw a hair cut-out hashed, for frames that will be averaged (true), or
+ * as a fixed cut-out with alpha to coverage and a blended pass over it. The
+ * shadow keeps the fixed test either way: three.js's depth material reads
+ * alphaTest, which is left as it is. True when the material is one. */
+export function setHairResolve(material: Material, temporal: boolean): boolean {
+  if (!material.userData.hairCut) return false;
+  const on = 'FW_HAIR_HASH' in (material.defines ?? {});
+  if (on !== temporal) {
+    const defines = { ...material.defines };
+    if (temporal) defines.FW_HAIR_HASH = '';
+    else delete defines.FW_HAIR_HASH;
+    material.defines = defines;
+    material.alphaToCoverage = !temporal;
+    material.needsUpdate = true;
+  }
+  return true;
+}
+
+/** What a head of strands is made of: the pigment, each strand's melanin
+ * moved either way from it by up to `BaseMelaninVariation`, the mean colour
+ * of all of them, and the dye, laid along each strand by its gradient
+ * (`dyeAt`): `DyeAmount` at most, from `DyeShift` to `DyeShift +
  * DyeFadeout` out from the root, in the vertex red's units.
+ *
+ * **`BaseMelaninVariation` is in melanin units.** CIG's grey colourway says
+ * so: `m_hair_75_grey` is melanin 0 with a variation of 0.86 under a
+ * `BaseTintColor` of 0.66 -- white strands spread up to 0.86 of melanin, the
+ * customizer's "salt and pepper" -- and read as a fraction (0.15 of a unit at
+ * a variation of one, as it was) every grey strand stayed near white.
+ * Ilucide's hair, 0.60 with 0.29, carries strands from 0.31 to 0.89. Centred
+ * on the pigment, so the picker's colour stays the middle strand; the grey
+ * clamps at no melanin, half its strands white. Inferred from that one
+ * family.
  *
  * **`DyePigmentVariation` varies the dye strand by strand** ("Dye Variation"
  * in the customizer), either side of the amount set: a strand takes
@@ -749,19 +943,29 @@ type HairParams = Record<string, number | Float32Array>;
  * downward, it left Ilucide's dyed strands at 79% of `DyeAmount` on average
  * and his beard near black. Not a share of strands: the archive's artists set
  * it to 0 on the pink, ginger and gold heads they meant to be dyed. How far a
- * variation of one moves the melanin is not in the data
- * (`STRAND_MELANIN_SPREAD`, chosen). */
+ * variation of one moves the melanin is the grey colourway's reading above. */
 function strandLooks(params: HairParams): {
-  light: Color; dark: Color; dye: Color; amount: number; shift: number; fade: number; variation: number;
+  melanin: number; spread: number; redness: number; tint: Color; mean: Color;
+  dye: Color; amount: number; shift: number; fade: number; variation: number;
 } {
-  const melanin = scalar(params.BaseMelanin, 0.5);
-  const spread = scalar(params.BaseMelaninVariation, 0) * STRAND_MELANIN_SPREAD;
+  const melanin = Math.min(0.999, Math.max(0, scalar(params.BaseMelanin, 0.5)));
+  const spread = Math.max(0, scalar(params.BaseMelaninVariation, 0)) * STRAND_MELANIN_SPREAD;
   const natural = { ...params, DyeAmount: 0 };
   const at = (m: number) => hairColour({ ...natural, BaseMelanin: Math.min(0.999, Math.max(0, m)) });
+  // The ids are uniform, so the strands' mean is the colour averaged over
+  // melanin from one end of the spread to the other.
+  const mean = new Color(0, 0, 0);
+  const STEPS = 64;
+  for (let i = 0; i < STEPS; i += 1) mean.add(at(melanin + spread * (((i + 0.5) / STEPS) * 2 - 1)));
+  mean.multiplyScalar(1 / STEPS);
+  const tint = vector(params.BaseTintColor) ?? [1, 1, 1];
   const dye = vector(params.DyeColor) ?? [1, 1, 1];
   return {
-    light: at(melanin - spread),
-    dark: at(melanin + spread),
+    melanin,
+    spread,
+    redness: Math.min(1, Math.max(0, scalar(params.BaseMelaninRedness, 0))),
+    tint: new Color().setRGB(tint[0], tint[1], tint[2]),
+    mean,
     dye: new Color().setRGB(dye[0] * DYE_ALBEDO, dye[1] * DYE_ALBEDO, dye[2] * DYE_ALBEDO),
     amount: Math.min(1, Math.max(0, scalar(params.DyeAmount, 0))),
     shift: Math.max(0, scalar(params.DyeShift, 0)),
@@ -947,6 +1151,11 @@ export function hairLobeExponent(smoothness: number): number {
   const deviation = 0.726 * beta + 0.812 * beta ** 2 + 3.7 * beta ** 20;
   return 1 / deviation ** 2;
 }
+/** How much light passes through a strand, against Karis's (2016) form of
+ * Marschner's TT lobe at one. Not in the data: HairPBR's own scattering
+ * ("improved scattering for blonde and bright hair", April 2020) is not
+ * public. */
+const HAIR_TRANSMISSION = 1;
 /** The blended pass: clipped below 5%, as CryEngine's, and its density
  * lifted as `AlphaBlendMultiplier` lifts it there. Chosen. */
 const HAIR_FRINGE_CLIP = 0.05;
@@ -976,8 +1185,11 @@ const DYE_ALBEDO = 0.3;
  * customizer's own colour picker (`hairColour`). Fitted. */
 const HAIR_AZIMUTHAL_ROUGHNESS = 0.82;
 /** How far a hair card's normal bends toward the head's sphere. Chosen
- * against the captures' hair-to-skin brightness. */
+ * against the captures' hair-to-skin brightness, when the cards were lit
+ * along their strands; kept for a mesh whose stream is a real normal. */
 const HAIR_SPHERE = 0.8;
+/** The same for cards in their real frame (`hair.strandFrame`). */
+const HAIR_CARD_SPHERE = 0;
 /** The glossiest a strand card is drawn. The highlight is anisotropic now,
  * a band across the strands; isotropic, anything glossier than 0.75 spread
  * into a grey-white sheet over cards that lie flat. */
@@ -988,9 +1200,9 @@ const HAIR_MIN_ROUGHNESS = 0.5;
 const HAIR_SPECULAR = 1;
 /** How stretched the highlight is across the strands, 0 to 1. Chosen. */
 const HAIR_ANISOTROPY = 0.85;
-/** Melanin either side of the pigment at a `BaseMelaninVariation` of one.
- * Chosen: the data says a head varies, not by how much. */
-const STRAND_MELANIN_SPREAD = 0.15;
+/** Melanin either side of the pigment at a `BaseMelaninVariation` of one:
+ * the variation is in melanin units (`strandLooks`). It was 0.15, chosen. */
+const STRAND_MELANIN_SPREAD = 1;
 
 function scalar(value: number | Float32Array | undefined, fallback: number): number {
   if (typeof value === 'number') return value;
@@ -1029,14 +1241,20 @@ export function hairColour(params: Record<string, number | Float32Array>): Color
     eu * 0.841 + pheo * 0.733,
     eu * 1.653 + pheo * 1.924,
   ];
-  const beta = HAIR_AZIMUTHAL_ROUGHNESS;
-  const k = 5.969 - 0.215 * beta + 2.532 * beta ** 2 - 10.73 * beta ** 3 + 5.574 * beta ** 4 + 0.245 * beta ** 5;
+  const k = chiangK();
   const tint = vector(params.BaseTintColor) ?? [1, 1, 1];
   let rgb = sigma.map((s, i) => Math.exp(-Math.sqrt(s) * k) * tint[i]!);
   const dye = vector(params.DyeColor);
   const amount = Math.min(1, Math.max(0, scalar(params.DyeAmount, 0))) * dyeAt(params, 0);
   if (dye && amount > 0) rgb = rgb.map((c, i) => c + (dye[i]! * DYE_ALBEDO - c) * amount);
   return new Color().setRGB(rgb[0]!, rgb[1]!, rgb[2]!);
+}
+
+/** Chiang et al.'s azimuthal-roughness factor at the customizer's roughness:
+ * a melanin absorption becomes a colour by `exp(-sqrt(sigma) k)`. */
+function chiangK(): number {
+  const beta = HAIR_AZIMUTHAL_ROUGHNESS;
+  return 5.969 - 0.215 * beta + 2.532 * beta ** 2 - 10.73 * beta ** 3 + 5.574 * beta ** 4 + 0.245 * beta ** 5;
 }
 
 /** How far the dye has come in at `along` a strand, 0 to 1: the strand's
@@ -1300,11 +1518,22 @@ export function setHairVolume(
   material: Material,
   centre: Vector3,
   style: HairStyle | null = null,
+  framed = false,
 ): void {
   const strands = material.userData.hairStrands as { uHairCentre: { value: Vector3 }; uHairSphere: { value: number } } | undefined;
   if (!strands) return;
   strands.uHairCentre.value.copy(centre);
-  strands.uHairSphere.value = HAIR_SPHERE;
+  // Cards in their real frame (`hair.strandFrame`) are lit by their own
+  // normals and need no sphere to stand in for them.
+  strands.uHairSphere.value = framed ? HAIR_CARD_SPHERE : HAIR_SPHERE;
+  // The strand is the tangent now, three.js's first axis, where the
+  // derivative frame put the card's U: the direction map, whose strands run
+  // down V, turns a quarter onto it, and without one the tangent is used as
+  // it is.
+  if (material instanceof MeshPhysicalMaterial) {
+    const mapped = Boolean(material.anisotropyMap);
+    material.anisotropyRotation = framed === mapped ? Math.PI / 2 : 0;
+  }
   // Hair drawn as CryEngine draws it: its own lighting, a cut-out at
   // `HAIR_CUT` with a blended pass for the rest, shading along its strands
   // where the mesh carries them, and by its baked occlusion where asked.
@@ -1348,14 +1577,18 @@ export function setHairLooks(material: Material, looks: Record<string, number | 
   const tint = (material.userData.hairTint as [number, number, number] | undefined) ?? [1, 1, 1];
   material.color.copy(hairColour(params)).multiply(new Color(tint[0], tint[1], tint[2]));
   const strands = material.userData.hairStrands as {
-    uHairLight: { value: Color }; uHairDark: { value: Color }; uDye: { value: Color };
+    uMelanin: { value: number }; uMelaninSpread: { value: number }; uMelaninRedness: { value: number };
+    uHairTint: { value: Color }; uHairMean: { value: Color }; uDye: { value: Color };
     uDyeAmount: { value: number }; uDyeShift: { value: number }; uDyeFade: { value: number };
     uDyeVariation: { value: number };
   } | undefined;
   if (strands) {
     const next = strandLooks(params);
-    strands.uHairLight.value.copy(next.light);
-    strands.uHairDark.value.copy(next.dark);
+    strands.uMelanin.value = next.melanin;
+    strands.uMelaninSpread.value = next.spread;
+    strands.uMelaninRedness.value = next.redness;
+    strands.uHairTint.value.copy(next.tint);
+    strands.uHairMean.value.copy(next.mean);
     strands.uDye.value.copy(next.dye);
     strands.uDyeAmount.value = next.amount;
     strands.uDyeShift.value = next.shift;

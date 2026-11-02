@@ -1,7 +1,7 @@
 import { BufferAttribute, BufferGeometry, Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
 
-import { sortInnerFirst, strandCoordinate } from '../src/three/hair';
+import { sortInnerFirst, strandCoordinate, strandFrame } from '../src/three/hair';
 
 /** Two cards side by side, each a strip of quads whose vertex red counts the
  * step from root to tip: the first three steps long, the second one. */
@@ -84,5 +84,30 @@ describe('sortInnerFirst', () => {
     }
     expect(after).toEqual(before);
     for (let i = 1; i < distances.length; i += 1) expect(distances[i]).toBeGreaterThanOrEqual(distances[i - 1]! - 1e-6);
+  });
+});
+
+describe('strandFrame', () => {
+  it('moves a normal stream that runs along the strand into the tangent', () => {
+    const geometry = cards();
+    // The archive's hair: the "normal" is the strand, up the card in y.
+    const count = geometry.getAttribute('position').count;
+    geometry.setAttribute('normal', new BufferAttribute(new Float32Array(count * 3).map((_, i) => (i % 3 === 1 ? 1 : 0)), 3));
+    expect(strandFrame(geometry, [{ start: 0, count: geometry.getIndex()!.count }])).toBe(true);
+    const tangent = geometry.getAttribute('tangent');
+    const normal = geometry.getAttribute('normal');
+    for (let v = 0; v < count; v += 1) {
+      expect([tangent.getX(v), tangent.getY(v), tangent.getZ(v), tangent.getW(v)]).toEqual([0, 1, 0, 1]);
+      // The cards lie in the xy plane: their own normal is z.
+      expect(Math.abs(normal.getZ(v))).toBeCloseTo(1, 5);
+    }
+  });
+
+  it('leaves a real normal alone', () => {
+    const geometry = cards();
+    const count = geometry.getAttribute('position').count;
+    geometry.setAttribute('normal', new BufferAttribute(new Float32Array(count * 3).map((_, i) => (i % 3 === 2 ? 1 : 0)), 3));
+    expect(strandFrame(geometry, [{ start: 0, count: geometry.getIndex()!.count }])).toBe(false);
+    expect(geometry.hasAttribute('tangent')).toBe(false);
   });
 });

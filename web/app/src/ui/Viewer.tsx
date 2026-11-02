@@ -32,7 +32,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 
 import { createGround, groundLook, type Ground } from '../three/ground';
 import { applyTheme, isLight, untoneMapped } from '../three/sceneTheme';
-import type { CaptureResult, CaptureView } from '../three/portrait';
+import type { CaptureResolve, CaptureResult, CaptureView } from '../three/portrait';
 import { readTokens, type Tokens } from '../theme';
 
 /** What a caller gets once the scene exists. */
@@ -63,7 +63,7 @@ export interface ViewerHandle {
    * All in one task, size and camera put back before it returns, so the
    * screen never shows any of it. The ambient fill is the preset's own, not
    * the theme's adjustment, so a picture does not depend on the page colour. */
-  capture(view: CaptureView, size: number, greys: readonly number[]): CaptureResult;
+  capture(view: CaptureView, size: number, greys: readonly number[], resolve?: CaptureResolve): CaptureResult;
 }
 
 
@@ -382,7 +382,7 @@ export function Viewer({ tokens, onScene, className }: ViewerProps): JSX.Element
       }
     };
 
-    const capture = (view: CaptureView, size: number, greys: readonly number[]): CaptureResult => {
+    const capture = (view: CaptureView, size: number, greys: readonly number[], resolve?: CaptureResolve): CaptureResult => {
       const saved = {
         position: camera.position.clone(),
         quaternion: camera.quaternion.clone(),
@@ -407,6 +407,37 @@ export function Viewer({ tokens, onScene, className }: ViewerProps): JSX.Element
         context.drawImage(canvas, 0, 0);
         return context.getImageData(0, 0, size, size).data;
       };
+      // Several frames, each jittered within its pixel, averaged in linear
+      // light: what one frame of hashed hair cannot show (`CaptureResolve`).
+      const samples = Math.max(1, Math.floor(resolve?.samples ?? 1));
+      const resolved = (): Uint8ClampedArray => {
+        if (samples === 1) {
+          draw();
+          return read();
+        }
+        const sum = new Float32Array(size * size * 4);
+        for (let i = 0; i < samples; i += 1) {
+          camera.setViewOffset(size, size, halton(i + 1, 2) - 0.5, halton(i + 1, 3) - 0.5, size, size);
+          resolve?.onSample?.(i, samples);
+          draw();
+          const pixels = read();
+          for (let k = 0; k < pixels.length; k += 4) {
+            sum[k] = sum[k]! + SRGB_TO_LINEAR[pixels[k]!]!;
+            sum[k + 1] = sum[k + 1]! + SRGB_TO_LINEAR[pixels[k + 1]!]!;
+            sum[k + 2] = sum[k + 2]! + SRGB_TO_LINEAR[pixels[k + 2]!]!;
+            sum[k + 3] = sum[k + 3]! + pixels[k + 3]!;
+          }
+        }
+        camera.clearViewOffset();
+        const out = new Uint8ClampedArray(size * size * 4);
+        for (let k = 0; k < out.length; k += 4) {
+          out[k] = linearToSrgbByte(sum[k]! / samples);
+          out[k + 1] = linearToSrgbByte(sum[k + 1]! / samples);
+          out[k + 2] = linearToSrgbByte(sum[k + 2]! / samples);
+          out[k + 3] = Math.round(sum[k + 3]! / samples);
+        }
+        return out;
+      };
       const frames: Uint8ClampedArray[] = [];
       const backgrounds: Array<[number, number, number]> = [];
       try {
@@ -430,8 +461,7 @@ export function Viewer({ tokens, onScene, className }: ViewerProps): JSX.Element
         for (const grey of greys) {
           scene.background = new Color().setRGB(grey, grey, grey);
           camera.layers.mask = saved.layers;
-          draw();
-          frames.push(read());
+          frames.push(resolved());
           // Nothing on layer 31: the grey alone, as the screen shows it.
           camera.layers.set(31);
           draw();
@@ -439,6 +469,7 @@ export function Viewer({ tokens, onScene, className }: ViewerProps): JSX.Element
           backgrounds.push([empty[0]!, empty[1]!, empty[2]!]);
         }
       } finally {
+        camera.clearViewOffset();
         camera.layers.mask = saved.layers;
         camera.position.copy(saved.position);
         camera.quaternion.copy(saved.quaternion);
@@ -497,4 +528,27 @@ export function Viewer({ tokens, onScene, className }: ViewerProps): JSX.Element
   }, [tokens]);
 
   return <div ref={host} className={className} data-fashionworks-view="" />;
+}
+
+/** sRGB bytes to linear, for averaging frames. */
+const SRGB_TO_LINEAR = Float32Array.from({ length: 256 }, (_, i) => {
+  const c = i / 255;
+  return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+});
+
+function linearToSrgbByte(c: number): number {
+  const v = c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055;
+  return Math.round(Math.min(1, Math.max(0, v)) * 255);
+}
+
+/** The Halton sequence's `index`th value in `base`, 0 to 1: sub-pixel offsets
+ * that cover the pixel evenly however many are taken. */
+function halton(index: number, base: number): number {
+  let f = 1;
+  let r = 0;
+  for (let i = index; i > 0; i = Math.floor(i / base)) {
+    f /= base;
+    r += f * (i % base);
+  }
+  return r;
 }

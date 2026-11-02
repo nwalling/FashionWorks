@@ -83,7 +83,9 @@ import {
   meshTexture,
   ownSkinTone,
   plainMaterial,
+  setHairHashFrame,
   setHairLooks,
+  setHairResolve,
   setHairVolume,
   type HairStyle,
   setIris,
@@ -92,7 +94,7 @@ import {
   surfaceMaterial,
   texturesWanted,
 } from './materials';
-import { fringeOf, sortInnerFirst, strandCoordinate } from './hair';
+import { fringeOf, sortInnerFirst, strandCoordinate, strandFrame } from './hair';
 import { DEFAULT_PRESET, LIGHT_PRESETS, StudioLighting } from './lighting';
 import { ClipLoop, FADE_SECONDS, type LoopMode, smooth } from './idle';
 import { hasEight, padEight, skinEight } from './skin8';
@@ -103,6 +105,7 @@ import {
   CAPTURE_SIZE,
   portraitView,
   solveCutout,
+  type CaptureResolve,
   type CaptureResult,
   type CaptureView,
 } from './portrait';
@@ -247,6 +250,9 @@ const COVERS_CHEST_ABOVE = 1.3;
 /** How much room to leave around a framed loadout. Enough that a pauldron or a
  * backpack does not touch the edge, not so much that the figure swims. */
 const FRAME_MARGIN = 1.12;
+/** Frames a portrait averages to resolve hashed hair: 16 resolve each
+ * strand layer's opacity to a sixteenth. */
+const PORTRAIT_SAMPLES = 16;
 
 /** Never get closer than this, whatever the bounds say. A single glove would
  * otherwise put the camera inside its own near plane. */
@@ -418,7 +424,7 @@ export interface KitbasherScene {
   };
   /** Present when the view is the full viewer: a frame off screen, for a
    * portrait (`ViewerHandle.capture`). */
-  readonly capture?: (view: CaptureView, size: number, greys: readonly number[]) => CaptureResult;
+  readonly capture?: (view: CaptureView, size: number, greys: readonly number[], resolve?: CaptureResolve) => CaptureResult;
 }
 
 /** What the UI renders from. Replaced wholesale on every change, so React can
@@ -1574,12 +1580,16 @@ export class Kitbasher {
     // where they were authored. Why eight fails here and not on armour is not
     // yet known.
     fourWays(object.geometry);
+    // Hair cards take their real frame, the strand as the tangent and the
+    // card's normal from its triangles (`strandFrame`): the mesh's normal
+    // stream is the strand.
+    const cardRanges = object.geometry.groups.filter((g) => materials[g.materialIndex ?? 0]?.userData.hairStrands);
+    const framed = strandFrame(object.geometry, cardRanges);
     // Hair is drawn as CryEngine draws it (`three/hair.ts`): its cards
     // ordered innermost first and carried root to tip, a cut-out and then a
     // blended pass for the rest. Lashes are too fine to gain from it and carry
-    // no root-to-tip count. Only a beard shades by its baked occlusion: head
-    // hair carries far deeper occlusion and went 20% darker against the skin,
-    // further from the captures, which read it much lighter than we do.
+    // no root-to-tip count. Head hair and beards alike shade by their baked
+    // occlusion, now that the cards are lit by their own normals.
     const fringes = new Map<number, Material>();
     let style: HairStyle | null = null;
     if (!/lashes/i.test(meshPath) && materials.some((m) => m.userData.hairFringe)) {
@@ -1593,10 +1603,10 @@ export class Kitbasher {
         if (!fringes.has(index)) fringes.set(index, make());
       }
       const beard = /facialhair/i.test(meshPath);
-      style = { passes: true, beard, occluded: beard && object.geometry.hasAttribute('fwColor'), rootToTip };
+      style = { passes: true, beard, occluded: object.geometry.hasAttribute('fwColor'), rootToTip };
     }
     const all = [...materials, ...fringes.values()];
-    if (centre) for (const m of all) setHairVolume(m, centre, style);
+    if (centre) for (const m of all) setHairVolume(m, centre, style, framed);
     // Hair is cut-outs, which the ambient occlusion pass cannot see (Viewer).
     if (materials.some((m) => m.userData.hairPigment)) object.userData.noAo = true;
     decalsWhereNeeded([object]);
@@ -1957,12 +1967,44 @@ export class Kitbasher {
    * bone, straight alpha, `CAPTURE_SIZE` square (`three/portrait.ts`). Waits
    * for what is loading first, so the picture is of finished surfaces and
    * the hair a bare head shows. Null without a full viewer or a rig. */
+  /** How many frames a portrait averages to resolve its hair; 1 draws it
+   * as the live view does, a cut-out with a blended pass. */
+  portraitSamples = PORTRAIT_SAMPLES;
+
   async portrait(): Promise<OffscreenCanvas | null> {
     await this.settled();
     const capture = this.view.capture;
     const head = this.attachmentWorld('Head');
     if (this.disposed || !capture || !head) return null;
-    const { frames, backgrounds } = capture(portraitView(head), CAPTURE_SIZE, CAPTURE_GREYS);
+    // Hair resolved over frames, as the game resolves it (`setHairResolve`):
+    // its cut-outs hashed, its blended passes away, and the frames averaged.
+    const hashed: Material[] = [];
+    const fringes: Object3D[] = [];
+    if (this.portraitSamples > 1) {
+      this.view.scene.traverseVisible((object) => {
+        if (object.userData.hairFringe) fringes.push(object);
+        const mesh = object as Mesh;
+        if (!mesh.isMesh) return;
+        for (const material of ([] as Material[]).concat(mesh.material)) {
+          if (setHairResolve(material, true)) hashed.push(material);
+        }
+      });
+    }
+    for (const fringe of fringes) fringe.visible = false;
+    let result: CaptureResult;
+    try {
+      result = capture(
+        portraitView(head),
+        CAPTURE_SIZE,
+        CAPTURE_GREYS,
+        hashed.length ? { samples: this.portraitSamples, onSample: (i, n) => setHairHashFrame(i / n) } : undefined,
+      );
+    } finally {
+      for (const material of hashed) setHairResolve(material, false);
+      for (const fringe of fringes) fringe.visible = true;
+      setHairHashFrame(0);
+    }
+    const { frames, backgrounds } = result;
     const pixels = solveCutout(frames[0]!, frames[1]!, backgrounds[0]!, backgrounds[1]!);
     const canvas = new OffscreenCanvas(CAPTURE_SIZE, CAPTURE_SIZE);
     canvas.getContext('2d')!.putImageData(new ImageData(pixels, CAPTURE_SIZE, CAPTURE_SIZE), 0, 0);
