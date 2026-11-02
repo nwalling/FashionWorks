@@ -32,6 +32,8 @@ from .catalog import (
     canonical_key,
     flags_for,
     manufacturer_for,
+    material_override,
+    material_palette,
     tags_for,
     tint_for,
 )
@@ -184,6 +186,9 @@ def selected_node(record: Record) -> GeoNode | None:
         )
 
     path, material, palette = read(root)
+    # The entity's own material over its model's; a tagged color variant's own
+    # still wins below.
+    material = material_override(record) or material
     wanted = {t.lower() for t in geometry_tags(record)}
     if wanted:
         for child in root.get(F.NODE_CHILDREN) or []:
@@ -248,7 +253,7 @@ def build_gear_item(record: Record, index: Index, loc: Localization) -> GearItem
             "tags": attach_tags,
         },
         anim_set=anim_set_for(slot, attach_tags),
-        tint=tint_for(roots, index),
+        tint=tint_for(roots, index, override=material_palette(record)),
         geometry=geometry,
         materials=materials,
         default_children=default_children_for(record),

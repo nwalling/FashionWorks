@@ -338,6 +338,29 @@ def material_palette(record: Record) -> str | None:
     return ref if isinstance(ref, str) and ref else None
 
 
+def material_override(record: Record) -> str | None:
+    """The entity's own ``.mtl``, from its material override, if it names one.
+
+    The same ``Material`` sibling ``material_palette`` reads carries the path
+    of a material that replaces the model's: what makes a backpack edition
+    its edition when it shares its family's ``.cga``, a Cal-O-Meal bar its
+    flavour and a flag its own. The Hangarworks item renders take it first
+    (``items.py`` ``Record.mtl``); read from the geometry tree alone, the
+    kitbasher drew those items in their model's base material. A record that
+    names none -- the Ambit Coverall -- keeps its model's, never another
+    item's.
+    """
+    component = F.component(record.data, F.GEOMETRY_COMPONENT)
+    if component is None:
+        return None
+    node = component.get("Material")
+    if not isinstance(node, dict):
+        return None
+    inner = node.get("Material")
+    path = inner.get("path") if isinstance(inner, dict) else None
+    return _normalize_asset_path(path) if isinstance(path, str) and path else None
+
+
 def select_wearables(nodes: list[GeoNode], skeleton: str) -> list[GeoNode]:
     """Pick the meshes actually worn on ``skeleton`` from a geometry tree.
 
@@ -390,10 +413,13 @@ def geometry_for(
     nodes = walk_geometry(record)
     chosen = select_wearables(nodes, skeleton)
     geometry = [Geometry(source=n.path, side=_side_of(n.path)) for n in chosen]
-    materials: list[str] = []
-    for node in chosen:
-        if node.material and node.material not in materials:
-            materials.append(node.material)
+    # The entity's own material, where it names one, over its model's.
+    override = material_override(record)
+    materials: list[str] = [override] if override and chosen else []
+    if not materials:
+        for node in chosen:
+            if node.material and node.material not in materials:
+                materials.append(node.material)
 
     if not materials:
         # The material is often authored on one gender's node only. ADP, Aril

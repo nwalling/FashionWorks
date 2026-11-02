@@ -184,6 +184,18 @@ pub struct SubMaterial {
     /// `%HOLOGRAPHIC_PROJECTION` (a standing flag's flag, at 9% opacity and
     /// full glow), or the `Hologram` shader.
     pub hologram: bool,
+    /// A relief: a decal compiled with `%PARALLAX_OCCLUSION_MAPPING`
+    /// (`MeshDecal`, or `Illum` with `%DECAL`), its height map in
+    /// `textures["height"]`. Its color image is a white mask with the carving
+    /// baked into it as shading -- screws, vents, serial numbers, calibre
+    /// stamps -- and drawn as color it laid white rings, panels and text over
+    /// every Behring, Klaus & Werner, Volt, Gemini and Kastak weapon.
+    pub relief: bool,
+    /// Occlusion baked into the vertex color's blue: HardSurface compiled
+    /// with `%VERTCOLORS`, or LayerBlend with `%WEAR_DIRT_AO_VERTEX`. A ship
+    /// part has no control maps, so this is the only shading its panels get;
+    /// the ship renders multiply it in at 0.6 (`sc_materials.strip_vertex_color`).
+    pub vertex_ao: bool,
     /// A thin film over the surface: LayerBlend compiled with `%IRIDESCENCE`.
     /// Its ramp, where it has one, is `textures["iridescence"]` (`TexSlot5`).
     /// None for anything else.
@@ -234,14 +246,20 @@ fn film_from(shader: &str, gen_mask: &str, public_params: &[(&str, &str)]) -> Op
 ///
 /// The palette's `decalTexture` is the stencil: its red, green and blue are
 /// separate masks (the VOLT logo's wordmark in green, its emblem in red), and
-/// the palette's `decalColorR/G/B` colour them -- unless the material sets
-/// `StencilTintOverride`, when its own `StencilDiffuseColor`, `...2` and
-/// `...3` do. With no palette the decal has nothing to draw.
+/// `StencilTintOverride` says what colors them: 0 and 2 the palette's
+/// `decalColorR/G/B`, 1 the palette's three tints (entries A, B and C). Read
+/// as a yes/no, 1 and 2 took the material's own `StencilDiffuseColor`s, and
+/// those are white on 406 of the 408 decals that set either: 89 decor and
+/// prop looks (dice, flair, building sets) drew their markings white. The
+/// ship pipeline reads a hull stencil's 1 the same way (`prep_decals.py`).
+/// With no palette the decal has nothing to draw.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Stencil {
-    /// Linear, for the stencil's red, green and blue.
+    /// Linear, for the stencil's red, green and blue: the material's own,
+    /// for a palette that names no colors of its own.
     pub colors: [[f32; 3]; 3],
-    pub override_tint: bool,
+    /// `StencilTintOverride`: 0, 1 or 2.
+    pub tint_override: u8,
     pub opacity: f32,
     /// 0-1.
     pub glossiness: f32,
@@ -251,6 +269,31 @@ pub struct Stencil {
 fn is_hologram(shader: &str, gen_mask: &str) -> bool {
     shader.to_ascii_lowercase().contains("hologram")
         || gen_mask.split('%').any(|t| t.eq_ignore_ascii_case("HOLOGRAPHIC_PROJECTION"))
+}
+
+/// Occlusion in the vertex color (`SubMaterial::vertex_ao`).
+fn has_vertex_ao(shader: &str, gen_mask: &str) -> bool {
+    let flags: Vec<&str> = gen_mask.split('%').collect();
+    let has = |f: &str| flags.iter().any(|t| t.eq_ignore_ascii_case(f));
+    has("WEAR_DIRT_AO_VERTEX") || (shader.eq_ignore_ascii_case("HardSurface") && has("VERTCOLORS"))
+}
+
+/// A carved decal (`SubMaterial::relief`).
+fn is_relief(shader: &str, gen_mask: &str) -> bool {
+    let flags: Vec<&str> = gen_mask.split('%').collect();
+    let has = |f: &str| flags.iter().any(|t| t.eq_ignore_ascii_case(f));
+    has("PARALLAX_OCCLUSION_MAPPING") && (shader.eq_ignore_ascii_case("MeshDecal") || has("DECAL"))
+}
+
+/// A relief's height map: `TexSlot4` on `MeshDecal` (`behr_pom_height`),
+/// `TexSlot8` on `Illum` (`universal_pom_2_a_displ`), or the name says so.
+fn is_height(shader: &str, slot: &str, path: &str) -> bool {
+    let stem = path.to_ascii_lowercase();
+    let stem = stem.rsplit(['/', '\\']).next().unwrap_or("").split('.').next().unwrap_or("");
+    stem.ends_with("_height")
+        || stem.ends_with("_displ")
+        || (shader.eq_ignore_ascii_case("MeshDecal") && slot.eq_ignore_ascii_case("TexSlot4"))
+        || (shader.eq_ignore_ascii_case("Illum") && slot.eq_ignore_ascii_case("TexSlot8"))
 }
 
 fn stencil_of(sub: &mtl::SubMaterial) -> Option<Stencil> {
@@ -278,7 +321,7 @@ fn stencil_from(gen_mask: &str, texture_paths: &[&str], public_params: &[(&str, 
     let scalar = |name: &str, fallback: f32| param(name).and_then(|v| v.first().copied()).unwrap_or(fallback);
     Some(Stencil {
         colors: [colour("StencilDiffuseColor"), colour("StencilDiffuseColor2"), colour("StencilDiffuseColor3")],
-        override_tint: scalar("StencilTintOverride", 0.0) > 0.5,
+        tint_override: scalar("StencilTintOverride", 0.0).round().clamp(0.0, 2.0) as u8,
         opacity: scalar("StencilOpacity", 1.0).clamp(0.0, 1.0),
         glossiness: scalar("StencilGlossiness", 0.5).clamp(0.0, 1.0),
     })
@@ -470,6 +513,7 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<SubMaterial>, String> {
             // trusts the file name first -- which is what CIG's own suffixes
             // (`_diff`, `_ddna`, `_spec`) are for.
             let layered = sub.shader.to_ascii_lowercase().contains("layerblend");
+            let relief = is_relief(&sub.shader, &sub.string_gen_mask);
             let skin = sub.shader.to_ascii_lowercase().contains("humanskin");
             let hair_shader = sub.shader.to_ascii_lowercase().contains("hair");
             let mut textures = HashMap::new();
@@ -495,6 +539,8 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<SubMaterial>, String> {
                     // A thin film's colour ramp (`%IRIDESCENCE`); nothing else
                     // on LayerBlend uses the slot.
                     Some("iridescence")
+                } else if relief && is_height(&sub.shader, &binding.slot, &binding.path) {
+                    Some("height")
                 } else if layered {
                     slot_role(&binding.slot).or_else(|| suffix_role(&binding.path))
                 } else {
@@ -570,6 +616,8 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<SubMaterial>, String> {
                     }
                 },
                 hologram: is_hologram(&sub.shader, &sub.string_gen_mask),
+                relief,
+                vertex_ao: has_vertex_ao(&sub.shader, &sub.string_gen_mask),
                 film: film_of(sub),
                 params: if layered {
                     numeric_params(&sub.public_params)
@@ -706,10 +754,42 @@ mod tests {
         let s = stencil_from(gen, &["$TintPaletteDecal", "textures/grime.tif"], &params).expect("a stencil");
         assert_eq!(s.colors[1], [0.5, 0.25, 0.0]);
         assert_eq!(s.colors[0], [1.0; 3]);
-        assert!(s.override_tint);
+        assert_eq!(s.tint_override, 1);
         // The same decal pointing at a texture of its own is not the palette's.
         assert!(stencil_from(gen, &["textures/decal.tif"], &params).is_none());
         assert!(stencil_from("%DIFFUSE_MAP", &["$TintPaletteDecal"], &params).is_none());
+    }
+
+    #[test]
+    fn a_stencil_override_is_three_ways_not_a_yes() {
+        let gen = "%STENCIL_MAP";
+        let mode = |v: &str| stencil_from(gen, &["$TintPaletteDecal"], &[("StencilTintOverride", v)]).unwrap().tint_override;
+        assert_eq!(mode("0"), 0);
+        assert_eq!(mode("1"), 1);
+        assert_eq!(mode("2"), 2);
+        assert_eq!(stencil_from(gen, &["$TintPaletteDecal"], &[]).unwrap().tint_override, 0);
+    }
+
+    #[test]
+    fn vertex_occlusion_is_what_the_flags_say() {
+        assert!(has_vertex_ao("HardSurface", "%VERTCOLORS%BLENDLAYER"));
+        assert!(has_vertex_ao("LayerBlend_V2", "%WEAR_DIRT_AO_VERTEX"));
+        // An armour piece's vertex color is its decal UV, not shade.
+        assert!(!has_vertex_ao("LayerBlend_V2", "%NORMAL_MAP%DECALS"));
+        assert!(!has_vertex_ao("Illum", "%VERTCOLORS"));
+    }
+
+    #[test]
+    fn a_carved_decal_is_a_relief_and_finds_its_height_map() {
+        // The P8-SC's POM sheet, and a ship bomb's Illum one.
+        assert!(is_relief("MeshDecal", "%DIFFUSE_MAP%PARALLAX_OCCLUSION_MAPPING"));
+        assert!(is_relief("Illum", "%NORMAL_MAP%DECAL%DECAL_OPACITY_MAP%PARALLAX_OCCLUSION_MAPPING"));
+        // A trim that is displaced but is a surface, not a decal.
+        assert!(!is_relief("Illum", "%NORMAL_MAP%SPECULAR_MAP%PARALLAX_OCCLUSION_MAPPING"));
+        assert!(!is_relief("MeshDecal", "%DIFFUSE_MAP"));
+        assert!(is_height("MeshDecal", "TexSlot4", "objects/behr/textures/behr_pom_height.tif"));
+        assert!(is_height("Illum", "TexSlot8", "prop/texture/pom/universal_pom_2_a_displ.tif"));
+        assert!(!is_height("MeshDecal", "TexSlot3", "objects/behr/textures/behr_pom_ddna.tif"));
     }
 
     #[test]

@@ -178,15 +178,23 @@ export interface MaterialPayload {
     /** `TexSlot9` where the shader is compiled with `%DECALS`, else null. */
     decalSheet?: string | null;
     /** A decal the colourway paints (`material::Stencil`): its own colours for
-     * the stencil's red, green and blue (linear), and whether they override the
-     * palette's. Null for anything else; absent on older cores. */
-    stencil?: { colors: Float32Array[]; override: boolean; opacity: number; glossiness: number } | null;
+     * the stencil's red, green and blue (linear), and its
+     * `StencilTintOverride` -- 1 paints it in the palette's three tints, 0 and
+     * 2 in the palette's decal colors. Null for anything else; absent on
+     * older cores. */
+    stencil?: { colors: Float32Array[]; tintOverride: number; opacity: number; glossiness: number } | null;
     /** A `HairPBR` surface's kind, from its shader flags: strand `cards`, the
      * scalp `cap` a hairline shades the skin with, or a short-hair `coat`. */
     hair?: 'cards' | 'cap' | 'coat';
     /** Light rather than a surface: `%HOLOGRAPHIC_PROJECTION` or the
      * `Hologram` shader. Absent on older cores. */
     hologram?: boolean;
+    /** A carved decal (`%PARALLAX_OCCLUSION_MAPPING`), its height map in
+     * `textures.height`. Absent for anything else, and on older cores. */
+    relief?: boolean;
+    /** Occlusion in the vertex color's blue (`%VERTCOLORS` on HardSurface,
+     * `%WEAR_DIRT_AO_VERTEX`). Absent for anything else, and on older cores. */
+    vertexAo?: boolean;
     /** A thin film (`material::Film`): LayerBlend compiled with
      * `%IRIDESCENCE`, its ramp in `textures.iridescence` where it has one.
      * Absent for anything else, and on older cores. */

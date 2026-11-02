@@ -32,6 +32,15 @@ export interface LayerArrays {
   blank: WebGLTexture | null;
 }
 
+/** The factor a vehicle paint layer's response is scaled by: one over its
+ * flat grey texture's linear mean, or 1. */
+export function neutralGreyGain(
+  texturePath: string | null | undefined,
+  mean: number,
+  metal: boolean,
+  paletteTint: number,
+): number;
+
 export function createProgram(gl: WebGL2RenderingContext): Program;
 
 export function createLayerArray(

@@ -33,7 +33,7 @@ pub use sets::{
     canonical_key, geometry_key, product_key, product_key_for, set_key, tag_value, tags_for,
 };
 pub use tint::{tint_for, PaletteIndex};
-pub use geometry::{materials_for, material_palette, select_wearables, walk_geometry, GeoNode};
+pub use geometry::{material_override, materials_for, material_palette, select_wearables, walk_geometry, GeoNode};
 
 /// Attach types that make a record wearable armour.
 ///

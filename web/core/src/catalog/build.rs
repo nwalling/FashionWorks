@@ -239,7 +239,11 @@ pub fn build_item(
     let all_nodes = walk_geometry(record);
     let worn = select_wearables(&all_nodes, skeleton);
     let geometry: Vec<String> = worn.iter().map(|n| n.path.clone()).collect();
-    let materials = materials_for(&all_nodes, skeleton);
+    // The entity's own material, where it names one, over its model's.
+    let materials = match super::material_override(record) {
+        Some(own) if !worn.is_empty() => vec![own],
+        _ => materials_for(&all_nodes, skeleton),
+    };
 
     let name_key = super::name_key(record);
     // An empty resolution counts as no name, not as a name that is empty.

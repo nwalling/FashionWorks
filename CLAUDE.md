@@ -2302,6 +2302,99 @@ undersuit 3.0; weapons and hard armour move by about 1, render noise.
 `tint.layer_gloss`, `layerblend.js` and the live `fwLayer` all apply it; the
 Python bake's cache key gains `:shinemap`.
 
+### The render review, held against the game (2026-11-02)
+
+The Hangarworks render review of 30 October listed what the ship and item
+renders had learned that FashionWorks had not. Built by the Hangarworks main
+session on branch `render-review`, and drawn through the Hangarworks item
+renderer on a 46-look bench (weapons, armour, clothing, helmets, ship parts,
+decor) against the same bench on `7dacc9f`, with the game's inventory icons
+where cstone has them. Armour, clothing and helmets moved by about 1 (mean, of
+255): the WebP noise floor.
+
+**A carved decal is light and shade, never color.** 330 FPS `MeshDecal`
+submaterials, and some 2,000 ship and 2,800 decor `Illum` ones with `%DECAL`,
+compile `%PARALLAX_OCCLUSION_MAPPING`. Their color image is a white mask with
+the carving baked in as shading (`behr_pom_diff`: screws, vents,
+"S/N: 1234567890mmx", AUTO/SEMI/BURST/SAFE, calibre stamps); the carving is in
+the height map (`TexSlot4` on `MeshDecal`, `TexSlot8` `_displ` on `Illum`).
+Drawn as color they laid white rings, dots and panels over the P8-SC, the
+Klaus & Werner pistols and every ship part with a POM sheet; the icons show
+none. `SubMaterial::relief` and `materials.ts` `reliefMaterial` draw the ship
+renders' emboss (`sc_materials.relief`, constant for constant): the height one
+step toward the texture's upper left against the height here, white where a
+bevel faces the light, black on a groove's far wall, plus depth below 0.5 and
+the color image's baked shading, all inside its alpha.
+
+**`StencilTintOverride` is three ways, not a yes.** 0 and 2 color a palette
+stencil with the palette's `decalColorR/G/B`, 1 with its three tints (entries
+A, B and C), as the ship renders read a hull stencil's. Read as a yes/no, 1
+and 2 took the material's own `StencilDiffuseColor`s, which are white on 406
+of the 408 decals that set either: the decor and prop looks drew their
+markings white. `Stencil::tint_override`; the kitbasher picks the colors.
+
+**A ship part's damage is not drawn.** A rigid mesh's groups on nodes named
+`dmg_*`, `*_dmg*` or `*damage*` are dropped (`gear::hide_damage`), as the ship
+renders hide them, unless that would drop every group -- then the damage is
+the item.
+
+**An item's own material beats its model's.** `SGeometryResourceParams
+.Material.Material.path` names the material that makes an edition its edition
+when it shares its family's mesh (`material_override`, both catalogues; the
+Hangarworks item step's `Record.mtl`). 61 armour and clothing items took no
+material before and now take their own (RRS and Grin backpack editions, Navy
+BDU belts), 4 gear items likewise, and gear also takes that node's palette.
+One Squadron 42 training trouser now wears the sweatpants material its record
+names. The Ambit Coverall names none and keeps its model's. `full_diff`:
+materials 100% both ways; the tint field's 53.6% is unchanged from `7dacc9f`
+(the port carries the stencil decal, the Python does not). Catalogue 4.
+
+**A vehicle paint's grey texture is neutral, not albedo.** The ship library's
+paint layers (`painted_panel_a_base`, `painted_tileable_a_base`) carry a flat
+mid-grey diffuse: `panel_a_base_diff` 0.408 linear (std 0.013),
+`ship_lf_panel_a_base_diff` 0.509. Multiplied in, a palette-painted ship part
+drew at 40-50% of its paint; the ship renders scale the paint back up
+(`sc_materials.neutral_grey`). `bake.js` `neutralGreyGain` divides such a
+texture by its mean -- dielectric, palette-tinted, under `textures/vehicles/`,
+mean 0.25-0.65 -- in the live and baked paths alike. FPS paint textures sit at
+0.79-0.94 and a weapon's grease (0.06) is meant dark, so armour and weapons do
+not move; nor does a part painted by a metal palette entry (most ship weapon
+palettes' entry A), which the metal rule already normalises. 97 of the 727
+ship looks paint such a layer with a dielectric entry. The Python bake bakes
+FPS armour only, never the vehicle library, so it is left alone and its cache
+key with it. **Mind the item renderer's light:** it draws ship parts with the
+environment x4 (`item-renders.mjs` `SHIP_ENV_SCALE`) so bare metals read
+silver, and that boost had been carrying the dim paint too. The F7A Mk I nose
+turret's #969696 grey went from 0.12 to its own 0.30 albedo and now reads near
+white under it: the ship-part light wants retuning against the icons when the
+item session next redraws ship parts.
+
+**A ship part's vertex color carries its occlusion.** HardSurface compiled
+with `%VERTCOLORS` and LayerBlend with `%WEAR_DIRT_AO_VERTEX` keep occlusion
+in the vertex color's blue, as the ship renders read it
+(`sc_materials.strip_vertex_color`, 0.6). The live surface multiplies it in
+(`VERTEX_AO`); a mesh with no colors under such a material gets white ones.
+Armour's vertex color is its decal UV and carries neither flag. Measured on
+the bench it is subtle -- the parts sampled average 63-98% blue, and no look
+moved by more than 4 of 255 for it alone -- shade in the crevices, not a
+change of tone.
+
+**Looked at and left as they are:**
+
+- *Dark glass.* The ships moved to near-opaque dark glass (alpha 0.95) because
+  canopies sit over a black hangar. The game's helmet icons show see-through
+  visors -- the Gys bubble clear, the CDS Legacy light helmet's smoked teal
+  with the face behind it -- so FPS glass keeps its own.
+- *Lighting.* The item renders already left `hangar` for the `studio` preset
+  with per-kind environment scales (weapons x1.5, ship parts x4, knives x1;
+  `ITEM_RENDER_VERSION` 2-3). AgX in place of Neutral would move every look in
+  the kitbasher for an unmeasured gain.
+- *`Illum` `%BLENDLAYER` second layers* and *vertex-alpha-tested decals.* The
+  ship renders apply each only to the ships a reference settled (the Ballista
+  and 300 series; the Pulse's sponsor logos, where vertex alpha x
+  `DecalAlphaMult` under `AlphaTest` explained most but not all of the hidden
+  logos). Neither is a rule to port blind.
+
 ### Still unverified
 
 - Only one set has been converted end to end. `scx convert` has not been run

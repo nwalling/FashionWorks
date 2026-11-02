@@ -1154,6 +1154,12 @@ impl Archive {
             if sub.hologram {
                 js_sys::Reflect::set(&entry, &"hologram".into(), &true.into())?;
             }
+            if sub.relief {
+                js_sys::Reflect::set(&entry, &"relief".into(), &true.into())?;
+            }
+            if sub.vertex_ao {
+                js_sys::Reflect::set(&entry, &"vertexAo".into(), &true.into())?;
+            }
             if let Some(film) = &sub.film {
                 let value = js_sys::Object::new();
                 js_sys::Reflect::set(&value, &"u".into(), &film.u.into())?;
@@ -1184,7 +1190,7 @@ impl Archive {
                         colors.push(&js_sys::Float32Array::from(&c[..]).into());
                     }
                     js_sys::Reflect::set(&value, &"colors".into(), &colors.into())?;
-                    js_sys::Reflect::set(&value, &"override".into(), &s.override_tint.into())?;
+                    js_sys::Reflect::set(&value, &"tintOverride".into(), &s.tint_override.into())?;
                     js_sys::Reflect::set(&value, &"opacity".into(), &s.opacity.into())?;
                     js_sys::Reflect::set(&value, &"glossiness".into(), &s.glossiness.into())?;
                     JsValue::from(value)
@@ -1431,6 +1437,7 @@ impl Archive {
             let prop = socket::Prop::parse(&cga);
             if let Some(prop) = &prop {
                 gear::place_nodes(&mut loaded, &prop.nodes);
+                gear::hide_damage(&mut loaded, &prop.nodes);
             }
             (loaded, prop)
         };
@@ -1675,6 +1682,7 @@ impl Archive {
         if !path.to_ascii_lowercase().ends_with(".skin") {
             if let Some(prop) = socket::Prop::parse(&head) {
                 gear::place_nodes(&mut loaded, &prop.nodes);
+                gear::hide_damage(&mut loaded, &prop.nodes);
             }
         }
         Ok(loaded)

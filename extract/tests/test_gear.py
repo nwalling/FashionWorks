@@ -71,6 +71,24 @@ def test_a_colourway_wears_the_child_its_geometry_tags_name() -> None:
     assert chosen.material is None
 
 
+def test_the_entity_material_beats_the_model_and_a_color_variant_beats_both() -> None:
+    def node(path: str, tags: str = "", material: str = "") -> dict:
+        return {"Tags": tags, "Geometry": {"Geometry": {"path": path}, "Material": {"path": material}}}
+
+    def item(tags: str) -> Record:
+        root = node("objects/monocular.cgf", material="objects/monocular.mtl")
+        root["SubGeometry"] = [node("objects/monocular.cgf", "Gold01", material="objects/monocular_gold.mtl")]
+        return record(f"monocular_{tags or 'base'}", [
+            {"_Type_": gear.WEAPON_COMPONENT, "geometryTags": tags},
+            {"_Type_": "SGeometryResourceParams", "Geometry": root,
+             "Material": {"Material": {"path": "objects/monocular_snowfall.mtl"},
+                          "Palette": {"RootRecord": None}}},
+        ])
+
+    assert gear.selected_node(item("")).material == "objects/monocular_snowfall.mtl"
+    assert gear.selected_node(item("Gold01")).material == "objects/monocular_gold.mtl"
+
+
 def test_default_children_are_what_ships_in_the_ports() -> None:
     rifle = record("behr_rifle_ballistic_01", [{
         "_Type_": gear.LOADOUT_COMPONENT,

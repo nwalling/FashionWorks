@@ -70,6 +70,26 @@ export function linearMean(rgba) {
   return sum / (rgba.length / 4) / 3;
 }
 
+/// How much to scale a layer's response by, so that a vehicle paint's flat
+/// grey texture reads as the neutral the game takes it for.
+///
+/// The ship library's paint layers (`painted_panel_a_base`,
+/// `painted_tileable_a_base`) carry a diffuse texture that is a flat mid grey:
+/// `panel_a_base_diff` at 0.408 linear (std 0.013), `ship_lf_panel_a_base_diff`
+/// at 0.509. Multiplied in as albedo, as an armour layer's is, every
+/// palette-painted ship part drew at 40-50% of the game's brightness; the ship
+/// renders hit the same thing on the Constellation's liveries and scale the
+/// paint back up (`sc_materials.neutral_grey`). Here the texture is divided by
+/// its own mean, which keeps its grain and leaves the color the palette's.
+/// Only a dielectric, palette-tinted layer whose texture lives in the vehicle
+/// library and averages 0.25-0.65: the FPS paint textures sit at 0.79-0.94
+/// and a weapon's grease (0.06) is meant dark, so armour and weapons do not
+/// move.
+export function neutralGreyGain(texturePath, mean, metal, paletteTint) {
+  if (metal || !(paletteTint > 0) || !texturePath || !(mean > 0.25 && mean < 0.65)) return 1;
+  return /(^|[\\/])textures[\\/]vehicles[\\/]/i.test(texturePath) ? 1 / mean : 1;
+}
+
 /// Whether a palette entry is a metal on its own terms: a black tint under a
 /// bright specular, which is how the game's spec-gloss paints say bare metal
 /// (the Behring default: tint (0,0,0), specular (143,143,143)). Such an entry

@@ -203,6 +203,49 @@ pub fn place_nodes(mesh: &mut LoadedMesh, nodes: &[nmc::NmcNode]) {
     }
 }
 
+/// Whether a node is a damaged state the game swaps in: `dmg_body`,
+/// `barrel_dmg`, `damage_left`. The ship renders hide the same names.
+pub fn is_damage_node(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    name.contains("damage") || name.contains("_dmg") || name.starts_with("dmg_")
+}
+
+/// Drop the groups a rigid mesh draws on its damage nodes.
+///
+/// A ship part carries its broken and burnt states as extra nodes beside the
+/// intact ones, and drawn together the part wears both: torn plates over
+/// whole ones. A mesh that is nothing *but* damage nodes is left alone -- that
+/// is what the item is.
+pub fn hide_damage(mesh: &mut LoadedMesh, nodes: &[nmc::NmcNode]) {
+    let damaged = |group: &crate::mesh::Submesh| {
+        nodes.get(usize::from(group.node)).is_some_and(|node| is_damage_node(&node.name))
+    };
+    if !mesh.submeshes.iter().any(damaged) || mesh.submeshes.iter().all(damaged) {
+        return;
+    }
+    mesh.submeshes.retain(|group| !damaged(group));
+    let mut min = [f32::MAX; 3];
+    let mut max = [f32::MIN; 3];
+    for group in &mesh.submeshes {
+        let start = group.first_index as usize;
+        let end = (start + group.index_count as usize).min(mesh.indices.len());
+        for &index in &mesh.indices[start..end] {
+            let v = index as usize * 3;
+            if v + 3 > mesh.positions.len() {
+                continue;
+            }
+            for i in 0..3 {
+                min[i] = min[i].min(mesh.positions[v + i]);
+                max[i] = max[i].max(mesh.positions[v + i]);
+            }
+        }
+    }
+    if min[0] <= max[0] {
+        mesh.min = min;
+        mesh.max = max;
+    }
+}
+
 /// Helpers by name, as world transforms in the item's own space.
 pub type Helpers = HashMap<String, Transform>;
 
@@ -249,6 +292,16 @@ pub fn mount(helpers: &Helpers, locator: &str) -> Option<Transform> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_damage_node_is_named_so() {
+        for name in ["dmg_body", "Barrel_DMG", "damage_left", "hull_damage_01", "wing_dmg_02"] {
+            assert!(super::is_damage_node(name), "{name}");
+        }
+        for name in ["body", "admgate", "barrel", "dmgless"] {
+            assert!(!super::is_damage_node(name), "{name}");
+        }
+    }
+
     use super::*;
 
     #[test]

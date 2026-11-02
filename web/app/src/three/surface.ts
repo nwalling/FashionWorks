@@ -52,6 +52,7 @@ import {
   createTarget,
   linearMean,
   linearMeanRgb,
+  neutralGreyGain,
   readTarget,
   render,
 } from '../../../gpu/bake.js';
@@ -478,8 +479,10 @@ async function composite(
       // A metal's response is its Specular, a dielectric's its Diffuse. 168 of
       // 317 dielectric layers set Diffuse to something other than white, so
       // ignoring it renders them at full brightness.
+      // A vehicle paint's grey texture is neutral, not albedo (`neutralGreyGain`).
       response: Array.from(metal ? (resolved?.specular ?? [0.04, 0.04, 0.04])
-        : (resolved?.diffuse ?? [1, 1, 1])),
+        : (resolved?.diffuse ?? [1, 1, 1])).map((c) => c * (texture && meanOf.has(texture)
+        ? neutralGreyGain(texture, meanOf.get(texture)!, metal, ref.paletteTint) : 1)),
       metal,
       diffuseSlice: texture ? 0 : -1,
       glossSlice: -1,

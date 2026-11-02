@@ -26,7 +26,9 @@ export const STORE_HANDLES = 'handles';
  */
 // 2: tint carries the palette's stencil decal.
 // 3: armour carries the parts its skin ports wear with it (`attached`).
-export const CATALOGUE_VERSION = 3;
+// 4: an item's own material (`SGeometryResourceParams.Material`) over its
+//    model's, and gear takes that node's palette too.
+export const CATALOGUE_VERSION = 4;
 
 export interface CachedCatalogue {
   /** The archive fingerprint this was built from. */

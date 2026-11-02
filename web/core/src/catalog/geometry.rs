@@ -240,6 +240,21 @@ pub fn materials_for(nodes: &[GeoNode], skeleton: &str) -> Vec<String> {
     out
 }
 
+/// The entity's own `.mtl`, from its material override, where it names one.
+///
+/// The same `Material` sibling [`material_palette`] reads carries the path of
+/// a material that replaces the model's: what makes a backpack edition its
+/// edition when it shares its family's `.cga`, a Cal-O-Meal bar its flavour
+/// and a flag its own. The Hangarworks item renders take it first (`items.py`
+/// `Record.mtl`); read from the geometry tree alone, the kitbasher drew those
+/// items in their model's base material. A record that names none -- the
+/// Ambit Coverall -- keeps its model's, never another item's.
+pub fn material_override(record: &Value) -> Option<String> {
+    let params = component(record, "SGeometryResourceParams")?;
+    let path = params.get("Material")?.get("Material")?.get("path")?.as_str()?;
+    (!path.is_empty()).then(|| normalize_asset_path(path))
+}
+
 /// The palette hung off the record's `Material` sibling rather than its tree.
 ///
 /// A rigid piece's colourway lives here: the CSP-68H Red Alert leaves every
@@ -321,6 +336,17 @@ mod tests {
             json!({ "path": "crate.mtl" });
         let nodes = walk_geometry(&rec);
         assert!(materials_for(&nodes, "male").is_empty());
+    }
+
+    #[test]
+    fn the_entity_material_is_read_only_where_it_names_one() {
+        let mut rec = record(vec![node("Objects/x/backpack_02.cga", Some("family.mtl"))]);
+        assert_eq!(material_override(&rec), None);
+        rec["_RecordValue_"]["Components"][0]["Material"] =
+            json!({ "Material": { "path": "" }, "Palette": { "RootRecord": null } });
+        assert_eq!(material_override(&rec), None, "an empty path is no material");
+        rec["_RecordValue_"]["Components"][0]["Material"]["Material"]["path"] = json!("Objects\\x\\edition.mtl");
+        assert_eq!(material_override(&rec).as_deref(), Some("Objects/x/edition.mtl"));
     }
 
     #[test]

@@ -16,6 +16,7 @@ import {
   type AmbientLight,
   Bone,
   Box3,
+  BufferAttribute,
   type BufferGeometry,
   Color,
   type DirectionalLight,
@@ -1758,8 +1759,11 @@ export class Kitbasher {
     const decal = item.tint?.decal;
     for (const sub of material.submaterials) {
       if (!sub.stencil || !decal?.texture) continue;
-      const colors = sub.stencil.override
-        ? sub.stencil.colors.map((c) => new Color().setRGB(c[0] ?? 1, c[1] ?? 1, c[2] ?? 1))
+      // `StencilTintOverride` 1 paints it in the palette's three tints (decor
+      // and props' branding); 0 and 2 in its decal colors.
+      const tints = item.tint?.layers ?? [];
+      const colors = sub.stencil.tintOverride === 1 && tints.length >= 3
+        ? tints.slice(0, 3).map((entry) => new Color(entry.color ?? '#ffffff'))
         : decal.colors.map((hex) => new Color(hex ?? '#ffffff'));
       if (colors.length < 3) continue;
       const payload = (await this.client.texture(decal.texture, plainSize)).texture;
@@ -2833,13 +2837,24 @@ function eightWhereNeeded(objects: Object3D[]): void {
 
 /** Give every mesh of a piece the decal UV attribute if any of its materials
  * samples a sheet: the materials are shared, and a mesh without the
- * attribute would read the sheet's top-left corner. */
+ * attribute would read the sheet's top-left corner. And a white vertex color
+ * to a mesh with none whose materials read occlusion from it, which would
+ * otherwise read black. */
 function decalsWhereNeeded(objects: Object3D[]): void {
   const meshes: Mesh[] = [];
   for (const root of objects) root.traverse((o) => { if ((o as Mesh).isMesh) meshes.push(o as Mesh); });
+  for (const mesh of meshes) {
+    if (([] as Material[]).concat(mesh.material).some((mat) => mat.userData.fwVertexAo)) padVertexColors(mesh.geometry);
+  }
   const sampled = meshes.some((m) => ([] as Material[]).concat(m.material).some((mat) => mat.userData.fwDecal));
   if (!sampled) return;
   for (const mesh of meshes) padDecalUvs(mesh.geometry);
+}
+
+function padVertexColors(geometry: BufferGeometry): void {
+  if (geometry.hasAttribute('fwColor')) return;
+  const colors = new Uint8Array(geometry.getAttribute('position').count * 4).fill(255);
+  geometry.setAttribute('fwColor', new BufferAttribute(colors, 4, true));
 }
 
 function drawnOnly<G extends { groups: Array<{ materialIndex?: number }> }>(geometry: G, materials: Material[]): G {

@@ -273,6 +273,11 @@ export function plainMaterial(
     return material;
   }
 
+  if (sub.relief) {
+    if (!diffuseMap) return new MeshBasicMaterial({ visible: false, name: sub.name });
+    return reliefMaterial(sub, diffuseMap, sub.textures.height ? textures.byPath.get(sub.textures.height) : undefined);
+  }
+
   if (shader.includes('decal')) {
     if (!diffuseMap) return new MeshBasicMaterial({ visible: false, name: sub.name });
     return new MeshStandardMaterial({
@@ -1246,6 +1251,62 @@ export function stencilMaterial(sub: Submaterial, stencil: Texture, colors: [Col
   return material;
 }
 
+/** Relief: an emboss of the height map. The height one step toward the light
+ * (the texture's upper left) against the height here: a bevel facing the light
+ * draws white, a groove's far wall black, as opaque as the step is steep, and
+ * flat areas stay clear, so panel lines come out a texel or two wide. Depth
+ * below the surface (0.5) darkens too, as does the shading baked into the
+ * color image. The ship renders' `sc_materials.relief`, constant for
+ * constant. */
+const RELIEF = { emboss: 40, step: 1.5, light: 0.8, shade: 1, surface: 0.5, depth: 16, depthMax: 0.85, baked: 0.35 };
+
+/** A carved decal (`Submaterial.relief`): the carving as light and shade over
+ * whatever it sits on, never as color. Its color image is a white mask
+ * with the carving baked in as shading, and drawn as color it laid white
+ * rings, panels and serial numbers over the P8-SC and every weapon like it. */
+function reliefMaterial(sub: Submaterial, mask: Texture, height: Texture | undefined): Material {
+  const material = new MeshStandardMaterial({
+    name: sub.name,
+    map: mask,
+    transparent: true,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2,
+    roughness: 1,
+    metalness: 0,
+  });
+  const uniforms = {
+    fwHeight: { value: height ?? mask },
+    fwHasHeight: { value: height ? 1 : 0 },
+  };
+  material.userData.fwRelief = uniforms;
+  const r = RELIEF;
+  const f = (v: number) => v.toFixed(4);
+  material.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, uniforms);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform sampler2D fwHeight;\nuniform float fwHasHeight;')
+      .replace('#include <map_fragment>', `
+        vec4 fwMask = texture2D( map, vMapUv );
+        float fwDark = ( 1.0 - dot( fwMask.rgb, vec3( 0.2126, 0.7152, 0.0722 ) ) ) * ${f(r.baked)};
+        float fwLight = 0.0;
+        if ( fwHasHeight > 0.5 ) {
+          // Up the image is -v here: the textures are uploaded unflipped.
+          vec2 fwStep = vec2( -1.0, -1.0 ) * ${f(r.step)} / vec2( textureSize( fwHeight, 0 ) );
+          float fwH0 = texture2D( fwHeight, vMapUv ).r;
+          float fwE = ( texture2D( fwHeight, vMapUv + fwStep ).r - fwH0 ) * ${f(r.emboss)};
+          fwLight = clamp( max( fwE, 0.0 ) * ${f(r.light)}, 0.0, 1.0 );
+          fwDark = max( max( -fwE, 0.0 ) * ${f(r.shade)}, fwDark );
+          fwDark = max( fwDark, min( max( ${f(r.surface)} - fwH0, 0.0 ) * ${f(r.depth)}, ${f(r.depthMax)} ) );
+        }
+        diffuseColor.rgb = vec3( fwLight > fwDark ? 1.0 : 0.0 );
+        diffuseColor.a *= clamp( max( fwLight, fwDark ), 0.0, 1.0 ) * fwMask.a;`);
+  };
+  material.customProgramCacheKey = () => 'fw-relief';
+  return material;
+}
+
 export function texturesWanted(sub: Submaterial): Array<{ path: string; srgb: boolean; alpha?: boolean }> {
   const out: Array<{ path: string; srgb: boolean; alpha?: boolean }> = [];
   // Skin's gloss lives in its normal map's smoothness stream, as armour
@@ -1258,6 +1319,8 @@ export function texturesWanted(sub: Submaterial): Array<{ path: string; srgb: bo
   if (!sub.tintable && sub.textures.base_color) out.push({ path: sub.textures.base_color, srgb: !hair });
   // An Illum metal's colour is in its specular map; see `withSpecGloss`.
   if (specGloss(sub)) out.push({ path: sub.textures.specular!, srgb: true });
+  // A relief's height map: data, not color.
+  if (sub.relief && sub.textures.height) out.push({ path: sub.textures.height, srgb: false });
   // A thin film's ramp is colour.
   if (sub.film && sub.textures.iridescence) out.push({ path: sub.textures.iridescence, srgb: true });
   // A strand's shade and its direction: data, not colour.

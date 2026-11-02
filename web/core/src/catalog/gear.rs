@@ -213,6 +213,9 @@ pub fn selected_node(record: &Value) -> Option<GeoNode> {
         return None;
     }
     let (mut path, mut material, mut palette) = read_node(root);
+    // The entity's own material over its model's; a tagged color variant's own
+    // still wins below.
+    material = super::material_override(record).or(material);
     let wanted: Vec<String> = geometry_tags(record).iter().map(|t| t.to_ascii_lowercase()).collect();
     if !wanted.is_empty() {
         if let Some(children) = root.get("SubGeometry").and_then(Value::as_array) {
@@ -274,7 +277,7 @@ pub fn build_gear_item(
         "manufacturer": { "code": code, "name": maker_name },
         "attach": { "type": attach_type, "subtype": subtype, "size": size, "tags": attach_tags },
         "anim_set": anim_set_for(slot, &attach_tags),
-        "tint": tint::tint_for(&nodes, palettes, &[], None),
+        "tint": tint::tint_for(&nodes, palettes, &[], super::material_palette(record).as_deref()),
         "geometry": geometry,
         "materials": materials,
         "default_children": default_children_for(record),

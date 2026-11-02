@@ -53,7 +53,7 @@ import {
   Vector2,
 } from 'three';
 
-import { DEFAULT_PALETTE, linearMean, paletteEntryIsMetal } from '../../../gpu/bake.js';
+import { DEFAULT_PALETTE, linearMean, neutralGreyGain, paletteEntryIsMetal } from '../../../gpu/bake.js';
 import type { ArchiveClient } from '../archive/client';
 import type { LayerRef, MaterialPayload, TexturePayload } from '../worker/archive.worker';
 import { FILM_DECLARE, filmFragment, filmValue, interferenceRamp } from './film';
@@ -110,6 +110,8 @@ const WEAR_FALLOFF = 0.5;
 /** Layer normals are authored for a surface otherwise flat; on top of the
  * armour's own `_ddn` they read a little strong, so they are eased back. */
 const DETAIL_NORMAL = 0.8;
+/** How far a surface's vertex occlusion darkens it: the ship renders' 0.6. */
+export const VERTEX_AO = 0.6;
 
 const srgbToLinear = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
 
@@ -435,8 +437,11 @@ function pack(sub: Submaterial, material: MaterialPayload, library: Library): Pa
     tint.splice(slot * 4, 4, ref.tintColor[0]!, ref.tintColor[1]!, ref.tintColor[2]!, ref.paletteTint);
     // A metal's response is its Specular, a dielectric's its Diffuse. A metal
     // not stated as one (TintMode 0) is 2: a thin film takes its tint's place.
+    // A vehicle paint's grey texture is neutral, not albedo (`neutralGreyGain`).
     const r = metal ? (resolved?.specular ?? [0.04, 0.04, 0.04]) : (resolved?.diffuse ?? [1, 1, 1]);
-    response.splice(slot * 4, 4, r[0]!, r[1]!, r[2]!, metal ? (resolved?.tintMode === 2 ? 1 : 2) : 0);
+    const mean = resolved?.diffuseTex ? library.mean.get(resolved.diffuseTex) : undefined;
+    const gain = mean === undefined ? 1 : neutralGreyGain(resolved?.diffuseTex, mean, metal, ref.paletteTint);
+    response.splice(slot * 4, 4, r[0]! * gain, r[1]! * gain, r[2]! * gain, metal ? (resolved?.tintMode === 2 ? 1 : 2) : 0);
     const colour = resolved?.diffuseTex ? library.diffuseSlice.get(resolved.diffuseTex) : undefined;
     const normal = resolved?.normalTex ? library.normalSlice.get(resolved.normalTex) : undefined;
     tex.splice(slot * 4, 4,
@@ -482,7 +487,9 @@ uniform float fwWearAmount;
 uniform vec3 fwUserTint;
 uniform float fwGlow;
 uniform float fwDetailNormal;
+uniform float fwVertexAo;
 uniform int fwDebug;
+varying float vFwVertexAo;
 
 vec3 fwColour;
 float fwRough;
@@ -603,7 +610,7 @@ void fwComposite(vec2 uv) {
 
 const COMPOSITE = /* glsl */ `
   fwComposite(vNormalMapUv);
-  diffuseColor.rgb = fwColour;
+  diffuseColor.rgb = fwColour * mix(1.0, vFwVertexAo, fwVertexAo);
 `;
 
 const NORMAL = /* glsl */ `
@@ -702,14 +709,20 @@ export async function liveSurfaces(
       // A fraction of the surface's own colour, emitted: the bake path's gain and ceiling.
       fwGlow: { value: Math.min(GLOW_CAP, sub.glow * GLOW_GAIN) },
       fwDetailNormal: { value: DETAIL_NORMAL },
+      // Occlusion from the vertex color, where the flags say it is there.
+      fwVertexAo: { value: sub.vertexAo ? VERTEX_AO : 0 },
       fwDebug: { value: 0 },
       // A film (film.ts): its own ramp, or interference by thickness.
       fwFilmRamp: { value: (ramp ?? (sub.film ? interferenceRamp() : out.normalMap)) as Texture },
       fwFilm: { value: filmValue(sub.film, Boolean(ramp)) },
     };
     out.userData.fwLive = uniforms;
+    if (sub.vertexAo) out.userData.fwVertexAo = true;
     out.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, uniforms);
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nattribute vec4 fwColor;\nvarying float vFwVertexAo;')
+        .replace('#include <uv_vertex>', '#include <uv_vertex>\n  vFwVertexAo = fwColor.b;');
       shader.fragmentShader = shader.fragmentShader
         .replace('#include <common>', `#include <common>\n${FILM_DECLARE}\n${DECLARE}`)
         .replace('#include <map_fragment>', `#include <map_fragment>\n${COMPOSITE}`)
