@@ -375,10 +375,19 @@ pub fn load_wide(skin: &[u8], skinm: &[u8], width: usize) -> Result<LoadedMesh, 
     }
 
     // A decal is where the colour leaves its neutral value; a mesh with none
-    // carries no second set, so nothing downstream pays for it.
+    // carries no second set, so nothing downstream pays for it. A vertex
+    // whose colour is not a coordinate on the sheet at all samples the
+    // neutral corner: whole islands carry another scheme (red near 32, 96 or
+    // 255, green's low nibble 6), and decoded anyway they landed off the
+    // sheet, where its repeat wrapping laid stripes over them -- 16 % of the
+    // Clash Arms, whose red sits at 17-30.
     if let Some(colors) = &built.colors {
-        if colors.iter().any(|c| c[0] >= DECAL_R_MIN) {
-            out.decal_uvs = colors.iter().take(vertices).flat_map(|c| decal_uv(*c)).collect();
+        let colors = &colors[..colors.len().min(vertices)];
+        if colors.iter().any(|c| c[0] >= DECAL_R_MIN && is_decal_coordinate(*c)) {
+            out.decal_uvs = colors
+                .iter()
+                .flat_map(|c| if is_decal_coordinate(*c) { decal_uv(*c) } else { DECAL_NEUTRAL })
+                .collect();
         }
         if colors.len() >= vertices {
             out.colors = colors.iter().take(vertices).flatten().copied().collect();
@@ -394,6 +403,17 @@ pub fn load_wide(skin: &[u8], skinm: &[u8], width: usize) -> Result<LoadedMesh, 
 
 /// The smallest red a decal vertex carries. Everything else sits at 160-161.
 pub const DECAL_R_MIN: u8 = 162;
+
+/// Where a vertex whose colour is not a decal coordinate samples the sheet:
+/// its empty bottom-left corner, as `decal.ts` pads a mesh with no decal UVs.
+pub const DECAL_NEUTRAL: [f32; 2] = [0.0, 0.99];
+
+/// Whether a vertex colour is a coordinate on the decal sheet at all: red
+/// 160-223 and green's low nibble 2-5, the ranges that decode inside the
+/// sheet. Neutral geometry -- red 160, green `16i + 5` -- is one.
+pub fn is_decal_coordinate(color: [u8; 4]) -> bool {
+    (160..=223).contains(&color[0]) && (2..=5).contains(&(color[1] & 15))
+}
 
 /// Where a vertex samples the decal sheet: the second UV set, packed into the
 /// vertex colour at ten bits a coordinate.
@@ -525,6 +545,19 @@ mod tests {
     fn neutral_colour_decodes_to_the_empty_corner() {
         let [u, v] = decal_uv([160, 16 * 9 + 5, 245, 250]);
         assert!(u < 0.02 && v > 0.95, "({u}, {v})");
+    }
+
+    #[test]
+    fn only_colours_inside_the_sheet_are_decal_coordinates() {
+        // Neutral, and a Sunchaser patch corner.
+        assert!(is_decal_coordinate([160, 16 * 9 + 5, 245, 250]));
+        assert!(is_decal_coordinate([211, 162, 239, 255]));
+        // The Clash Arms' colour: red 17-30, green 165-229, blue 253.
+        assert!(!is_decal_coordinate([17, 165, 253, 255]));
+        assert!(!is_decal_coordinate([24, 229, 253, 254]));
+        // Past the sheet's right edge, and past its foot.
+        assert!(!is_decal_coordinate([224, 5, 0, 255]));
+        assert!(!is_decal_coordinate([200, 16 + 6, 0, 255]));
     }
 
     #[test]

@@ -1350,6 +1350,11 @@ cannot hold under one global mapping, and nothing in the record distinguishes
 them. That contradiction is the open question, and it is not answerable from
 coverage measurements alone.
 
+**Closed by the icons (2026-11-02).** Drawn on main against the game's own
+icon, the arms carry gold on the pauldron frame and the forearm, as the icon
+shows, at 19% of the piece. Some later fix moved them; which one was not
+traced. See "The catalogue held against the game's icons" below.
+
 ### A record name is not unique across types
 
 165 items resolved a palette reference to the wrong record. The VGL Warden
@@ -1466,6 +1471,10 @@ not adjudicate: indices 1, 2 and 3 cover 31%, 30% and 38% of palette-tinted
 area, which is too even to call. Do not "fix" this by guessing; it needs a
 piece whose in-game appearance is unambiguous and whose blend mask is
 understood.
+
+**Closed by the icons (2026-11-02):** the shell draws red on main, as the
+game's icon shows, with the mapping as it stands, 1 -> A. Some later fix
+moved it; which one was not traced.
 
 ### Attachment points and sockets
 
@@ -2472,6 +2481,59 @@ default** in the web engine (`state.wear`), which every path reads -- live
 surfaces, baked atlases, swatches, carried gear, and the Hangarworks item
 renders through it -- and in the local viewer, whose pipeline already bakes
 both surfaces. It stays a toggle.
+
+### The catalogue held against the game's icons (2026-11-02)
+
+Every armour, clothing and weapon look -- 4,731 -- was put beside the game's
+own inventory icon (`cstone.space/uifimages/<guid>.png`; 3,152 have one, and
+1,838 of those are plain inventory shots rather than scenes) and scored on
+colour. What the comparison can and cannot say matters as much as what it
+found.
+
+**An icon is a reference only through its light.** The inventory lights its
+mannequin white but fills from teal: a shadow reads teal at saturation 0.45
+whatever the paint, a purple suit reads blue, a dark red cloth reads mauve,
+and the K7 and Razorback trousers' twenty colourways each average within a
+few units of (56, 60, 62) -- muted, not wrong (zoomed, each shows its colour).
+Half the armour icons, and most weapon ones, are in-game screenshots under
+scene light, and a dim one passes a dark-border test. So the scores rank
+candidates and the eye decides; balance only the icon, on its brightest
+pixels, and count hue only above a third of each image's brightness. The
+scorer reads Hangarworks' item data and stays outside this repository; the
+method is what to keep.
+
+**A vertex colour is not always a decal coordinate -- fixed.** `decal_uv`
+decoded every vertex of a mesh once any looked like one, and 684 character
+meshes (LOD0; 990 looks) carry whole islands in another scheme -- red near
+17-35, 96, 159 or 255, green's low nibble 6. Decoded, those land off the
+sheet, and its repeat wrapping laid sheet content over them: hazard stripes
+over the Clash Arms, white paint over the jaw and side ring of every Tailwind
+flight helmet. A vertex is now decoded only inside the encoding (red 160-223,
+green's low nibble 2-5, `mesh::is_decal_coordinate`) and samples the neutral
+corner otherwise. Confirmed on references it was not fitted to: the Tailwind
+Adrenaline, Big Bite, Blackbolt and Thunderstruck now wear the dark blue,
+black, yellow and orange jaws their icons show, and the Clash Arms the brown
+leather. In a random 100 of the 990, 2 change plainly; the Sunchaser and
+Shogun decals do not move. A mesh-wide "mostly another scheme" cutoff was
+tried and refuted: 282 LOD0 meshes are under half in the encoding and still
+place real decals (10,690 vertices on the female CDS medium arms).
+`examples/decal_coding.rs` surveys the archive.
+
+**Found and left:**
+
+- *Thin films with no ramp.* The Arclight "Glimmer" draws gold, its icon
+  violet-blue; `film.ts` `FILM_THICKNESS` was fitted to the wiki's 2021-23
+  shots, older than the asset. Three looks (Glimmer, Mirage, Venom).
+- *Tinted bare metal on weapons* (the Yubarev "Igniter" and "Venom" bodies)
+  reads near black under the studio probe where the icons show orange and
+  green panels. A light question, not a data one: the Yubarev's own body is
+  palette entry A at (42, 42, 42), dark in both.
+- *Helmet glass.* The Odyssey II Racing domes read dark teal in the item
+  renders because nothing is inside them; the icon has the mannequin's head
+  behind the same teal glass. Presentation, not material.
+- *The Deo Shirt (Modified)* is periwinkle by its data (entry C of the Nine
+  Tails palette on `cotton_01`); its only reference is a screenshot under
+  orange light, which cannot overrule that.
 
 ### Still unverified
 
