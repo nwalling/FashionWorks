@@ -2298,7 +2298,9 @@ and `Illum` path (`materials.ts` `glossRoughness`) already read it as
 Drawn through the Hangarworks item renderer on a 22-look bench: the Ambit
 Coverall moves by 10.6 (mean, of 255) and loses its wet sheen (99th
 percentile 215 -> 153), the Argus helmet 7.0, MacFlex legs and the Scaleweave
-undersuit 3.0; weapons and hard armour move by about 1, render noise.
+undersuit 3.0. Weapons are unchanged; hard armour moves by under 1, and that
+is a real change, not noise: the Clark Defense chest moves on 0.4% of its
+channels (mean 0.65 of 255), its yellow paint's highlights a little softer.
 `tint.layer_gloss`, `layerblend.js` and the live `fwLayer` all apply it; the
 Python bake's cache key gains `:shinemap`.
 
