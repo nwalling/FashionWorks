@@ -403,6 +403,11 @@ and this one agree; a customizer swatch would still settle it.
 
 **What is still short of the game.** Hair against skin: p50 0.28 against
 0.45, p10 0.07 against 0.26 -- the base is still dark and the game's broad
-grey sheen across the crown is only partly there. With the strand colour,
+grey sheen across the crown is only partly there. The moustache reads less
+grey than before the build, though no thinner: coverage of the region was
+36% before, 33% after steps 1-2, 32% with the depth offset and 34% resolved,
+its top edge now single strands. The dye on the tips is unchanged; the old
+grey was likely partly the environment's sheen on cards lit along the
+strand. Not isolated. With the strand colour,
 frame, occlusion and resolve now taken from the data, what is left is the
 light: the capture's strong top light and teal cast are not any preset.
