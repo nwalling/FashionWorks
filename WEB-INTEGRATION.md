@@ -247,11 +247,15 @@ portrait it is a download and nothing else, and needs no host code.
 
 ### 3.3 Kits
 
-Since 0.15.0 a **Kits** button beside Save image opens a panel that saves the
-outfit on screen to the visitor's profile as a kit, and puts on any of their
-kits. **Hangarworks keeps the kits**; FashionWorks stores nothing and calls no
-API of its own. It asks through `kits`, and without the prop there is no
-button.
+Since 0.15.0 a **Loadouts** button beside Save image opens a panel that saves
+the outfit on screen to the visitor's profile as a kit, and puts on any of
+their kits. **Hangarworks keeps the kits**; FashionWorks stores nothing and
+calls no API of its own. It asks through `kits`, and without the prop there is
+no button.
+
+**A visitor reads "loadout"**, as every Hangarworks client says it ("My
+Loadouts"); the button, the panel and its messages use the word. The props and
+types keep "kit": they are code.
 
 ```ts
 export interface KitsHost {
@@ -272,8 +276,9 @@ export interface HostKit {
   /** The KitOutfit FashionWorks handed to save(), stored as given; absent on
    *  a kit made on the profile page. */
   readonly outfit?: KitOutfit | null;
-  /** The items the kit's blueprints make: each blueprint's
-   *  `productEntityClass`. Ids FashionWorks has not got are passed over. */
+  /** The items the kit holds: each blueprint's `productEntityClass`, and
+   *  the record GUID of any other item in it. Ids FashionWorks has not got
+   *  are passed over. */
   readonly itemIds: readonly string[];
 }
 
@@ -301,7 +306,9 @@ host:
    outfit, and are simply not requestable). The panel says only "Saved".
 
 `kits` lists every kit the visitor has, each with `itemIds` filled from its
-blueprints' `productEntityClass`. A kit saved from here is worn from its
+blueprints' `productEntityClass` and the record GUIDs of any item-database
+items it also holds -- the same DataCore GUIDs either way. A kit saved from
+here is worn from its
 `outfit`; one made on the profile page from its `itemIds`, one piece per slot,
 in armour or clothing, plus its weapons in their default holsters. The panel
 shows how many pieces each can put on, and disables a kit that has none here.

@@ -47,8 +47,10 @@ export interface HostKit {
   /** The outfit FashionWorks saved with it, as it was handed over; absent on
    * a kit made elsewhere. */
   readonly outfit?: KitOutfit | null;
-  /** The ids of the items its blueprints make. Ids this catalogue does not
-   * have (a ship component, a medpen) are passed over. */
+  /** The ids of the items it holds: its blueprints' `productEntityClass`,
+   * and the record GUIDs of any other item in it -- DataCore GUIDs either
+   * way. Ids this catalogue does not have (a ship component, a medpen) are
+   * passed over. */
   readonly itemIds: readonly string[];
 }
 

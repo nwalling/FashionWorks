@@ -587,14 +587,14 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
       className="fw-kit-portrait-button"
       aria-expanded={kitsOpen}
       disabled={!state}
-      title="Save this outfit to your profile as a kit, or put on one of your kits"
+      title="Save this outfit to your profile as a loadout, or put on one of your loadouts"
       onClick={() => {
         setMoreOpen(false);
         setPortraitOpen(false);
         setKitsOpen((open) => !open);
       }}
     >
-      Kits
+      Loadouts
     </button>
   );
 
