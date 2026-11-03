@@ -2247,12 +2247,44 @@ strand's colour in linear light, and on a wide melanin spread that mean is the
 white strands': Ilucide's hair (spread 1.0 from his `.chf`, a fifth of it at
 melanin 0) turned flat silver as the camera stood back. The strand id map is
 mipped, so the filtered id's colour is what a distant pixel takes, as in game.
-**The beard thins far off for a different reason, not yet fixed:** the
-cut-out's coverage-preserving mips assume point sampling, and bilinear,
-trilinear and anisotropic filtering pull the sparse passing texels under the
-test, so at a full figure's distance the cut-out draws nothing and the beard
-is the blended pass alone. Handing the cut-out over to the density through
-alpha to coverage (4 samples) was tried and drew it thinner; refuted.
+**The beard thinned far off from the depth offset and the cut-out**
+(2026-11-03). Held against the same view drawn at eight times the pixels and
+averaged down -- what the strands up close look like from further away --
+Ilucide's beard went from 37% of its region covered at 0.5 m to 20% at 6 m,
+where the reference holds 41% to 36%, and its moustache broke into clumps.
+
+* *The depth offset read an average as a strand's edge.* `PixelDepthOffset`
+  pushes a fragment back by how transparent it is, 9.2 mm on the beard. Hair
+  masks load at 1024 (`plainSize`), where a strand is under half a texel, so
+  outside an extreme close-up a pixel's opacity is several strands' average,
+  partial everywhere, and the beard went back behind the skin it lies on, the
+  moustache first. It now fades between half a texel a pixel and two
+  (`HAIR_DEPTH_FADE`): at half a metre 42% covered, the reference's figure,
+  where it was 37%.
+* *A cut-out keeps the densest texels.* One threshold over a mip whose
+  coverage is right in total keeps the roots, where the cards bunch, and drops
+  the tips and the moustache: the jaw drew solid black, and each pixel it kept
+  was one strand's highlight, a glitter. Between 2 and 5 texels a pixel
+  (`HAIR_HANDOVER`) the cut-out dissolves and the blended pass carries the
+  strands at their density as the mips carry it, `OpacityMipScale` and no
+  more: the 1.5 lift that fills between the cut-out's strands made the far
+  beard a fifth too covered.
+
+Measured: 42/40/37/33% covered at 0.5/1.2/3/6 m against 40/38/35/34%, and
+the region's spread of log luminance 1.14-1.17 against 1.02-1.08, from
+1.41-1.65. Head hair and brows take the same passes and do not visibly move;
+the portrait's moustache is a band again. The far beard reads about 15%
+darker than the eight-times render, because magnified each strand takes its
+own melanin and the lighter ones lift the red, where unresolved the filtered
+id names the middle strand -- as the game's mipped id map would. Left.
+
+The diagnosis this replaces -- filtering pulls the coverage mips' passing
+texels under the test, so far off the cut-out draws nothing -- holds only
+further out; before that the cut-out drew, on the wrong texels, and the
+blended pass left to carry the rest was the one the depth offset hid. And
+alpha to coverage cannot carry the far beard: one alpha gives every layer the
+same samples, so overlapping cards do not stack, which is why handing over
+through it drew thinner.
 
 ### Items held against the game's own icons (2026-10-30)
 

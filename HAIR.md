@@ -416,3 +416,17 @@ grey was likely partly the environment's sheen on cards lit along the
 strand. Not isolated. With the strand colour,
 frame, occlusion and resolve now taken from the data, what is left is the
 light: the capture's strong top light and teal cast are not any preset.
+
+**Far off (2026-11-03).** Step 3's depth offset and the cut-out were what
+thinned the beard with distance, measured against the same view drawn at
+eight times the pixels and averaged down. The masks load at 1024, where a
+strand is under half a texel, so the offset read several strands' average as
+a strand's edge and pushed the beard behind the skin; it now fades between
+half a texel a pixel and two, which leaves it in nothing but an extreme
+close-up -- the portrait spans 1.3 and keeps about half. And past a strand or
+two a pixel the cut-out kept only the densest texels, the roots; from 2 to 5
+texels it dissolves into the blended pass, at the density `OpacityMipScale`
+gives and no more. Coverage of the region holds 42-33% from 0.5 to 6 m
+against the reference's 40-34%, where it fell to 20%. `CLAUDE.md` has the
+figures. Loading the hair masks at 2048 or 4096 would let a close-up resolve
+strands again, and the offset with them; not done, for memory.

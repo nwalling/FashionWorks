@@ -909,9 +909,29 @@ function hairCards(
           '#include <alphamap_fragment>',
           // Red is the cut-out's mask, coverage kept down the mips; green the
           // density as authored, which is what a blend wants.
-          `#ifdef USE_ALPHAMAP
+          //
+          // **How far a pixel is from resolving its strands**: the mask's
+          // texels it spans. The masks load at 1024, where a strand is under
+          // half a texel wide and the next is a texel or two away, so past a
+          // texel a pixel holds several strands, and both what the cut-out
+          // tests and what the depth offset reads are their average, not a
+          // strand. fwFar is how far the cut-out has handed over to the
+          // blended pass (HAIR_HANDOVER), fwFlat how far the depth offset
+          // has faded (HAIR_DEPTH_FADE), both 0 to 1.
+          `float fwFar = 0.0;
+          float fwFlat = 0.0;
+          #ifdef USE_ALPHAMAP
+            vec2 fwMaskTexels = vec2(textureSize(alphaMap, 0));
+            float fwSpan = max(length(dFdx(vAlphaMapUv) * fwMaskTexels), length(dFdy(vAlphaMapUv) * fwMaskTexels));
+            fwFar = smoothstep(${HAIR_HANDOVER[0].toFixed(2)}, ${HAIR_HANDOVER[1].toFixed(2)}, fwSpan);
+            fwFlat = smoothstep(${HAIR_DEPTH_FADE[0].toFixed(2)}, ${HAIR_DEPTH_FADE[1].toFixed(2)}, fwSpan);
             #ifdef FW_HAIR_FRINGE
-              diffuseColor.a *= saturate(texture2D(alphaMap, vAlphaMapUv).g * ${HAIR_FRINGE_GAIN.toFixed(3)});
+              // Its lift fills between the cut-out's strands. Far off, where
+              // it is the whole of them, the density is as the mips carry it,
+              // OpacityMipScale and no more: with the lift kept, the beard's
+              // region at 1.2-6 m came out a fifth more covered than a render
+              // at eight times the pixels, averaged down; without, within 3%.
+              diffuseColor.a *= saturate(texture2D(alphaMap, vAlphaMapUv).g * mix(${HAIR_FRINGE_GAIN.toFixed(3)}, 1.0, fwFar));
             #elif defined( FW_HAIR_HASH )
               // Hashed, the opacity is the density as the blended pass takes
               // it: one hashed layer stands for the cut-out and the blend
@@ -942,6 +962,20 @@ function hairCards(
           '#include <alphatest_fragment>',
           `#ifdef FW_HAIR_HASH
             if ( diffuseColor.a <= fwHashThreshold( vAlphaMapUv ) ) discard;
+          #elif defined( FW_HAIR_HANDOVER ) && defined( ALPHA_TO_COVERAGE )
+            // **Far off, the blended pass carries the strands alone.** A
+            // test against one threshold keeps the mask's densest texels --
+            // the roots, where the cards bunch -- and drops the sparse ones,
+            // the tips and the moustache: past a strand or two a pixel, the
+            // cut-out drew Ilucide's jaw solid black and his moustache in
+            // clumps, and each pixel it kept was one strand's highlight, a
+            // glitter of single bright pixels. A blend takes every texel at
+            // its own density and layers stack as coverage does. So the
+            // cut-out dissolves over its samples as the strands go
+            // unresolved, and the blended pass, depth-tested against it,
+            // fills what it leaves.
+            diffuseColor.a = smoothstep( alphaTest, alphaTest + fwidth( diffuseColor.a ), diffuseColor.a ) * ( 1.0 - fwFar );
+            if ( diffuseColor.a == 0.0 ) discard;
           #else
             #include <alphatest_fragment>
           #endif`,
@@ -963,10 +997,20 @@ function hairCards(
           // front, so the meeting is a scatter of strands instead of a cut
           // line -- the hairline, the jaw under a beard. Written here, before
           // the lighting reads anything, from the opacity the mask gave.
+          //
+          // **Only where a pixel resolves a strand** (fwFlat). Otherwise
+          // the opacity is several strands' average, partial everywhere, and
+          // every fragment went back: up to 9 mm on the beard, whose cards
+          // lie closer than that to the skin, which hid them. The beard
+          // thinned with distance and its moustache, lying on the lip, went
+          // first, in clumps. Faded, the beard's region at half a metre is
+          // 42% covered where it was 37%, against 42% in a render at eight
+          // times the pixels, averaged down; the portrait's moustache is a
+          // band again.
           #ifdef FW_HAIR_DEPTH_OFFSET
           {
             vec3 viewAt = -vViewPosition;
-            float back = uPixelDepthOffset * (1.0 - saturate(diffuseColor.a));
+            float back = uPixelDepthOffset * (1.0 - saturate(diffuseColor.a)) * (1.0 - fwFlat);
             vec4 clip = projectionMatrix * vec4(viewAt * (1.0 + back / max(length(viewAt), 1e-4)), 1.0);
             gl_FragDepth = 0.5 * clip.z / clip.w + 0.5;
           }
@@ -1256,6 +1300,17 @@ const HAIR_FRINGE_CLIP = 0.05;
 const HAIR_FRINGE_GAIN = 1.5;
 /** The cut-out, where a blended pass carries what it leaves. */
 const HAIR_CUT = 0.5;
+/** Texels of the strand mask a pixel spans where the cut-out hands over to
+ * the blended pass: it starts at the first and is gone by the second. A
+ * face-on beard card spans 2.3 at half a metre in a 1024 view, 5.4 at 1.2 m,
+ * 27 at 6 m. Chosen against renders at eight times the pixels, averaged
+ * down: kept to 1.2 m, the cut-out glittered. */
+const HAIR_HANDOVER = [2, 5] as const;
+/** Texels of the strand mask a pixel spans where the depth offset fades:
+ * full where a pixel is narrower than a strand (under half a texel at
+ * 1024), gone by two, where it spans the gap to the next strand as well.
+ * A portrait spans about 1.3. */
+const HAIR_DEPTH_FADE = [0.5, 2] as const;
 /** Root to tip: the shade at each end, and how much of the tip fades from
  * where. Chosen. */
 const HAIR_ROOT_SHADE = 0.7;
@@ -1637,6 +1692,9 @@ export function setHairVolume(
   sheen.uHairEnvSheen.value = style?.beard ? BEARD_ENV_SHEEN : HAIR_ENV_SHEEN;
   const want: Record<string, boolean> = {
     FW_HAIR_KK: Boolean(style?.passes),
+    // The cut-out hands over to the blended pass far off; one without a
+    // blended pass (the lashes) keeps its cut-out.
+    FW_HAIR_HANDOVER: Boolean(style?.passes) && !fringe,
     FW_HAIR_OCCLUSION: Boolean(style?.occluded),
     FW_HAIR_ROOT: Boolean(style?.rootToTip),
   };
