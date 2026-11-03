@@ -7,7 +7,7 @@
  * puts back exactly what was on; a kit made on the profile page carries only
  * its blueprints, and the host passes the item each one makes
  * (`productEntityClass`, the DataCore id this catalogue uses), so its armour
- * and weapons can still be worn. The contract is WEB-INTEGRATION.md §2.4.
+ * and weapons can still be worn. The contract is WEB-INTEGRATION.md §3.3.
  */
 
 import {

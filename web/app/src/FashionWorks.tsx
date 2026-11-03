@@ -53,7 +53,7 @@ export interface FashionWorksProps {
   portraitBackgrounds?: readonly PortraitBackground[];
   /** Where the visitor's kits are kept: their profile's list, a way to save
    * one, and a way to start a profile. Without it there is no kits button.
-   * WEB-INTEGRATION.md §2.4. */
+   * WEB-INTEGRATION.md §3.3. */
   kits?: KitsHost;
 }
 

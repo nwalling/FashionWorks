@@ -1060,6 +1060,26 @@ A port using `unwrap_or` gets `Some("")` and keeps it: three helmets came out
 with a blank name and no flag. **An empty resolution is not a resolution**, and
 it is a distinction the original never had to make.
 
+### A name key can carry `,P`, and a placeholder is not a name (2026-11-03)
+
+**13,380 of 90,437 `global.ini` keys end in `,P`**, a suffix the record never
+names: `AttachDef.Localization.Name` says `@item_Name_doom_combat_medium_arms_01_01_01`
+and the file says `item_Name_doom_combat_medium_arms_01_01_01,P=Clash Arms`.
+Read as written, 56 items (armour, clothing and gear) found no name and showed
+their class name -- the Clash Arms, Defiance Arms Ultimatum, the Strata
+Levski Edition, the Shiv and the Novian crossbows among them. Stripping the
+suffix never collides with a key that exists, so both loaders do it
+(`localization.rs`, `localization.py`). Casing still differs too
+(`GRIN_utility` in the file, `grin_utility` in the record), which the
+existing case-insensitive fallback already covered.
+
+**A localiser's placeholder resolves as absent**: 58 item names read
+`PH - <class name>` or `PLACEHOLDER - <class name>`. With both rules, 60 of
+4,941 records have no game name at all -- Squadron 42's navy and marine
+uniforms, the character customizer's own clothes, promotional prints -- and
+the kitbasher hides them (`unnamed` joined `HIDDEN_FLAGS`): a visitor sees
+only the game's own names. `CATALOGUE_VERSION` 5.
+
 ### The bake truncates, and is 0.57 sRGB units dark
 
 `compose_layered` writes `(linear_to_srgb(rgb) * 255).astype(np.uint8)`, and
@@ -2566,8 +2586,9 @@ than its icon.
   transform. Fine for backpacks; other rigid pieces may need the CDF.
 - 12 of 41 complete sets are converted. Running the full catalog through
   conversion has not been attempted, and Collada intermediates are large.
-- 93 items with unresolved localization keys, and some placeholder junk in the
-  catalog (`<= PLACEHOLDER =>`, `Body`) that should be flagged and hidden.
+- Placeholder junk in the catalog (`<= PLACEHOLDER =>`, `Body`) is flagged
+  and hidden; the unresolved names are explained under "A name key can carry
+  `,P`" above.
 - 331 items have no manufacturer code.
 
 ## Layout

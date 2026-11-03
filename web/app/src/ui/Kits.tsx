@@ -1,7 +1,7 @@
 /** The kits panel: save the outfit on screen to the visitor's profile as a
  * kit, or put on one of their kits. The host keeps the kits (`KitsHost`);
  * this asks it to save and reads what it lists. Without a profile it
- * suggests starting one. `kits.ts` and WEB-INTEGRATION.md §2.4.
+ * suggests starting one. `kits.ts` and WEB-INTEGRATION.md §3.3.
  */
 
 import { useEffect, useId, useRef, useState } from 'react';

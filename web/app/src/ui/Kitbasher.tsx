@@ -71,7 +71,7 @@ export interface KitbasherProps {
    * one when absent. WEB-INTEGRATION.md. */
   readonly portraitBackgrounds?: readonly PortraitBackground[];
   /** Where the visitor's kits are kept. Without it there is no kits button.
-   * WEB-INTEGRATION.md §2.4. */
+   * WEB-INTEGRATION.md §3.3. */
   readonly kits?: KitsHost;
 }
 

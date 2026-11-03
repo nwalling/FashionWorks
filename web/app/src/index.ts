@@ -98,6 +98,6 @@ export { DEFAULT_BACKGROUND, portraitBackgrounds } from './three/portrait';
 export type { PortraitBackground } from './three/portrait';
 
 // Kits: the outfit saved to the visitor's profile and worn again. The host
-// keeps them; WEB-INTEGRATION.md §2.4.
+// keeps them; WEB-INTEGRATION.md §3.3.
 export { kitOutfit, kitPieces, kitReach, suggestKitName } from './kits';
 export type { HostKit, KitOutfit, KitPiece, KitsHost } from './kits';

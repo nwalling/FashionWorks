@@ -155,6 +155,9 @@ export interface FashionWorksProps {
 
   /** The backgrounds the Portrait panel offers. Since 0.11.0; see §3.1. */
   portraitBackgrounds?: readonly PortraitBackground[];
+
+  /** Where the visitor's kits are kept. Since 0.15.0; see §3.3. */
+  kits?: KitsHost;
 }
 
 export interface PortraitBackground {
@@ -231,6 +234,88 @@ While the panel is open the viewport shows what the picture will: the
 character creator's lighting and, with the helmet off, the bare head. Closing
 puts the visitor's lighting and outfit back. Neither is written to the
 loadout.
+
+### 3.2 The square picture
+
+Since 0.15.0 a **Save image** button beside Portrait (in More on a narrow
+screen) downloads a **1080 px square PNG** of the whole outfit: the figure
+from the angle the visitor is looking at it, reframed to fill the square, with
+its floor shadow, over the backdrop they chose in More -- cropped to the square
+from its middle, as the viewport crops it -- or the page colour (`--sc-dark`)
+where there is none. Named after the character (`ilucide-outfit.png`). Like the
+portrait it is a download and nothing else, and needs no host code.
+
+### 3.3 Kits
+
+Since 0.15.0 a **Kits** button beside Save image opens a panel that saves the
+outfit on screen to the visitor's profile as a kit, and puts on any of their
+kits. **Hangarworks keeps the kits**; FashionWorks stores nothing and calls no
+API of its own. It asks through `kits`, and without the prop there is no
+button.
+
+```ts
+export interface KitsHost {
+  /** Whether the visitor has a profile to keep kits in. */
+  readonly signedIn: boolean;
+  /** The visitor's kits, in the order to list them. */
+  readonly kits: readonly HostKit[];
+  /** Save the outfit as a new kit called `name`. Reject with an Error whose
+   *  message the panel shows. */
+  save(name: string, outfit: KitOutfit): Promise<void>;
+  /** Take the visitor to start a profile, or sign in. */
+  startProfile(): void;
+}
+
+export interface HostKit {
+  readonly id: string;
+  readonly name: string;
+  /** The KitOutfit FashionWorks handed to save(), stored as given; absent on
+   *  a kit made on the profile page. */
+  readonly outfit?: KitOutfit | null;
+  /** The items the kit's blueprints make: each blueprint's
+   *  `productEntityClass`. Ids FashionWorks has not got are passed over. */
+  readonly itemIds: readonly string[];
+}
+
+export interface KitOutfit {
+  readonly version: 1;
+  readonly loadout: string;          // opaque, as §3's loadout string
+  readonly items: readonly { id: string; slot: string; name: string }[];
+  readonly body: 'male' | 'female';
+}
+```
+
+**What a kit is.** Hangarworks' kits are blueprints the org can be asked to
+craft (`Kit.items: { blueprintId, quantity }[]`). An outfit from here is
+items, and only some have a blueprint -- about 900 armour pieces and 190
+weapons in 4.10, no clothing. So `save` receives the whole outfit, and the
+host:
+
+1. maps each `outfit.items[].id` to the blueprint whose `productEntityClass`
+   is that id (the same DataCore GUID; no name matching), quantity 1, and
+   stores those as the kit's `items`, so the kit can be requested as before;
+2. stores `outfit` itself, unchanged, alongside -- a few hundred bytes of ids
+   and names -- so wearing the kit again puts back the exact look, uncraftable
+   pieces, colours and holsters included;
+3. may tell the visitor which pieces have no blueprint (they stay in the
+   outfit, and are simply not requestable). The panel says only "Saved".
+
+`kits` lists every kit the visitor has, each with `itemIds` filled from its
+blueprints' `productEntityClass`. A kit saved from here is worn from its
+`outfit`; one made on the profile page from its `itemIds`, one piece per slot,
+in armour or clothing, plus its weapons in their default holsters. The panel
+shows how many pieces each can put on, and disables a kit that has none here.
+
+**Without a profile** (`signedIn: false`) the panel offers nothing to save or
+wear and suggests starting one, with a button that calls `startProfile`. What
+that does -- a sign-up page, a sign-in dialog -- is the host's.
+
+`kits` is read on every render, so pass a fresh object when the list changes
+(after a save, or when the profile's kits load); the panel follows it.
+
+The route stays usable without an account, and nothing here sends game data to
+the host: an outfit is item ids and the names the game gives them, the same
+ids the share link already carries in the fragment.
 
 ---
 
