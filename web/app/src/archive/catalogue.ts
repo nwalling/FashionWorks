@@ -92,6 +92,15 @@ export function outfitOf(slot: string): Outfit {
   return isClothingSlot(slot) ? 'clothing' : 'armour';
 }
 
+/** What a visitor reads for an outfit, or for the gear mode beside them.
+ *
+ * The site writes American English, as the game's own names do ("Medium
+ * Armor"). The catalogue's `outfit` value stays `armour`: it is data, read by
+ * saved catalogues and share links, not text. */
+export function outfitLabel(outfit: Outfit | 'gear'): string {
+  return outfit === 'armour' ? 'armor' : outfit;
+}
+
 /** What a character carries rather than wears. */
 export const GEAR_SLOTS = [
   'primary', 'sidearm', 'knife', 'gadget', 'grenade', 'magazine', 'consumable',

@@ -342,7 +342,7 @@ function context(): Shared {
   canvas.width = 1;
   canvas.height = 1;
   const gl = canvas.getContext('webgl2', { antialias: false, preserveDrawingBuffer: false });
-  if (!gl) throw new Error('WebGL2 is required to composite armour surfaces');
+  if (!gl) throw new Error('WebGL2 is required to composite armor surfaces');
   const blank = gl.createTexture()!;
   gl.bindTexture(gl.TEXTURE_2D, blank);
   gl.texImage2D(

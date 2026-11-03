@@ -49,6 +49,7 @@ import {
   sharedName,
   CLOTHING_SLOTS,
   SLOTS,
+  outfitLabel,
   type Catalogue,
   type CatalogueItem,
   type Outfit,
@@ -2173,7 +2174,7 @@ export class Kitbasher {
     this.frameLoadout();
     const kept = this.aside.size;
     this.publish({
-      status: `${outfit} on` + (kept ? ` · ${kept} piece${kept === 1 ? '' : 's'} of ${outfit === 'armour' ? 'clothing' : 'armour'} kept aside` : ''),
+      status: `${outfitLabel(outfit)} on` + (kept ? ` · ${kept} piece${kept === 1 ? '' : 's'} of ${outfit === 'armour' ? 'clothing' : 'armor'} kept aside` : ''),
     });
   }
 

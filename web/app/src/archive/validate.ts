@@ -139,7 +139,7 @@ export function validateArchive(archive: IndexedArchive): ValidationResult {
     return {
       code: 'unsupported-build',
       title: 'This game build is not supported yet',
-      detail: `The archive is valid but holds only ${armour} armour files, where this build `
+      detail: `The archive is valid but holds only ${armour} armor files, where this build `
         + `should have thousands. The layout has probably changed. Please report it in `
         + `${DISCORD} with your game version.`,
       reportable: true,

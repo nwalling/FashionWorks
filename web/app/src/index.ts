@@ -49,6 +49,7 @@ export {
   isGearSlot,
   isClothingSlot,
   outfitOf,
+  outfitLabel,
   HIDDEN_FLAGS,
 } from './archive/catalogue';
 export type {

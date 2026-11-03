@@ -21,6 +21,7 @@ import {
   lineOf,
   lineRepresentative,
   lineTitle,
+  outfitLabel,
   swatchColour,
   CLOTHING_SLOTS,
   SLOTS,
@@ -385,10 +386,10 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
           disabled={busy && name !== 'gear' && mode !== name}
           title={name === 'gear'
             ? 'Weapons and equipment, into the holsters of what is worn'
-            : `Wear ${name}; the ${name === 'armour' ? 'clothing' : 'armour'} is kept aside`}
+            : `Wear ${outfitLabel(name)}; the ${name === 'armour' ? 'clothing' : 'armor'} is kept aside`}
           onClick={() => choose(name)}
         >
-          {name}
+          {outfitLabel(name)}
         </button>
       ))}
     </div>
@@ -453,7 +454,7 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
   const asideCount = state?.aside.size ?? 0;
   const asideNote = mode !== 'gear' && asideCount > 0 && (
     <p className="fw-kit-aside">
-      {mode === 'armour' ? 'clothing' : 'armour'} kept aside: {asideCount} {asideCount === 1 ? 'piece' : 'pieces'}
+      {mode === 'armour' ? 'clothing' : 'armor'} kept aside: {asideCount} {asideCount === 1 ? 'piece' : 'pieces'}
     </p>
   );
 
@@ -612,7 +613,7 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
             type="search"
             placeholder={mode === 'gear'
               ? `Search ${searchable.toLocaleString()} pieces of gear…`
-              : `Search ${searchable.toLocaleString()} pieces of ${mode}…`}
+              : `Search ${searchable.toLocaleString()} pieces of ${outfitLabel(mode)}…`}
             autoComplete="off"
             value={search}
             onChange={(event) => setSearch(event.target.value)}

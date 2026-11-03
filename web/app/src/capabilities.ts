@@ -174,17 +174,17 @@ export async function checkCapabilities(): Promise<CapabilityReport> {
         + 'so it needs the same computer. Open this page on your desktop.',
     },
     {
-      name: 'Saved catalogue',
+      name: 'Saved catalog',
       ok: hasIndexedDb(),
       severity: 'warning',
-      remedy: 'Your catalogue cannot be saved, so it will be rebuilt on every visit. '
+      remedy: 'Your catalog cannot be saved, so it will be rebuilt on every visit. '
         + 'A private window usually causes this.',
     },
     {
       name: 'Cached pieces',
       ok: hasOpfs(),
       severity: 'warning',
-      remedy: 'Armour pieces cannot be cached, so each one is re-read from your game files.',
+      remedy: 'Armor pieces cannot be cached, so each one is re-read from your game files.',
     },
     {
       name: 'Quick reconnect',

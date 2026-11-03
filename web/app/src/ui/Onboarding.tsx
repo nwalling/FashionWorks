@@ -58,7 +58,7 @@ export function Onboarding({ state, onEvent, onFile }: OnboardingProps) {
 function Landing({ onEvent }: { onEvent: (event: Event) => void }) {
   return (
     <div>
-      <h2>Kitbash Star Citizen FPS armour</h2>
+      <h2>Kitbash Star Citizen FPS armor</h2>
       {/* The single most important sentence on the page. Visitors will assume
           choosing a 158 GB file means uploading it, and will not choose it. */}
       <p className="fw-promise">
@@ -273,7 +273,7 @@ function Ready({ state }: { state: State }) {
       <h2>Ready</h2>
       <p>
         {state.itemCount?.toLocaleString()} pieces
-        {state.fromCache ? ' loaded from your saved catalogue' : ' catalogued'}.
+        {state.fromCache ? ' loaded from your saved catalog' : ' cataloged'}.
       </p>
     </div>
   );

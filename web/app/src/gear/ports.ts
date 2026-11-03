@@ -140,7 +140,7 @@ export function itemNoun(item: CatalogueItem): string {
 /** Why a port will not take an item, or `null` when it will. */
 export function refusal(port: Port, item: CatalogueItem): string | null {
   const attach = item.attach;
-  if (!attach) return `${portLabel(port)} holds gear, not armour`;
+  if (!attach) return `${portLabel(port)} holds gear, not armor`;
   const type = attach.type.toLowerCase();
   const sub = attach.subtype.toLowerCase();
   const typed = port.types.some((t) => t.type.toLowerCase() === type
