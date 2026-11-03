@@ -62,8 +62,16 @@ export interface ViewerHandle {
    *
    * All in one task, size and camera put back before it returns, so the
    * screen never shows any of it. The ambient fill is the preset's own, not
-   * the theme's adjustment, so a picture does not depend on the page colour. */
-  capture(view: CaptureView, size: number, greys: readonly number[], resolve?: CaptureResolve): CaptureResult;
+   * the theme's adjustment, so a picture does not depend on the page colour.
+   * With `ground`, the floor's shadow is kept, as a backdrop shows it: the
+   * shadow alone, which the solve turns into dark coverage under the feet. */
+  capture(
+    view: CaptureView,
+    size: number,
+    greys: readonly number[],
+    resolve?: CaptureResolve,
+    options?: { readonly ground?: boolean },
+  ): CaptureResult;
 }
 
 
@@ -394,7 +402,13 @@ export function Viewer({ tokens, onScene, className }: ViewerProps): JSX.Element
       }
     };
 
-    const capture = (view: CaptureView, size: number, greys: readonly number[], resolve?: CaptureResolve): CaptureResult => {
+    const capture = (
+      view: CaptureView,
+      size: number,
+      greys: readonly number[],
+      resolve?: CaptureResolve,
+      options?: { readonly ground?: boolean },
+    ): CaptureResult => {
       const saved = {
         position: camera.position.clone(),
         quaternion: camera.quaternion.clone(),
@@ -467,7 +481,8 @@ export function Viewer({ tokens, onScene, className }: ViewerProps): JSX.Element
         camera.far = 50;
         camera.updateProjectionMatrix();
         grid.visible = false;
-        ground.mesh.visible = false;
+        ground.mesh.visible = Boolean(options?.ground);
+        if (options?.ground) ground.setLook(groundLook(readTokens(), false, true));
         renderer.setClearAlpha(1);
         fill.intensity = (fill.userData.base as number | undefined) ?? fill.intensity;
         for (const grey of greys) {
@@ -492,6 +507,10 @@ export function Viewer({ tokens, onScene, className }: ViewerProps): JSX.Element
         renderer.setClearAlpha(saved.clearAlpha);
         grid.visible = saved.grid;
         ground.mesh.visible = saved.ground;
+        if (options?.ground) {
+          const tokens = readTokens();
+          ground.setLook(groundLook(tokens, isLight(tokens), state.backdrop, Boolean(chain)));
+        }
         fill.intensity = saved.fill;
         renderer.setPixelRatio(pixelRatioFor(quality));
         // Size, aspect and the chain's targets back to the element's, and the

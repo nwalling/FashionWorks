@@ -1,5 +1,6 @@
 /** A portrait of the figure: the player's own face and outfit, head and
- * shoulders, on a gradient, as a square JPEG to download. Used as an avatar
+ * shoulders, on a gradient, as a square JPEG to download -- and the square
+ * picture of the whole outfit over the visitor's backdrop (`composeSnapshot`). Used as an avatar
  * on Hangarworks, where it is cropped to a circle and drawn as small as
  * 34 px in member lists -- which is why the head is large in the frame.
  *
@@ -179,9 +180,9 @@ function hexBytes(hex: string): [number, number, number] {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
-/** The figure over its background, at `size`. The cut-out is scaled down in
- * halves, which keeps edges sharper than one large step. */
-export function composePortrait(cutout: OffscreenCanvas, background: PortraitBackground, size = PORTRAIT_SIZE): OffscreenCanvas {
+/** A cut-out scaled down in halves toward `size`, which keeps edges sharper
+ * than one large step. */
+function halved(cutout: OffscreenCanvas, size: number): OffscreenCanvas {
   let source: OffscreenCanvas = cutout;
   while (source.width / 2 >= size) {
     const half = new OffscreenCanvas(source.width / 2, source.height / 2);
@@ -190,12 +191,74 @@ export function composePortrait(cutout: OffscreenCanvas, background: PortraitBac
     g.drawImage(source, 0, 0, half.width, half.height);
     source = half;
   }
+  return source;
+}
+
+/** The figure over its background, at `size`. */
+export function composePortrait(cutout: OffscreenCanvas, background: PortraitBackground, size = PORTRAIT_SIZE): OffscreenCanvas {
   const out = new OffscreenCanvas(size, size);
   const context = out.getContext('2d')!;
   paintBackground(context, background, size);
   context.imageSmoothingQuality = 'high';
-  context.drawImage(source, 0, 0, size, size);
+  context.drawImage(halved(cutout, size), 0, 0, size, size);
   return out;
+}
+
+/** The square picture to share: the whole figure as the camera sees it, over
+ * the backdrop the visitor chose. 1080 is the square the social sites show
+ * without scaling. */
+export const SNAPSHOT_SIZE = 1080;
+
+/** The whole figure, from where the camera is looking: the visitor's own
+ * angle, its distance reframed so the bounds fill a square with a margin. */
+export function snapshotView(
+  centre: readonly [number, number, number],
+  size: readonly [number, number, number],
+  direction: readonly [number, number, number],
+  fov: number,
+  margin = 1.12,
+): CaptureView {
+  const half = Math.tan((fov * Math.PI) / 360);
+  // Seen from any angle round the vertical, the figure is no wider than the
+  // diagonal of its footprint.
+  const footprint = Math.hypot(size[0], size[2]);
+  const distance = (Math.max(size[1], footprint) / 2 / half) * margin;
+  const length = Math.hypot(...direction) || 1;
+  const position: [number, number, number] = [
+    centre[0] + (direction[0] / length) * distance,
+    centre[1] + (direction[1] / length) * distance,
+    centre[2] + (direction[2] / length) * distance,
+  ];
+  return { position, target: [centre[0], centre[1], centre[2]], fov };
+}
+
+/** The figure over the visitor's backdrop, cropped to cover the square from
+ * its middle as the viewport crops it, or over `colour` where there is none. */
+export function composeSnapshot(
+  cutout: OffscreenCanvas,
+  backdrop: CanvasImageSource & { width: number; height: number } | null,
+  colour: string,
+  size = SNAPSHOT_SIZE,
+): OffscreenCanvas {
+  const out = new OffscreenCanvas(size, size);
+  const context = out.getContext('2d')!;
+  context.fillStyle = colour;
+  context.fillRect(0, 0, size, size);
+  context.imageSmoothingQuality = 'high';
+  if (backdrop && backdrop.width > 0 && backdrop.height > 0) {
+    const scale = Math.max(size / backdrop.width, size / backdrop.height);
+    const w = backdrop.width * scale;
+    const h = backdrop.height * scale;
+    context.drawImage(backdrop, (size - w) / 2, (size - h) / 2, w, h);
+  }
+  context.drawImage(halved(cutout, size), 0, 0, size, size);
+  return out;
+}
+
+/** The square picture as a PNG: a photograph of the backdrop and a figure's
+ * edges both keep better than in a JPEG, and nothing caps its size. */
+export function encodeSnapshot(canvas: OffscreenCanvas): Promise<Blob> {
+  return canvas.convertToBlob({ type: 'image/png' });
 }
 
 /** The picture as a JPEG no larger than `maxBytes`, stepping the quality down
@@ -210,8 +273,17 @@ export async function encodePortrait(canvas: OffscreenCanvas, maxBytes = PORTRAI
   return blob!;
 }
 
+function fileBase(character: string | null): string {
+  const base = (character ?? '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^\w-]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase();
+  return base || 'fashionworks';
+}
+
 /** A file name for the download: the character's, else the tool's. */
 export function portraitFileName(character: string | null): string {
-  const base = (character ?? '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^\w-]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase();
-  return `${base || 'fashionworks'}-portrait.jpg`;
+  return `${fileBase(character)}-portrait.jpg`;
+}
+
+/** The square picture's file name, after the portrait's. */
+export function snapshotFileName(character: string | null): string {
+  return `${fileBase(character)}-outfit.png`;
 }

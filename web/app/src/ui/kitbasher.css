@@ -456,12 +456,22 @@
   border-radius: 10px;
 }
 
+/* Bounded by the canvas on both sides, wrapping onto a second line rather
+ * than growing left over the column when the canvas is narrow. The gaps it
+ * leaves still pass the pointer through to orbit. */
 .fw-kit-scene {
   top: 12px;
   right: 12px;
+  left: 12px;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
   gap: 8px;
+}
+
+.fw-kit-scene button {
+  white-space: nowrap;
 }
 
 .fw-kit-scene > .fw-kit-group {
@@ -554,10 +564,10 @@
  * one at the member list's 34 px. */
 .fw-kit-portrait {
   position: absolute;
-  top: 56px;
+  top: calc(var(--fw-kit-scene-bottom, 44px) + 12px);
   right: 12px;
   width: 280px;
-  max-height: calc(100% - 140px);
+  max-height: calc(100% - var(--fw-kit-scene-bottom, 44px) - 96px);
   overflow-y: auto;
   box-sizing: border-box;
   display: flex;
@@ -659,4 +669,42 @@
   background: var(--sc-accent);
   color: var(--sc-accent-ink, var(--sc-dark));
   border-color: transparent;
+}
+
+/* The kits panel, in the portrait's corner and its frame. */
+.fw-kit-kits-save {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fw-kit-kits-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--sc-border);
+}
+
+.fw-kit-kits-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.fw-kit-kits-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fw-kit-kits-meta {
+  color: var(--sc-subtle);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.fw-kit-kits [data-error] {
+  color: var(--sc-accent-text, var(--sc-text));
 }

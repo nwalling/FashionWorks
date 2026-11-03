@@ -32,9 +32,18 @@ import {
 import { HAND, portLabel, portServes, portShort } from '../gear/ports';
 import { Kitbasher as Engine, type KitbasherState } from '../three/kitbasher';
 import { HEAD_SLOTS } from '../three/outfit';
-import { portraitBackgrounds, type PortraitBackground } from '../three/portrait';
+import {
+  composeSnapshot,
+  encodeSnapshot,
+  portraitBackgrounds,
+  snapshotFileName,
+  type PortraitBackground,
+} from '../three/portrait';
 import type { Tokens } from '../theme';
 import { QUALITIES, Viewer, type Quality, type ViewerHandle } from './Viewer';
+import type { KitsHost } from '../kits';
+import { downloadBlob } from './download';
+import { Kits } from './Kits';
 import { Portrait } from './Portrait';
 import './kitbasher.css';
 
@@ -61,6 +70,9 @@ export interface KitbasherProps {
   /** The backgrounds the portrait offers, the first preselected. A neutral
    * one when absent. WEB-INTEGRATION.md. */
   readonly portraitBackgrounds?: readonly PortraitBackground[];
+  /** Where the visitor's kits are kept. Without it there is no kits button.
+   * WEB-INTEGRATION.md §2.4. */
+  readonly kits?: KitsHost;
 }
 
 /** A row's title: the words its whole line shares -- "Defiance Core". */
@@ -80,6 +92,9 @@ const SLOT_LABELS: Partial<Record<string, string>> = {
 };
 
 const slotLabel = (slot: string) => SLOT_LABELS[slot] ?? slot;
+
+/** Armour's weight classes, lightest first, as the DataCore spells them. */
+const WEIGHTS = ['light', 'medium', 'heavy', 'superheavy'] as const;
 
 /** The lighting preset a visitor last chose. Per-visitor convenience only:
  * storage can be blocked or empty, and the default is always fine. */
@@ -161,6 +176,9 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
   // The holster the next gear pick goes into; null picks the first free one.
   const [target, setTarget] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  // Armour by weight class. Kept across slots, and ignored in a slot that
+  // has nothing of that weight (hats, eyewear, most clothing have none).
+  const [weight, setWeight] = useState<string | null>(null);
   const [backdrop, setBackdrop] = useState<string | null>(null);
   const viewer = useRef<ViewerHandle | null>(null);
   const [quality, setQuality] = useState<Quality | null>(null);
@@ -175,12 +193,54 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
   // under it closes it.
   const [portraitOpen, setPortraitOpen] = useState(false);
   const closePortrait = useCallback(() => setPortraitOpen(false), []);
+  // The kits panel shares the portrait's corner: one open at a time.
+  const [kitsOpen, setKitsOpen] = useState(false);
+  const closeKits = useCallback(() => setKitsOpen(false), []);
+
+  // The square picture: the whole outfit from where the camera is looking,
+  // over the backdrop the visitor chose -- cropped to the square as the
+  // viewport crops it -- or the page colour where there is none.
+  const [snapping, setSnapping] = useState(false);
+  const saveImage = async () => {
+    const kit = engine.current;
+    if (!kit || snapping) return;
+    setSnapping(true);
+    try {
+      const cutout = await kit.snapshot();
+      if (!cutout) return;
+      let picture: ImageBitmap | null = null;
+      if (backdrop) {
+        try {
+          picture = await createImageBitmap(await (await fetch(backdrop)).blob());
+        } catch {
+          picture = null;
+        }
+      }
+      const canvas = composeSnapshot(cutout, picture, tokens['--sc-dark']);
+      picture?.close();
+      downloadBlob(await encodeSnapshot(canvas), snapshotFileName(kit.current.character));
+    } finally {
+      setSnapping(false);
+    }
+  };
   useEffect(() => {
     if (narrow) setPortraitOpen(false);
   }, [narrow]);
   const moreId = useId();
   const moreButton = useRef<HTMLButtonElement>(null);
   const sceneRef = useRef<HTMLDivElement>(null);
+  // The toolbar wraps onto a second line on a narrow canvas; the panels in
+  // its corner start below however tall it is (`--fw-kit-scene-bottom`).
+  useEffect(() => {
+    const scene = sceneRef.current;
+    const canvas = scene?.parentElement;
+    if (!scene || !canvas || typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(() => {
+      canvas.style.setProperty('--fw-kit-scene-bottom', `${scene.offsetTop + scene.offsetHeight}px`);
+    });
+    observer.observe(scene);
+    return () => observer.disconnect();
+  }, []);
   useEffect(() => {
     if (!moreOpen) return undefined;
     const onKey = (event: KeyboardEvent) => {
@@ -281,6 +341,14 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
   // One row per product line: its colours and editions are chosen by name
   // above, rather than listed as twenty near-identical rows -- and a
   // (Modified) build is one of them too, whatever mesh it happens to use.
+  // The weight classes this slot's armour comes in, lightest first.
+  const weights = useMemo((): string[] => {
+    if (mode !== 'armour' || isGearSlot(slot)) return [];
+    const here = new Set((catalogue.bySlot.get(slot as WearSlot) ?? []).map((item) => item.weight_class));
+    return WEIGHTS.filter((w) => here.has(w));
+  }, [catalogue, mode, slot]);
+  const weighed = weight && weights.includes(weight) ? weight : null;
+
   const pool = useMemo(() => {
     const needle = search.trim().toLowerCase();
     const seen = new Set<string>();
@@ -294,10 +362,11 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
       if (needle && !line.some((member) => (
         `${member.name ?? ''} ${member.class_name}`.toLowerCase().includes(needle)
       ))) continue;
-      rows.push(lineRepresentative(line));
+      if (weighed && !line.some((member) => member.weight_class === weighed)) continue;
+      rows.push(lineRepresentative(line.filter((member) => !weighed || member.weight_class === weighed)));
     }
     return rows.sort((a, b) => titleOfLine(catalogue, a).localeCompare(titleOfLine(catalogue, b)));
-  }, [catalogue, slot, search]);
+  }, [catalogue, slot, search, weighed]);
 
   const familyOf = (item: CatalogueItem) => lineOf(catalogue, item);
   const titleOf = (item: CatalogueItem) => titleOfLine(catalogue, item);
@@ -497,8 +566,46 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
   );
 
   // Set once, if ever: behind More.
+  const imageButton = (
+    <button
+      type="button"
+      className="fw-kit-portrait-button"
+      disabled={!state || snapping}
+      title="A square picture of the whole outfit, as the camera sees it, over your backdrop: to download and share"
+      onClick={() => {
+        setMoreOpen(false);
+        void saveImage();
+      }}
+    >
+      {snapping ? 'saving…' : 'Save image'}
+    </button>
+  );
+
+  const kitsButton = props.kits && (
+    <button
+      type="button"
+      className="fw-kit-portrait-button"
+      aria-expanded={kitsOpen}
+      disabled={!state}
+      title="Save this outfit to your profile as a kit, or put on one of your kits"
+      onClick={() => {
+        setMoreOpen(false);
+        setPortraitOpen(false);
+        setKitsOpen((open) => !open);
+      }}
+    >
+      Kits
+    </button>
+  );
+
   const moreRows = (
     <>
+      {narrow && (
+        <div className="fw-kit-more-row">
+          {imageButton}
+          {kitsButton}
+        </div>
+      )}
       <div className="fw-kit-more-row">
         <span className="fw-kit-label">figure</span>
         <button
@@ -600,6 +707,24 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
+          {weights.length > 1 && (
+            <div className="fw-kit-ports" role="radiogroup" aria-label="Weight">
+              <span className="fw-kit-ports-label">weight</span>
+              {[null, ...weights].map((w) => (
+                <button
+                  key={w ?? 'any'}
+                  type="button"
+                  role="radio"
+                  className="fw-kit-port"
+                  aria-checked={weighed === w}
+                  title={w ? `Only ${w} armor` : 'Every weight'}
+                  onClick={() => setWeight(w)}
+                >
+                  {w ?? 'any'}
+                </button>
+              ))}
+            </div>
+          )}
           {mode === 'gear' && (() => {
             // Which holsters this slot's gear can go in, one line of short
             // chips: a filled one is marked, the targeted one is lit, and the
@@ -760,12 +885,15 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
                   title="A head-and-shoulders picture of your character in this outfit, to download as an avatar"
                   onClick={() => {
                     setMoreOpen(false);
+                    setKitsOpen(false);
                     setPortraitOpen((open) => !open);
                   }}
                 >
                   Portrait
                 </button>
               )}
+              {!narrow && imageButton}
+              {!narrow && kitsButton}
               <button
                 type="button"
                 ref={moreButton}
@@ -795,6 +923,15 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
                 {moreRows}
               </div>
             </div>
+            {kitsOpen && props.kits && state && engine.current && (
+              <Kits
+                engine={engine.current}
+                state={state}
+                catalogue={catalogue}
+                host={props.kits}
+                onClose={closeKits}
+              />
+            )}
             {portraitOpen && state && engine.current && (
               <Portrait
                 engine={engine.current}

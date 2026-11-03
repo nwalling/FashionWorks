@@ -23,6 +23,7 @@ import { Kitbasher } from './ui/Kitbasher';
 import './ui/onboarding.css';
 import { readTokens, watchTheme, type Tokens } from './theme';
 import type { PortraitBackground } from './three/portrait';
+import type { KitsHost } from './kits';
 
 export type FashionWorksErrorCode =
   | 'unsupported-browser'
@@ -50,6 +51,10 @@ export interface FashionWorksProps {
    * preselected (the host passes the visitor's current theme first). Without
    * it, one neutral background. Malformed entries are dropped. */
   portraitBackgrounds?: readonly PortraitBackground[];
+  /** Where the visitor's kits are kept: their profile's list, a way to save
+   * one, and a way to start a profile. Without it there is no kits button.
+   * WEB-INTEGRATION.md §2.4. */
+  kits?: KitsHost;
 }
 
 /** Map an internal failure onto the host-facing code.
@@ -76,7 +81,7 @@ function errorCodeFor(state: State): FashionWorksErrorCode | null {
 }
 
 export function FashionWorks(props: FashionWorksProps): JSX.Element {
-  const { className, onReady, onError, initialLoadout, onLoadoutChange, portraitBackgrounds } = props;
+  const { className, onReady, onError, initialLoadout, onLoadoutChange, portraitBackgrounds, kits } = props;
   const [state, setState] = useState<State>(initial);
   const [tokens, setTokens] = useState<Tokens | null>(null);
   const root = useRef<HTMLDivElement>(null);
@@ -215,6 +220,7 @@ export function FashionWorks(props: FashionWorksProps): JSX.Element {
           initialLoadout={initialLoadout}
           onLoadoutChange={onLoadoutChange}
           portraitBackgrounds={portraitBackgrounds}
+          kits={kits}
         />
       )}
     </div>

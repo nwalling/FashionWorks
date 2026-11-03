@@ -19,7 +19,9 @@ import {
   readCatalogue,
   readTokens,
   watchTheme,
+  type HostKit,
   type KitbasherEngine,
+  type KitsHost,
   type Tokens,
 } from './dist/fashionworks.js';
 import './dist/fashionworks.css';
@@ -64,6 +66,28 @@ async function main(): Promise<void> {
   let tokens: Tokens = readTokens();
   const root = createRoot(document.getElementById('mount')!);
   const exposed: { engine?: KitbasherEngine; loadout?: string } = {};
+
+  // A stand-in for Hangarworks' kits, in memory: one kit as the profile page
+  // makes them, blueprints only, as the items they make -- with one id this
+  // catalogue has not got, as a ship component would be. `?guest` is a
+  // visitor without a profile.
+  const named = (name: string) => [...catalogue.items, ...catalogue.gear].find((i) => i.name === name)?.id;
+  const stored: HostKit[] = [{
+    id: 'profile-kit',
+    name: 'Arden-SL, from the profile page',
+    itemIds: ['Arden-SL Helmet', 'Arden-SL Core', 'Arden-SL Arms', 'Arden-SL Legs', 'P4-AR Rifle']
+      .map(named).filter((id): id is string => Boolean(id)).concat('00000000-ship-component'),
+  }];
+  const kitsHost = (): KitsHost => ({
+    signedIn: !new URLSearchParams(location.search).has('guest'),
+    kits: [...stored],
+    save: async (name, outfit) => {
+      stored.unshift({ id: crypto.randomUUID(), name, outfit, itemIds: outfit.items.map((i) => i.id) });
+      (exposed as { saved?: unknown }).saved = outfit;
+      render();
+    },
+    startProfile: () => say('the host would open its sign-up here'),
+  });
   const render = () => root.render(
     createElement(StrictMode, null, createElement(Kitbasher, {
       client,
@@ -72,6 +96,7 @@ async function main(): Promise<void> {
       onEngine: (engine) => { exposed.engine = engine; },
       onLoadoutChange: (encoded) => { exposed.loadout = encoded; history.replaceState(null, '', `#${encoded}`); },
       initialLoadout: location.hash.slice(1) || undefined,
+      kits: kitsHost(),
     })),
   );
   render();

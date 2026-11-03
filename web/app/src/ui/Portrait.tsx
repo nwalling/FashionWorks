@@ -18,6 +18,7 @@ import {
   portraitFileName,
   type PortraitBackground,
 } from '../three/portrait';
+import { downloadBlob } from './download';
 
 export interface PortraitProps {
   readonly engine: Engine;
@@ -35,10 +36,6 @@ const PORTRAIT_LIGHTING = 'creator';
 
 /** How long the outfit has to sit still before the picture is taken again. */
 const SETTLE_MS = 250;
-
-/** How long a download's object URL is kept: `click()` only queues the
- * navigation, and revoking at once can lose the file (CLAUDE.md). */
-const OBJECT_URL_TTL_MS = 60_000;
 
 export function Portrait(props: PortraitProps): JSX.Element {
   const { engine, state, backgrounds, onLoadCharacter, onClose } = props;
@@ -128,15 +125,7 @@ export function Portrait(props: PortraitProps): JSX.Element {
     setSaving(true);
     try {
       const blob = await encodePortrait(composePortrait(cutout, background));
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = portraitFileName(state.character);
-      // Attached first: Firefox ignores a click on a detached anchor.
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      setTimeout(() => URL.revokeObjectURL(url), OBJECT_URL_TTL_MS);
+      downloadBlob(blob, portraitFileName(state.character));
     } finally {
       setSaving(false);
     }

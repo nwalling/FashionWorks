@@ -105,11 +105,13 @@ import {
   CAPTURE_GREYS,
   CAPTURE_SIZE,
   portraitView,
+  snapshotView,
   solveCutout,
   type CaptureResolve,
   type CaptureResult,
   type CaptureView,
 } from './portrait';
+import { kitPieces, type HostKit } from '../kits';
 import { HAIR_TAGS, layerOf, outfitFor, outfitSlots, portHidden, viewOf, type OutfitView } from './outfit';
 import { LIVE_DEFAULTS, liveSurfaces, releaseAfterUpload, takesS3tc } from './live';
 import { applyClip, bonePosition, boneRotation, buildRig, mountMatrix, type BuiltRig } from './rig';
@@ -425,7 +427,13 @@ export interface KitbasherScene {
   };
   /** Present when the view is the full viewer: a frame off screen, for a
    * portrait (`ViewerHandle.capture`). */
-  readonly capture?: (view: CaptureView, size: number, greys: readonly number[], resolve?: CaptureResolve) => CaptureResult;
+  readonly capture?: (
+    view: CaptureView,
+    size: number,
+    greys: readonly number[],
+    resolve?: CaptureResolve,
+    options?: { readonly ground?: boolean },
+  ) => CaptureResult;
 }
 
 /** What the UI renders from. Replaced wholesale on every change, so React can
@@ -1978,11 +1986,38 @@ export class Kitbasher {
 
   async portrait(): Promise<OffscreenCanvas | null> {
     await this.settled();
-    const capture = this.view.capture;
     const head = this.attachmentWorld('Head');
-    if (this.disposed || !capture || !head) return null;
-    // Hair resolved over frames, as the game resolves it (`setHairResolve`):
-    // its cut-outs hashed, its blended passes away, and the frames averaged.
+    if (this.disposed || !head) return null;
+    return this.captureCutout(portraitView(head));
+  }
+
+  /** The square picture to share: the whole figure from where the camera is
+   * looking, its shadow under it, cut out for `composeSnapshot` to put over
+   * the visitor's backdrop. */
+  async snapshot(): Promise<OffscreenCanvas | null> {
+    await this.settled();
+    const bounds = this.figureBounds(true);
+    if (this.disposed || !bounds) return null;
+    const { camera, controls } = this.view;
+    const direction = new Vector3().subVectors(camera.position, controls.target);
+    const centre = bounds.getCenter(new Vector3());
+    const size = bounds.getSize(new Vector3());
+    const view = snapshotView(
+      [centre.x, centre.y, centre.z],
+      [size.x, size.y, size.z],
+      [direction.x, direction.y, direction.z],
+      camera.fov,
+      FRAME_MARGIN,
+    );
+    return this.captureCutout(view, { ground: true });
+  }
+
+  /** A capture solved to a cut-out, with hair resolved over frames as the
+   * game resolves it (`setHairResolve`): its cut-outs hashed, its blended
+   * passes away, and the frames averaged. */
+  private captureCutout(view: CaptureView, options?: { readonly ground?: boolean }): OffscreenCanvas | null {
+    const capture = this.view.capture;
+    if (!capture) return null;
     const hashed: Material[] = [];
     const fringes: Object3D[] = [];
     if (this.portraitSamples > 1) {
@@ -1999,10 +2034,11 @@ export class Kitbasher {
     let result: CaptureResult;
     try {
       result = capture(
-        portraitView(head),
+        view,
         CAPTURE_SIZE,
         CAPTURE_GREYS,
         hashed.length ? { samples: this.portraitSamples, onSample: (i, n) => setHairHashFrame(i / n) } : undefined,
+        options,
       );
     } finally {
       for (const material of hashed) setHairResolve(material, false);
@@ -2770,6 +2806,28 @@ export class Kitbasher {
     return encodeLoadout(this.wearing, carrying, this.holdingPort);
   }
 
+  /** Put a kit on in place of what is worn: the outfit saved with it, on its
+   * body, or else the pieces its blueprints make. How many went on. */
+  async wearKit(kit: HostKit): Promise<number> {
+    if (!this.rig) await this.init();
+    if (this.disposed) return 0;
+    this.clear();
+    this.clearGear();
+    const outfit = kit.outfit;
+    if (outfit?.body && outfit.body !== this.state.body) await this.setBody(outfit.body);
+    let worn = 0;
+    if (outfit?.loadout) {
+      worn = await this.restore(outfit.loadout);
+    } else {
+      const { wear, carry } = kitPieces(kit.itemIds, this.catalogue);
+      for (const item of wear) await this.equip(item);
+      worn = wear.length;
+      for (const item of carry) if (await this.carry(item, null)) worn += 1;
+    }
+    this.publish({ status: `${kit.name}: ${worn} ${worn === 1 ? 'piece' : 'pieces'} on` });
+    return worn;
+  }
+
   async restore(encoded: string): Promise<number> {
     const items = decodeLoadout(encoded, this.catalogue);
     for (const item of items) await this.equip(item);
@@ -2777,6 +2835,35 @@ export class Kitbasher {
     for (const { port, item } of gear.carrying) await this.carry(item, port);
     if (gear.holding && this.carried.has(gear.holding)) await this.hold(gear.holding);
     return items.length + gear.carrying.length;
+  }
+
+  /** What is worn and carried, and the figure's head where it shows. With
+   * `body`, the figure's whole body too, and bounds for a bare figure;
+   * without, null when nothing is worn or carried. */
+  private figureBounds(body: boolean): Box3 | null {
+    const bounds = new Box3();
+    let any = false;
+    for (const loaded of this.equipped.values()) {
+      for (const object of loaded.objects) {
+        bounds.expandByObject(object);
+        any = true;
+      }
+    }
+    for (const carried of this.carried.values()) {
+      bounds.expandByObject(carried.instance);
+      any = true;
+    }
+    // The head, where it shows: clothing rarely reaches it, and a jacket and
+    // trousers framed on their own cut the figure off at the collar.
+    for (const { loaded, part } of this.figure?.parts ?? []) {
+      if (part === 'body' && !body) continue;
+      for (const object of loaded.objects) {
+        if (!object.visible) continue;
+        bounds.expandByObject(object);
+        if (body) any = true;
+      }
+    }
+    return any && !bounds.isEmpty() ? bounds : null;
   }
 
   /** Point the camera at whatever is on the body, filling the panel.
@@ -2795,25 +2882,8 @@ export class Kitbasher {
    * angle is worse than one that is slightly loose.
    */
   frameLoadout(): void {
-    const bounds = new Box3();
-    let any = false;
-    for (const loaded of this.equipped.values()) {
-      for (const object of loaded.objects) {
-        bounds.expandByObject(object);
-        any = true;
-      }
-    }
-    for (const carried of this.carried.values()) {
-      bounds.expandByObject(carried.instance);
-      any = true;
-    }
-    // The head, where it shows: clothing rarely reaches it, and a jacket and
-    // trousers framed on their own cut the figure off at the collar.
-    for (const { loaded, part } of this.figure?.parts ?? []) {
-      if (part === 'body') continue;
-      for (const object of loaded.objects) if (object.visible) bounds.expandByObject(object);
-    }
-    if (!any) return;
+    const bounds = this.figureBounds(false);
+    if (!bounds) return;
     const { camera, controls } = this.view;
     const centre = bounds.getCenter(new Vector3());
     const size = bounds.getSize(new Vector3());
