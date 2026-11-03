@@ -13,7 +13,6 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 
 import type { ArchiveClient } from '../archive/client';
 import {
-  colourwayName,
   displayName,
   GEAR_SLOTS,
   isGearSlot,
@@ -22,7 +21,6 @@ import {
   lineRepresentative,
   lineTitle,
   outfitLabel,
-  swatchColour,
   CLOTHING_SLOTS,
   SLOTS,
   type Catalogue,
@@ -280,9 +278,9 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
     ? [...carrying].find(([, item]) => item.id === onBody.id)?.[0] ?? null
     : null;
 
-  // One row per product line: its colours and editions appear as swatches
-  // above, rather than as twenty near-identical rows -- and a (Modified)
-  // build is one of them too, whatever mesh it happens to use.
+  // One row per product line: its colours and editions are chosen by name
+  // above, rather than listed as twenty near-identical rows -- and a
+  // (Modified) build is one of them too, whatever mesh it happens to use.
   const pool = useMemo(() => {
     const needle = search.trim().toLowerCase();
     const seen = new Set<string>();
@@ -321,22 +319,6 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
     setBackdrop(null);
     viewer.current?.setBackdrop(null);
   };
-  // Work out the colours of the family on screen, for the pieces that carry no
-  // tint palette. Only the visible family: compositing is real work, and the
-  // catalogue has a thousand such pieces.
-  const family = onBody ? lineOf(catalogue, onBody) : [];
-  const familyKey = family.map((f) => f.id).join(',');
-  useEffect(() => {
-    for (const variant of family) {
-      if (!swatchColour(variant) && !state?.swatches.has(variant.id)) {
-        engine.current?.requestSwatch(variant);
-      }
-    }
-    // `familyKey` rather than `family`: a new array every render would ask
-    // again on every render, and the engine would have to dedupe a flood.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [familyKey, state?.swatches]);
-
   // A backdrop is the visitor's own file and never leaves the page; the object
   // URL is released when it is replaced, cleared, or the component goes.
   useEffect(() => () => { if (backdrop) URL.revokeObjectURL(backdrop); }, [backdrop]);
@@ -663,31 +645,32 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
             );
           })()}
           {onBody && familyOf(onBody).length > 1 && (
-            <div className="fw-kit-ways" role="radiogroup" aria-label="Color">
-              {/* Labelled, because a row of small squares at the foot of a long
-                  listing reads as decoration rather than as a control. */}
+            // Which of the line's pieces is worn, by its game name: a row of
+            // small colour squares could not be read, and an edition such as
+            // "(Modified)" has no colour of its own to show.
+            <label className="fw-kit-ways">
               <span className="fw-kit-ways-label">
                 {/* In gear mode the holster chips no longer name what is in
-                    them, so this says which piece the colours are for. */}
-                {mode === 'gear' ? `${titleOf(onBody)} · ` : ''}{familyOf(onBody).length} colors
+                    them, so this says which piece the list is for. */}
+                {mode === 'gear' ? `${titleOf(onBody)} · ` : ''}{familyOf(onBody).length} variants
               </span>
-              {familyOf(onBody).map((variant) => {
-                const colour = swatchColour(variant) ?? state?.swatches.get(variant.id);
-                return (
-                  <button
-                    key={variant.id}
-                    type="button"
-                    role="radio"
-                    aria-checked={onBody.id === variant.id}
-                    className="fw-kit-way"
-                    style={colour ? { background: colour } : undefined}
-                    title={colourwayName(displayName(variant), titleOf(variant))}
-                    disabled={busy}
-                    onClick={() => pick(variant, onBodyPort)}
-                  />
-                );
-              })}
-            </div>
+              <select
+                className="fw-kit-select fw-kit-way"
+                aria-label={`${titleOf(onBody)}: which one`}
+                value={onBody.id}
+                disabled={busy}
+                onChange={(event) => {
+                  const variant = familyOf(onBody).find((v) => v.id === event.target.value);
+                  if (variant) pick(variant, onBodyPort);
+                }}
+              >
+                {[...familyOf(onBody)]
+                  .sort((a, b) => displayName(a).localeCompare(displayName(b)))
+                  .map((variant) => (
+                    <option key={variant.id} value={variant.id}>{displayName(variant)}</option>
+                  ))}
+              </select>
+            </label>
           )}
           <div className="fw-kit-items" role="listbox" aria-label={`${slotLabel(slot)} pieces`}>
             {pool.length === 0 && (
@@ -701,7 +684,7 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
               const meta = [
                 item.manufacturer?.code ?? '',
                 item.weight_class ?? (item.attach?.size ? `size ${item.attach.size}` : ''),
-                line.length > 1 ? `${line.length} colors` : '',
+                line.length > 1 ? `${line.length} variants` : '',
               ].filter(Boolean).join(' · ');
               return (
                 <button
@@ -733,13 +716,27 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
             >
               equip set
             </button>
+            {/* One slot back to empty, without clearing the rest. Gear has
+                its own: the × beside the targeted holster. */}
+            {mode !== 'gear' && (
+              <button
+                type="button"
+                disabled={busy || !wearing.has(slot as WearSlot)}
+                title={wearing.has(slot as WearSlot)
+                  ? `Take the ${displayName(wearing.get(slot as WearSlot)!)} off and leave the ${slotLabel(slot)} slot empty`
+                  : `Nothing is worn in the ${slotLabel(slot)} slot`}
+                onClick={() => engine.current?.unequip(slot as WearSlot)}
+              >
+                empty {slotLabel(slot)}
+              </button>
+            )}
             <button
               type="button"
               disabled={mode === 'gear' ? carrying.size === 0 : wearing.size === 0}
-              title={mode === 'gear' ? 'Take all gear off' : `Take all ${mode} off`}
+              title={mode === 'gear' ? 'Take all gear off' : `Take all ${outfitLabel(mode)} off`}
               onClick={() => (mode === 'gear' ? engine.current?.clearGear() : engine.current?.undress())}
             >
-              clear
+              clear all
             </button>
           </div>
         </aside>

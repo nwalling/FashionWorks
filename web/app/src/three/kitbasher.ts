@@ -2061,7 +2061,7 @@ export class Kitbasher {
     // piece goes aside with its outfit rather than onto the body over it.
     if (outfit && outfit !== this.state.outfit) {
       this.aside.set(slot, item);
-      this.publish({ busy: false, status: `${name} kept aside with the ${outfit}` });
+      this.publish({ busy: false, status: `${name} kept aside with the ${outfitLabel(outfit)}` });
       return;
     }
 
@@ -2158,7 +2158,7 @@ export class Kitbasher {
     this.applyOverrides();
     this.measureUndersuit();
     this.applyOutfit();
-    this.publish({ ports: this.ports(), status: `${outfit} on` });
+    this.publish({ ports: this.ports(), status: `${outfitLabel(outfit)} on` });
 
     for (const item of returning) await this.equip(item);
     for (const { port, item } of gearReturning.carrying) {
@@ -2185,8 +2185,8 @@ export class Kitbasher {
     this.measureUndersuit();
     this.applyOutfit();
     const gear = this.revalidateGear();
-    this.publish({ ports: gear.ports, status: `${this.state.outfit} off` });
-    if (gear.lostHold) void this.setPose(this.unarmedPose()).then(() => this.publish({ status: `${this.state.outfit} off` }));
+    this.publish({ ports: gear.ports, status: `${outfitLabel(this.state.outfit)} off` });
+    if (gear.lostHold) void this.setPose(this.unarmedPose()).then(() => this.publish({ status: `${outfitLabel(this.state.outfit)} off` }));
   }
 
   /** Everything off, both outfits. */
