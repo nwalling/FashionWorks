@@ -2241,6 +2241,19 @@ counts its strands out in. A hair's highlight width comes from its
 which put a white patch on every head. Skin reflects its `Specular` times its
 spec map, through the 30x pore detail map on slot 6 the core used to drop.
 
+**Far off, a head takes the middle strand's colour** (2026-11-03). Once a
+pixel spans several strands the shader used to draw the mean of every
+strand's colour in linear light, and on a wide melanin spread that mean is the
+white strands': Ilucide's hair (spread 1.0 from his `.chf`, a fifth of it at
+melanin 0) turned flat silver as the camera stood back. The strand id map is
+mipped, so the filtered id's colour is what a distant pixel takes, as in game.
+**The beard thins far off for a different reason, not yet fixed:** the
+cut-out's coverage-preserving mips assume point sampling, and bilinear,
+trilinear and anisotropic filtering pull the sparse passing texels under the
+test, so at a full figure's distance the cut-out draws nothing and the beard
+is the blended pass alone. Handing the cut-out over to the density through
+alpha to coverage (4 samples) was tried and drew it thinner; refuted.
+
 ### Items held against the game's own icons (2026-10-30)
 
 The Hangarworks item renders were put beside references for 32 items and 12
