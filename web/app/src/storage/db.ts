@@ -28,7 +28,8 @@ export const STORE_HANDLES = 'handles';
 // 3: armour carries the parts its skin ports wear with it (`attached`).
 // 4: an item's own material (`SGeometryResourceParams.Material`) over its
 //    model's, and gear takes that node's palette too.
-export const CATALOGUE_VERSION = 4;
+// 5: names behind a `,P` key resolve, and a placeholder name does not.
+export const CATALOGUE_VERSION = 5;
 
 export interface CachedCatalogue {
   /** The archive fingerprint this was built from. */

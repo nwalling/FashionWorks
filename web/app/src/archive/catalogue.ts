@@ -108,10 +108,13 @@ export function isGearSlot(slot: string): slot is GearSlot {
  * placeholders all carry an armour attach type without being wearable.
  * `squadron42` marks Squadron 42's crew uniforms, which are not in the
  * persistent universe.
- * `unnamed` is deliberately **not** here: that is a real piece whose
- * localisation key did not resolve, and it stays visible under its class name.
+ * `unnamed` is a piece with no name in the game: its key does not resolve, or
+ * resolves to a localiser's placeholder (`PH - <class name>`), and its `name`
+ * is then its class name. A visitor sees only the game's own names, so it is
+ * hidden too -- 60 of 4,941 items, most of them Squadron 42 uniforms, the
+ * character customizer's own clothes and promotional prints.
  */
-export const HIDDEN_FLAGS = ['npc', 'placeholder', 'not_wearable', 'test', 'squadron42'];
+export const HIDDEN_FLAGS = ['npc', 'placeholder', 'not_wearable', 'test', 'squadron42', 'unnamed'];
 
 export interface Catalogue {
   readonly items: CatalogueItem[];

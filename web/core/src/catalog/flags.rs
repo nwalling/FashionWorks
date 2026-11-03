@@ -6,8 +6,10 @@
 //! hides the first group and the catalogue drops NPC items by default, so these
 //! decide what a visitor actually sees.
 //!
-//! `unnamed` is deliberately *not* hidden: it is a real piece whose
-//! localisation key did not resolve, and it stays visible under its class name.
+//! `unnamed` marks a piece with no name in the game -- its key does not
+//! resolve, or resolves to a placeholder -- whose `name` is then its class
+//! name. The kitbasher hides it with the rest: a visitor sees only the game's
+//! own names (`HIDDEN_FLAGS` in `catalogue.ts`).
 
 pub const PLACEHOLDER_NAME: &str = "<= PLACEHOLDER =>";
 
@@ -93,7 +95,7 @@ mod tests {
     }
 
     #[test]
-    fn an_unresolved_name_is_flagged_but_not_hidden() {
+    fn an_unresolved_name_is_flagged() {
         let flags = flags_for("gys_undersuit_01", Some("gys_undersuit_01"), true);
         assert!(flags.contains(&"unnamed".into()));
         assert!(!flags.contains(&"not_wearable".into()));

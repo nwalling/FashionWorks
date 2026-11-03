@@ -3,7 +3,10 @@
 ``global.ini`` is a flat ``key=value`` file with no INI sections, UTF-8 with a
 BOM, one entry per line. Values may contain ``=``; only the first one splits.
 Keys appear in records prefixed with ``@`` (``@item_Name_foo``) but are stored
-in the file without it.
+in the file without it, and 13,380 of them with a ``,P`` suffix the record does
+not name (``item_Name_doom_combat_medium_arms_01_01_01,P`` is the Clash Arms).
+A placeholder (``PH - <class>``, ``PLACEHOLDER - <class>``) is not a name and
+resolves as missing.
 """
 
 from __future__ import annotations
@@ -13,6 +16,11 @@ from collections.abc import Iterable
 from pathlib import Path
 
 log = logging.getLogger(__name__)
+
+
+def is_placeholder(text: str) -> bool:
+    """What the localisers left where a name will go."""
+    return text.startswith(("PH - ", "PLACEHOLDER - "))
 
 
 class Localization:
@@ -42,7 +50,7 @@ class Localization:
             # Keys are matched case-insensitively as a fallback: the DCB and the
             # ini file do not always agree on casing.
             value = self._lower_index().get(normalized.lower())
-        if value is None:
+        if value is None or is_placeholder(value):
             self.missing.add(key)
             return default
         return value
@@ -64,7 +72,8 @@ class Localization:
             key, sep, value = line.partition("=")
             if not sep:
                 continue
-            table[key.strip()] = value.strip()
+            key = key.strip()
+            table[key.removesuffix(",P")] = value.strip()
         return cls(table)
 
     @classmethod

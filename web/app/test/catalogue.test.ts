@@ -46,11 +46,12 @@ describe('reading the catalogue', () => {
     expect(read.items.map((i) => i.id)).toEqual(['real']);
   });
 
-  it('keeps an unnamed piece, which is real armour with an unresolved key', () => {
-    // `unnamed` is deliberately not a hidden flag: the piece is real and shows
-    // under its class name.
-    const read = catalogue([item({ id: 'x', class_name: 'vgl_01', flags: ['unnamed'] })]);
-    expect(read.items).toHaveLength(1);
+  it('drops a piece with no game name, so no class name is ever shown', () => {
+    const read = catalogue([
+      item({ id: 'x', class_name: 'sc_nvy_bdu_boots_01_01_01', name: 'sc_nvy_bdu_boots_01_01_01', flags: ['unnamed'] }),
+      item({ id: 'real' }),
+    ]);
+    expect(read.items.map((i) => i.id)).toEqual(['real']);
   });
 
   it('drops a record with no geometry, which cannot be rendered', () => {
