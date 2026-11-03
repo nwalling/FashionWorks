@@ -75,6 +75,17 @@ renderer's -- rely on it being affine between their two backdrop greys, and
 at its design point it reproduces a base colour as authored, which is what
 the palette work in `CLAUDE.md` is measured in.
 
+**Its shoulder starts at 0.6, not 0.76** (2026-11-03, `three/toneCurve.ts`).
+Metered, a white paint under the key reaches 1.2-1.6, where Khronos's
+shoulder is nearly flat: the Monde Legs' white plates drew paper white, 247
+median and 249 at p90 under `inventory`. From 0.6 they read 238 and 241
+(`hangar` 235 to 227); skin, a black suit and the gold's median do not move,
+the brightest gold and Beacon's orange lose 5 of 255, and hue holds within
+half a degree. The light capture backdrop sits at 0.52, so the solves stay
+straight; that is also why it goes no lower. The lit face of a white plate
+still has little form -- the light across it varies by a third, which no
+curve keeping white under 1 spreads far.
+
 **A flat capture backdrop is not lit, so it is not metered.** Those greys,
 0.2 and 0.8 linear, were placed for exposure 0.7; at a metered 1.41 the light
 one lands on the shoulder and shows 0.91 for 1.13, and a half-covered pixel

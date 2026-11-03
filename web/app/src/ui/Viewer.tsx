@@ -32,6 +32,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 
 import { createGround, groundLook, type Ground } from '../three/ground';
 import { applyTheme, isLight, untoneMapped } from '../three/sceneTheme';
+import { softenNeutralShoulder } from '../three/toneCurve';
 import type { CaptureResolve, CaptureResult, CaptureView } from '../three/portrait';
 import { readTokens, type Tokens } from '../theme';
 
@@ -189,6 +190,7 @@ export function Viewer({ tokens, onScene, className }: ViewerProps): JSX.Element
     // empty; `preserveDrawingBuffer` so the canvas can be read back after
     // compositing, which is how a check confirms the scene followed a theme
     // change -- without it `readPixels` outside the draw call returns nothing.
+    softenNeutralShoulder();
     const renderer = new WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, alpha: true });
     let quality: Quality = rememberedQuality() ?? detectQuality(renderer);
     renderer.setPixelRatio(pixelRatioFor(quality));

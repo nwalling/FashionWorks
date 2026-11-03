@@ -12,6 +12,7 @@
 import { NeutralToneMapping, NoToneMapping, type Color, type GridHelper, type Scene, type ToneMapping, type WebGLRenderer } from 'three';
 
 import { contrast, toHex, type Tokens } from '../theme';
+import { NEUTRAL_SHOULDER } from './toneCurve';
 
 export interface ThemedScene {
   scene: Scene;
@@ -87,14 +88,14 @@ export function isLight(tokens: Tokens): boolean {
 }
 
 /** three.js's Neutral curve (Khronos PBR Neutral), exactly as its shader runs
- * it, on linear RGB. */
+ * it with the shoulder `toneCurve` moves, on linear RGB. */
 function neutral(r: number, g: number, b: number, exposure: number): [number, number, number] {
   let c = [r * exposure, g * exposure, b * exposure];
   const x = Math.min(c[0]!, c[1]!, c[2]!);
   const offset = x < 0.08 ? x - 6.25 * x * x : 0.04;
   c = c.map((v) => v - offset);
   const peak = Math.max(c[0]!, c[1]!, c[2]!);
-  const start = 0.8 - 0.04;
+  const start = NEUTRAL_SHOULDER;
   if (peak < start) return [c[0]!, c[1]!, c[2]!];
   const d = 1 - start;
   const newPeak = 1 - (d * d) / (peak + d - start);
@@ -110,8 +111,10 @@ function neutral(r: number, g: number, b: number, exposure: number): [number, nu
  * where the direct path never touched a background colour. Neutral is not
  * identity even in the darks: it subtracts a toe, so a near-black page colour
  * came out darker still. It is monotonic per channel over the range a page
- * uses, so a few dozen corrections of the forward curve invert it. `out` is
- * written and returned. */
+ * uses, so a few dozen corrections of the forward curve invert it, each
+ * scaled by the curve's own slope there: on the shoulder the slope is a
+ * tenth of the exposure or less, and stepping by the exposure alone left a
+ * light page colour 0.0025 short after forty. `out` is written and returned. */
 export function untoneMapped(target: Color, exposure: number, toneMapping: ToneMapping, out: Color): Color {
   // With no tone mapping the output pass applies no exposure either.
   if (toneMapping === NoToneMapping) return out.copy(target);
@@ -119,11 +122,16 @@ export function untoneMapped(target: Color, exposure: number, toneMapping: ToneM
   let r = target.r / exposure;
   let g = target.g / exposure;
   let b = target.b / exposure;
+  const slope = (lo: number, hi: number, h: number) => Math.max((hi - lo) / h, 1e-3);
   for (let i = 0; i < 40; i += 1) {
     const [fr, fg, fb] = neutral(r, g, b, exposure);
-    r = Math.max(0, r + (target.r - fr) / exposure);
-    g = Math.max(0, g + (target.g - fg) / exposure);
-    b = Math.max(0, b + (target.b - fb) / exposure);
+    const h = 1e-4;
+    const sr = slope(fr, neutral(r + h, g, b, exposure)[0], h);
+    const sg = slope(fg, neutral(r, g + h, b, exposure)[1], h);
+    const sb = slope(fb, neutral(r, g, b + h, exposure)[2], h);
+    r = Math.max(0, r + (target.r - fr) / sr);
+    g = Math.max(0, g + (target.g - fg) / sg);
+    b = Math.max(0, b + (target.b - fb) / sb);
   }
   return out.setRGB(r, g, b);
 }

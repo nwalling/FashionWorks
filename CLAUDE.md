@@ -2533,6 +2533,13 @@ flat backdrop now goes through the curve at 0.7 whatever the preset
 hashed frames whose pixels are mostly whole -- but single-frame captures,
 edges and visors, would.
 
+**Neutral's shoulder starts at 0.6** (2026-11-03, `three/toneCurve.ts`,
+LIGHTING.md). Metered, white paints reached Khronos's nearly flat top and
+drew paper white (Monde Legs 247 of 255); now 238, with nothing below 0.6
+moved. It cannot go below the light capture backdrop's 0.52 without bending
+the alpha solves, and `sceneTheme.neutral` mirrors it, so a change to one is
+a change to both.
+
 ### A piece is drawn as it left the factory (2026-11-02)
 
 The white chips on that backpack were its wear: the shell's paint pairs with
