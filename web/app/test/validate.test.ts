@@ -108,7 +108,7 @@ describe('an indexed archive', () => {
     // through a full index and arrives at an empty catalogue.
     const result = validateArchive(archive({ armour: 3 }));
     expect(result.code).toBe('unsupported-build');
-    if (result.code !== 'ok') expect(result.detail).toContain('3 armour files');
+    if (result.code !== 'ok') expect(result.detail).toContain('3 armor files');
   });
 });
 
