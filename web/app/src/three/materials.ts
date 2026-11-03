@@ -533,13 +533,11 @@ function hairCards(
   const uniforms = {
     uStrandId: { value: strandId ?? null },
     // The pigment, strand by strand (`fwMelaninColour`): melanin and its
-    // spread in melanin units, redness, the tint over it, and the mean
-    // colour of all the strands, which is what a pixel spanning several sees.
+    // spread in melanin units, redness, and the tint over it.
     uMelanin: { value: strands.melanin },
     uMelaninSpread: { value: strands.spread },
     uMelaninRedness: { value: strands.redness },
     uHairTint: { value: strands.tint },
-    uHairMean: { value: strands.mean },
     // Each strand's highlight moves along the normal by up to this much
     // either way (`SpecularVariation`), and the highlight fades toward the
     // root by `SpecularRootOcclusion`.
@@ -694,7 +692,6 @@ function hairCards(
           uniform float uMelaninSpread;
           uniform float uMelaninRedness;
           uniform vec3 uHairTint;
-          uniform vec3 uHairMean;
           uniform float uSpecularVariation;
           uniform float uSpecularRootOcclusion;
           uniform float uPixelDepthOffset;
@@ -875,18 +872,23 @@ function hairCards(
             #endif
             float gradient = uDyeAmount * along;
             float dyed = saturate(gradient * (1.0 + uDyeVariation * (2.0 * fract(strand * 7.31 + 0.137) - 1.0)));
-            // A pixel that spans several strands takes their average, not
-            // whichever one it lands on: strands are two or three texels wide
-            // in a 2048 map, and at a portrait's distance a pixel covers
+            // A pixel that spans several strands takes their average dye, not
+            // whichever strand it lands on: strands are two or three texels
+            // wide in a 2048 map, and at a portrait's distance a pixel covers
             // several, so each drew as a near-white or near-black speck -- a
-            // salt-and-pepper beard where the captures show a soft grey. The
-            // map's ids are uniform, so the average is the mean colour over
-            // them (uHairMean) -- not the colour of the mean melanin, which
-            // with the spread in melanin units is darker -- and a close view
-            // keeps every strand.
+            // salt-and-pepper beard where the captures show a soft grey.
+            //
+            // **Its natural colour is the filtered id's, as the game's is.**
+            // The id map is mipped like any other, so far off it reads the
+            // middle strand -- the picker's colour. The colours' own mean in
+            // linear light is what a pixel physically averages, and on a
+            // head with a wide spread it is the white strands': Ilucide's
+            // hair (melanin 0.64, spread 1.0, a fifth of its strands at none)
+            // went from brown with grey streaks to flat silver once the
+            // camera stood back, where the game keeps it brown.
             float footprint = max(length(dFdx(vAlphaMapUv) * texels), length(dFdy(vAlphaMapUv) * texels)) / ${STRAND_TEXELS.toFixed(1)};
             float resolved = smoothstep(0.5, 2.0, footprint);
-            vec3 average = mix(uHairMean, uDye, gradient);
+            vec3 average = mix(natural, uDye, gradient);
             diffuseColor.rgb = mix(mix(natural, uDye, dyed), average, resolved);
             fwHairShift = (fract(strand * 13.37 + 0.61) - 0.5) * uSpecularVariation * (1.0 - resolved);
           }` : ''}
@@ -1019,10 +1021,10 @@ export function setHairResolve(material: Material, temporal: boolean): boolean {
 }
 
 /** What a head of strands is made of: the pigment, each strand's melanin
- * moved either way from it by up to `BaseMelaninVariation`, the mean colour
- * of all of them, and the dye, laid along each strand by its gradient
- * (`dyeAt`): `DyeAmount` at most, from `DyeShift` to `DyeShift +
- * DyeFadeout` out from the root, in the vertex red's units.
+ * moved either way from it by up to `BaseMelaninVariation`, and the dye,
+ * laid along each strand by its gradient (`dyeAt`): `DyeAmount` at most, from
+ * `DyeShift` to `DyeShift + DyeFadeout` out from the root, in the vertex
+ * red's units.
  *
  * **`BaseMelaninVariation` is in melanin units.** CIG's grey colourway says
  * so: `m_hair_75_grey` is melanin 0 with a variation of 0.86 under a
@@ -1043,19 +1045,11 @@ export function setHairResolve(material: Material, temporal: boolean): boolean {
  * it to 0 on the pink, ginger and gold heads they meant to be dyed. How far a
  * variation of one moves the melanin is the grey colourway's reading above. */
 function strandLooks(params: HairParams): {
-  melanin: number; spread: number; redness: number; tint: Color; mean: Color;
+  melanin: number; spread: number; redness: number; tint: Color;
   dye: Color; amount: number; shift: number; fade: number; variation: number;
 } {
   const melanin = Math.min(0.999, Math.max(0, scalar(params.BaseMelanin, 0.5)));
   const spread = Math.max(0, scalar(params.BaseMelaninVariation, 0)) * STRAND_MELANIN_SPREAD;
-  const natural = { ...params, DyeAmount: 0 };
-  const at = (m: number) => hairColour({ ...natural, BaseMelanin: Math.min(0.999, Math.max(0, m)) });
-  // The ids are uniform, so the strands' mean is the colour averaged over
-  // melanin from one end of the spread to the other.
-  const mean = new Color(0, 0, 0);
-  const STEPS = 64;
-  for (let i = 0; i < STEPS; i += 1) mean.add(at(melanin + spread * (((i + 0.5) / STEPS) * 2 - 1)));
-  mean.multiplyScalar(1 / STEPS);
   const tint = vector(params.BaseTintColor) ?? [1, 1, 1];
   const dye = vector(params.DyeColor) ?? [1, 1, 1];
   return {
@@ -1063,7 +1057,6 @@ function strandLooks(params: HairParams): {
     spread,
     redness: Math.min(1, Math.max(0, scalar(params.BaseMelaninRedness, 0))),
     tint: new Color().setRGB(tint[0], tint[1], tint[2]),
-    mean,
     dye: new Color().setRGB(dye[0] * DYE_ALBEDO, dye[1] * DYE_ALBEDO, dye[2] * DYE_ALBEDO),
     amount: Math.min(1, Math.max(0, scalar(params.DyeAmount, 0))),
     shift: Math.max(0, scalar(params.DyeShift, 0)),
@@ -1679,7 +1672,7 @@ export function setHairLooks(material: Material, looks: Record<string, number | 
   material.color.copy(hairColour(params)).multiply(new Color(tint[0], tint[1], tint[2]));
   const strands = material.userData.hairStrands as {
     uMelanin: { value: number }; uMelaninSpread: { value: number }; uMelaninRedness: { value: number };
-    uHairTint: { value: Color }; uHairMean: { value: Color }; uDye: { value: Color };
+    uHairTint: { value: Color }; uDye: { value: Color };
     uDyeAmount: { value: number }; uDyeShift: { value: number }; uDyeFade: { value: number };
     uDyeVariation: { value: number };
   } | undefined;
@@ -1689,7 +1682,6 @@ export function setHairLooks(material: Material, looks: Record<string, number | 
     strands.uMelaninSpread.value = next.spread;
     strands.uMelaninRedness.value = next.redness;
     strands.uHairTint.value.copy(next.tint);
-    strands.uHairMean.value.copy(next.mean);
     strands.uDye.value.copy(next.dye);
     strands.uDyeAmount.value = next.amount;
     strands.uDyeShift.value = next.shift;
