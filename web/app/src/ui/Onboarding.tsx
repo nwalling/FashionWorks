@@ -146,7 +146,7 @@ function PickFile({ state, onEvent, onFile }: OnboardingProps) {
           <p>{state.failure.detail}</p>
           {state.failure.reportable && (
             <p>
-              <a href="https://discord.gg/hangarworks" target="_blank" rel="noreferrer noopener">
+              <a href="https://discord.gg/3s5usuKr9R" target="_blank" rel="noreferrer noopener">
                 Report it on Discord
               </a>
             </p>
