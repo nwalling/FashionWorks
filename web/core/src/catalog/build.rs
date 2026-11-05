@@ -230,6 +230,7 @@ pub fn build_item(
     palettes: &PaletteIndex,
     makers: &HashMap<String, Value>,
     loc: &Localization,
+    tags: &super::TagIndex,
     skeleton: &str,
     source_path: &str,
 ) -> Option<Value> {
@@ -270,7 +271,7 @@ pub fn build_item(
     let bind_mode = bind_mode_for(slot, &geometry);
     let (code, maker_name) = manufacturer_for(record, makers, loc);
 
-    Some(json!({
+    let mut item = json!({
         "id": record.get("_RecordId_").and_then(Value::as_str).unwrap_or(""),
         "class_name": class_name,
         "name": name.unwrap_or(&class_name),
@@ -299,7 +300,16 @@ pub fn build_item(
         "outfit": super::outfit_of(slot),
         "chunks": chunks_for(record),
         "hidden": hidden_for(record),
-    }))
+    });
+    // Only on the pieces that have them: a few hundred of some five thousand.
+    // `tagged` is trimmed to what the conditions read once every item is built
+    // (`visibility::keep_read_tags`).
+    let visibility = super::visibility::visibility_for(record, tags);
+    if !visibility.is_empty() {
+        item["visibility"] = Value::Array(visibility);
+    }
+    item["tagged"] = json!(super::visibility::tagged_for(record, tags));
+    Some(item)
 }
 
 /// Hand each item the parts its skin ports carry, as those parts' own items:

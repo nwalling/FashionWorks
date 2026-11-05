@@ -2629,6 +2629,27 @@ than its icon.
   Tails palette on `cotton_01`); its only reference is a screenshot under
   orange light, which cannot overrule that.
 
+### A helmet's cowl answers to its core (2026-11-05)
+
+Reported by Noel: the Artimex helmet's cowl and breathing tube, and the Geist
+ASD helmet's hood, were drawn with any core. They are one zone of the helmet's
+mesh, `theta_head_zone` (word `2583318635`, read off the meshes the way
+CLOTHING.md Phase 0 read the body's), and the record draws it only under
+`Chunks[].VisibilityConditions`: the piece in `Armor_Torso` must hold the
+Artimex core's tags. A chunk is drawn while any condition holds, a condition
+holds when all its port checks pass, and a check wants every `ActiveTags` and
+no `DisableTags` tag on the piece in its port, held through the tag tree and
+read from the entity's `tags` and its `OverlayTags` together. Read that way,
+each of the 281 conditions in the archive picks exactly its own partners --
+the Artimex cowl the three Artimex core families and nothing else. The
+inventory icon agrees: the Artimex helmet on the bare mannequin has neither.
+
+The web catalogue carries it as `visibility` and `tagged` (catalogue 6), and
+`outfit.offZones` decides it. The Python catalogue does not -- no tag tree in
+its export, no zones in its baked meshes -- and `chunks` is unchanged in both.
+Only `theta_head_zone` is named so far; the other conditional zones still draw
+as before. CLOTHING.md, "Chunks that answer to a partner".
+
 ### Still unverified
 
 - Only one set has been converted end to end. `scx convert` has not been run

@@ -13,6 +13,12 @@
  * the body, never both. The engine keeps one outfit on the body and the other
  * aside, so switching loses nothing. Head items are worn in either: the head's
  * ports are not the body's, and an undersuit hides none of them.
+ *
+ * **Some chunks answer to a partner.** An Artimex helmet's cowl and breathing
+ * tube plug into the Artimex core, and are drawn only with one in the torso
+ * port; the game's own icon shows the helmet bare. Each piece's `visibility`
+ * says which of its zones wait on what (`catalog::visibility` in the core
+ * reads it), and `offZones` decides them against what is worn.
  */
 
 import {
@@ -21,6 +27,7 @@ import {
   SLOTS,
   type CatalogueItem,
   type Outfit,
+  type PortCheck,
   type WearSlot,
 } from '../archive/catalogue';
 import type { ZoneChunk } from './zones';
@@ -105,11 +112,55 @@ export function layerOf(item: CatalogueItem): number {
   return layers.length ? Math.max(...layers) : SLOT_LAYER[item.slot as WearSlot] ?? 4;
 }
 
+/** Whether `held` is the tag `wanted` or sits under it in the tag tree: a
+ * core's `Theta/Variant/01` answers a helmet asking for `Theta/Variant`. */
+export function holdsTag(held: string, wanted: string): boolean {
+  return held === wanted || (held.startsWith(wanted) && held.charAt(wanted.length) === '/');
+}
+
+/** The piece each port holds, lowercased: what a visibility check reads. A
+ * hidden piece holds nothing, and a port nothing is worn in -- a hand, a
+ * magazine pouch -- reads as empty. */
+export function portHolders(
+  wearing: ReadonlyMap<WearSlot, CatalogueItem>,
+  hiddenSlots: ReadonlySet<WearSlot> = new Set(),
+): Map<string, CatalogueItem> {
+  const out = new Map<string, CatalogueItem>();
+  for (const [slot, item] of wearing) if (!hiddenSlots.has(slot)) out.set(SLOT_PORT[slot].toLowerCase(), item);
+  return out;
+}
+
+function checkPasses(check: PortCheck, holders: ReadonlyMap<string, CatalogueItem>): boolean {
+  return check.ports.some((port) => {
+    const held = holders.get(port.toLowerCase())?.tagged ?? [];
+    const has = (wanted: string) => held.some((tag) => holdsTag(tag, wanted));
+    return check.active.every(has) && !check.disable.some(has);
+  });
+}
+
+/** The zones of `item` that its visibility conditions leave undrawn beside
+ * what `holders` hold. A zone is drawn while any of its conditions holds, and
+ * a condition holds when all its checks pass: the Artimex cowl wants an
+ * Artimex core in `Armor_Torso`, the Aril arms' chunk an Aril core *and* an
+ * Aril pack, and the Clash core's back is drawn until any pack goes on. */
+export function offZones(item: CatalogueItem, holders: ReadonlyMap<string, CatalogueItem>): Set<string> {
+  const drawn = new Map<string, boolean>();
+  for (const { zone, when } of item.visibility ?? []) {
+    const holds = when.some((condition) => condition.every((check) => checkPasses(check, holders)));
+    drawn.set(zone, (drawn.get(zone) ?? false) || holds);
+  }
+  return new Set([...drawn].filter(([, on]) => !on).map(([zone]) => zone));
+}
+
 /** What is drawn of an outfit, worked out once whenever it changes. */
 export interface OutfitView {
   /** Worn slots whose port something else hides. */
   readonly hiddenSlots: ReadonlySet<WearSlot>;
-  /** Every chunk a drawn piece covers: what the zone rule hides beneath. */
+  /** The zones of each worn piece its visibility conditions leave undrawn:
+   * the Artimex helmet's cowl beside any core but an Artimex. */
+  readonly off: ReadonlyMap<WearSlot, ReadonlySet<string>>;
+  /** Every chunk a drawn piece covers: what the zone rule hides beneath. A
+   * chunk its conditions leave undrawn covers nothing. */
   readonly chunks: readonly ZoneChunk[];
   readonly hideHair: boolean;
   readonly hideHead: boolean;
@@ -140,14 +191,21 @@ export function viewOf(wearing: ReadonlyMap<WearSlot, CatalogueItem>): OutfitVie
   const hidden = hiddenPorts(wearing.values());
   const hiddenSlots = new Set<WearSlot>();
   for (const slot of wearing.keys()) if (portHidden(SLOT_PORT[slot], hidden)) hiddenSlots.add(slot);
+  const holders = portHolders(wearing, hiddenSlots);
+  const off = new Map<WearSlot, ReadonlySet<string>>();
+  for (const [slot, item] of wearing) {
+    const zones = offZones(item, holders);
+    if (zones.size) off.set(slot, zones);
+  }
   // A hidden piece covers nothing: a shirt under a jacket that hides it must
   // not also hide the skin at a hem the jacket leaves open.
   const chunks = [...wearing]
     .filter(([slot]) => !hiddenSlots.has(slot))
-    .flatMap(([, item]) => item.chunks ?? []);
+    .flatMap(([slot, item]) => (item.chunks ?? []).filter((chunk) => !off.get(slot)?.has(chunk.zone)));
   const tags = [...wearing].filter(([slot]) => !hiddenSlots.has(slot)).flatMap(([, item]) => addedTags(item));
   return {
     hiddenSlots,
+    off,
     chunks,
     // Every helmet hides the hair, whatever its record says. The data hides
     // the hair port on 113 of 683 helmets; the rest rely on the game swapping

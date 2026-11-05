@@ -28,8 +28,9 @@ fn main() {
         println!("resolved   {:?}", key.and_then(|k| loc.get(k)));
         let palettes = fashionworks_core::catalog::PaletteIndex::build(&database);
         let makers = db::index_by_name(&database, "SCItemManufacturer");
+        let tags = fashionworks_core::catalog::TagIndex::build(&database);
         let built = fashionworks_core::catalog::build_item(
-            &record.value, &palettes, &makers, &loc, "male", &record.source_path);
+            &record.value, &palettes, &makers, &loc, &tags, "male", &record.source_path);
         match built {
             None => println!("build_item None"),
             Some(item) => println!(

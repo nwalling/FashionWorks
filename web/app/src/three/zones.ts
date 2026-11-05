@@ -15,6 +15,9 @@
  * layer but leaves the listed layers drawn there, because it ends part way
  * across it -- hiding the body's forearm under a sleeve that stops at the
  * elbow would open a gap of missing skin.
+ *
+ * A piece's own zones can be off too: the ones its visibility conditions
+ * leave undrawn beside what is worn (`outfit.offZones`).
  */
 
 import type { BufferGeometry } from 'three';
@@ -39,12 +42,18 @@ export function covered(zone: string | null | undefined, layer: number, chunks: 
   return chunks.some((c) => c.zone === zone && c.layer > layer && !c.visible.includes(layer));
 }
 
-/** Draw only the groups of `geometry` that nothing above `layer` covers.
- * Safe to call again whenever the outfit changes: the full group list is
- * kept on the geometry the first time. Returns how many groups are hidden. */
-export function showUncovered(geometry: BufferGeometry, layer: number, chunks: readonly ZoneChunk[]): number {
+/** Draw only the groups of `geometry` that nothing above `layer` covers and
+ * that are not among the piece's own `off` zones. Safe to call again whenever
+ * the outfit changes: the full group list is kept on the geometry the first
+ * time. Returns how many groups are hidden. */
+export function showUncovered(
+  geometry: BufferGeometry,
+  layer: number,
+  chunks: readonly ZoneChunk[],
+  off?: ReadonlySet<string>,
+): number {
   const all = (geometry.userData.fwAllGroups ??= geometry.groups.slice()) as ZonedGroup[];
-  const kept = all.filter((g) => !covered(g.zone, layer, chunks));
+  const kept = all.filter((g) => !covered(g.zone, layer, chunks) && !(g.zone && off?.has(g.zone)));
   geometry.groups = kept as typeof geometry.groups;
   return all.length - kept.length;
 }

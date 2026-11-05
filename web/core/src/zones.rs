@@ -71,9 +71,23 @@ const BODY: &[(u32, &str)] = &[
 /// colourways. It is the shirt's hem, which a jacket covering the hips hides.
 const GARMENT: &[(u32, &str)] = &[(232552810, "hips_zone")];
 
+/// Zones armour carries, named the same way.
+///
+/// `theta_head_zone` is what a helmet draws only beside its own core -- the
+/// Artimex cowl and breathing tube, the Geist ASD hood
+/// (`catalog::visibility`). Of the 606 male character meshes the pipeline has
+/// extracted, eleven carry this word, and the ten a record points at belong to
+/// the eight families whose records list `theta_head_zone`: the Artimex, Geist
+/// ASD, Arden-SL, Palatino, Outback, Inmate Work and THP helmets and the
+/// Piecemeal core. The eleventh, `m_kap_light_combat_helmet_02_01`, no record
+/// names. On the Artimex helmet
+/// it is three submeshes: the cowl at the back of the head, the tube down the
+/// chest and the piece under the chin.
+const ARMOUR: &[(u32, &str)] = &[(2583318635, "theta_head_zone")];
+
 /// The zone a submesh word names, where it is known.
 pub fn name(word: u32) -> Option<&'static str> {
-    BODY.iter().chain(GARMENT).find(|(w, _)| *w == word).map(|(_, n)| *n)
+    BODY.iter().chain(GARMENT).chain(ARMOUR).find(|(w, _)| *w == word).map(|(_, n)| *n)
 }
 
 #[cfg(test)]
@@ -89,6 +103,7 @@ mod tests {
         assert_eq!(BODY.len(), 31);
         assert_eq!(name(3955070026), Some("torso01_zone"));
         assert_eq!(name(232552810), Some("hips_zone"), "the shirt hem");
+        assert_eq!(name(2583318635), Some("theta_head_zone"), "the Artimex cowl");
         assert_eq!(name(1), None);
     }
 }

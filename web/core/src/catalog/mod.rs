@@ -23,6 +23,7 @@ mod flags;
 pub mod localization;
 pub mod sets;
 pub mod tint;
+pub mod visibility;
 pub(crate) mod geometry;
 
 pub use fields::{component, first, record_body};
@@ -33,6 +34,7 @@ pub use sets::{
     canonical_key, geometry_key, product_key, product_key_for, set_key, tag_value, tags_for,
 };
 pub use tint::{tint_for, PaletteIndex};
+pub use visibility::TagIndex;
 pub use geometry::{material_override, materials_for, material_palette, select_wearables, walk_geometry, GeoNode};
 
 /// Attach types that make a record wearable armour.

@@ -29,7 +29,9 @@ export const STORE_HANDLES = 'handles';
 // 4: an item's own material (`SGeometryResourceParams.Material`) over its
 //    model's, and gear takes that node's palette too.
 // 5: names behind a `,P` key resolve, and a placeholder name does not.
-export const CATALOGUE_VERSION = 5;
+// 6: a piece's conditional chunks (`visibility`) and the tags they test
+//    (`tagged`): the Artimex cowl drawn only with an Artimex core.
+export const CATALOGUE_VERSION = 6;
 
 export interface CachedCatalogue {
   /** The archive fingerprint this was built from. */

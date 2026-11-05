@@ -43,4 +43,16 @@ describe('zones', () => {
     expect(showUncovered(geometry, 0, [])).toBe(0);
     expect(geometry.groups).toHaveLength(2);
   });
+
+  it('leaves out a piece\'s own zones its conditions turn off', () => {
+    const geometry = new BufferGeometry();
+    geometry.addGroup(0, 3, 0);
+    geometry.addGroup(3, 3, 0);
+    geometry.addGroup(6, 3, 0);
+    (geometry.groups[1] as { zone?: string }).zone = 'theta_head_zone';
+    expect(showUncovered(geometry, 2, [], new Set(['theta_head_zone']))).toBe(1);
+    expect(geometry.groups).toHaveLength(2);
+    expect(showUncovered(geometry, 2, [], new Set())).toBe(0);
+    expect(geometry.groups).toHaveLength(3);
+  });
 });

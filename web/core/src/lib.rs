@@ -351,12 +351,15 @@ pub fn build_catalogue(dcb: &[u8], ini: &str, skeleton: &str) -> Result<String, 
     let loc = Localization::parse(ini);
     let palettes = tint::PaletteIndex::build(&database);
     let makers = db::index_by_name(&database, "SCItemManufacturer");
+    let tags = catalog::TagIndex::build(&database);
 
     // One record at a time: each is built and dropped, so the heap holds one
     // JSON tree rather than all of them (`db::armor_records`).
     let mut items: Vec<serde_json::Value> = db::armor_records(&database)
-        .filter_map(|r| build::build_item(&r.value, &palettes, &makers, &loc, skeleton, &r.source_path))
+        .filter_map(|r| build::build_item(&r.value, &palettes, &makers, &loc, &tags, skeleton, &r.source_path))
         .collect();
+    // What the visibility conditions test, and nothing else.
+    catalog::visibility::keep_read_tags(&mut items);
     // The parts a piece wears with it, before anything leaves the list.
     build::resolve_attached(&mut items);
     // NPC-only records are in the DataCore and are not wearable, so they

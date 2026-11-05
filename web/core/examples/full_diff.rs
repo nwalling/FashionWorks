@@ -24,11 +24,12 @@ fn main() {
     let loc = Localization::parse(&String::from_utf8_lossy(&raw));
     let palettes = tint::PaletteIndex::build(&database);
     let makers = db::index_by_name(&database, "SCItemManufacturer");
+    let tags = fashionworks_core::catalog::TagIndex::build(&database);
     println!("locale {} keys, {} palettes, {} manufacturers", loc.len(), palettes.len(), makers.len());
 
     let t = Instant::now();
     let mut items: Vec<Value> = db::armor_records(&database)
-        .filter_map(|r| build::build_item(&r.value, &palettes, &makers, &loc, "male", &r.source_path))
+        .filter_map(|r| build::build_item(&r.value, &palettes, &makers, &loc, &tags, "male", &r.source_path))
         .filter(|i| {
             !i["flags"].as_array().map(|f| f.iter().any(|x| x == "npc")).unwrap_or(false)
         })

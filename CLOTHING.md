@@ -194,9 +194,10 @@ shirts, gloves and trousers (still hidden by the listing's anatomy rule), and a
 used to ride along raw in `stats.Chunks`, where nothing read it, and is out of
 `stats` now. `VisibilityConditions` is left out: 48 chunks carry an empty one,
 and the rest tie an undersuit's or armour's zone to the armour ports, which the
-armour outfit does not draw by zone. `hidden` is `HiddenParts`, port names with
-the repeats dropped (`sc_nvy_bdu_jumpsuit_02_01_17` lists `Clothing_Torso_0`
-twice).
+armour outfit does not draw by zone. (It is read now, by the web catalogue
+alone: see "Chunks that answer to a partner".) `hidden` is `HiddenParts`, port
+names with the repeats dropped (`sc_nvy_bdu_jumpsuit_02_01_17` lists
+`Clothing_Torso_0` twice).
 
 **Squadron 42 is flagged by folder**, `clothing/s42_clothing/`: 50 items,
 hidden by the web listing. Only clothing -- S42 armour under
@@ -352,6 +353,68 @@ baseline to within 0.1. The 23-item loadout lists 25 pieces, and the one the
 armour has no free holster for, refused before, now goes to the hand: 24
 carried, one more template (+85 MB worn), 60 more draw calls. The clothing
 outfit is unchanged at 136 calls and 133 MB.
+
+## Chunks that answer to a partner (2026-11-05)
+
+Reported by Noel: the Artimex helmet's cowl and breathing tube, and the Geist
+ASD helmet's hood, were drawn with any core. In the game they belong to their
+own core; the Artimex helmet's inventory icon, on the bare mannequin, has
+neither.
+
+**The record says so per chunk.** The Artimex helmet lists one chunk,
+`theta_head_zone`, with a `VisibilityConditions` entry: the piece in
+`Armor_Torso` must hold `Global/Manufacturer/QuirinusTech`,
+`Armor/FPS/Archetype/Specialist`, `Armor/FPS/Type/Medium` and `Theta/Variant`.
+281 such conditions sit on 204 records. Read this way, every one of them picks
+exactly its own partners:
+
+* a chunk is drawn while **any** of its conditions holds -- the Arden-SL
+  helmet lists its core in `Armor_Torso` or in `Torso_1`;
+* a condition holds when **all** its port checks pass -- the Aril arms want an
+  Aril core and an Aril pack;
+* a check passes when the piece in its port holds every `ActiveTags` tag and
+  none of its `DisableTags`, and an empty port holds none -- the Clash core's
+  back is drawn until any pack goes on.
+
+A tag is held through the tree (the core's `Theta/Variant/01` answers
+`Theta/Variant`), and a piece's tags are its entity `tags` together with its
+clothing's `OverlayTags`: the Artimex helmet names entity tags, the Palatino
+the overlay's `Theta/Manufacturer/Qrt`. Against the catalogue the Artimex cowl
+answers to the three Artimex core families and nothing else, the Geist ASD
+hood to the cores of its own design (ASD Edition and Snow Camo), the
+Arden-SL, Palatino and Outback helmets each to their own core, the Inmate
+Work helmet to its undersuit, and the Piecemeal core's hood to the Badami
+helmet.
+
+**The zone was the missing half.** The mesh does not name its zones
+(Phase 0), and `theta_head_zone` is word `2583318635`: of the 606 male meshes
+the pipeline has extracted, eleven carry it, and the ten a record names belong
+to the eight families whose records list `theta_head_zone`. On the Artimex
+helmet it is the cowl at the back of the head (4,058 vertices), the tube down
+the chest (2,958) and a piece under the chin (379); on the Geist ASD helmet the
+hood down the back (4,915).
+
+**Built** in the web catalogue and engine. `catalog::visibility` reads the tag
+tree (19,000 tags, by GUID to path) and gives each piece `visibility` --
+`{zone, when: [[{ports, active, disable}]]}` -- and `tagged`, the tags a check
+can find on it, trimmed to those some check reads (1.3 MB as read, 215 KB
+kept). `outfit.offZones` decides each worn piece's zones against what is worn
+in each port, and an off zone is neither drawn nor covers anything beneath it.
+A piece another hides holds nothing in its port, and a hand or a magazine port
+reads as empty. Catalogue 6. The Python catalogue does not carry it: the local
+viewer's baked meshes keep no zone submeshes, its DataCore export has no tag
+tree, and `chunks`, which both carry, is unchanged. `cargo run --example
+visibility_probe` lists, for every conditional chunk, the families that turn
+it on.
+
+**Found and left.** The other conditional zones are not named yet, so they
+draw as before, unconditionally: the Aril and Strata `theta_arms/legs/core`,
+the Clash core's `omega_core_zone`, the Morozov-SH-I Stronghold's six magazine
+pouches (each off while a magazine is in its port), the BUL-H4's
+`theta_core_zone` (its pack, or an Apar weapon in the hand), the VGL flight
+suits' (their helmet) and the Inmate Work undersuit's (its pack). Each needs
+its word read off its meshes the way this one was. The Carnifex and Alb
+pieces' conditions ask for nothing a port can lack, and would not change.
 
 ## Phases
 

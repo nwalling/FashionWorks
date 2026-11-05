@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { CatalogueItem, WearSlot } from '../src/archive/catalogue';
-import { addedTags, layerOf, outfitFor, outfitSlots, viewOf } from '../src/three/outfit';
+import { addedTags, holdsTag, layerOf, offZones, outfitFor, outfitSlots, portHolders, viewOf } from '../src/three/outfit';
 
 function item(slot: WearSlot, partial: Partial<CatalogueItem> = {}): CatalogueItem {
   return {
@@ -85,6 +85,76 @@ describe('the hair under a hat', () => {
     const view = viewOf(worn(item('hat', { tags: ['$hatHair+'] }), item('helmet', { hidden: ['Hat_ItemPort'] })));
     expect(view.hairTag).toBeUndefined();
     expect(view.hideHair).toBe(true);
+  });
+});
+
+describe('a chunk that answers to a partner', () => {
+  // The Artimex helmet's cowl and breathing tube, as its record conditions them.
+  const artimexHelmet = item('helmet', {
+    chunks: [{ zone: 'theta_head_zone', layer: 2, visible: [] }],
+    visibility: [{ zone: 'theta_head_zone', when: [[{
+      ports: ['Armor_Torso'],
+      active: ['Global/Manufacturer/QuirinusTech', 'Armor/FPS/Archetype/Specialist', 'Armor/FPS/Type/Medium', 'Theta/Variant'],
+      disable: [],
+    }]] }],
+  });
+  const artimexCore = item('torso', {
+    tagged: ['Armor/FPS/Archetype/Specialist', 'Armor/FPS/Type/Medium', 'Global/Manufacturer/QuirinusTech', 'Theta/Variant/01'],
+  });
+  // A medium core from another maker: everything but the manufacturer.
+  const otherCore = item('torso', {
+    tagged: ['Armor/FPS/Archetype/Specialist', 'Armor/FPS/Type/Medium', 'Global/Manufacturer/RRS', 'Theta/Variant/01'],
+  });
+
+  it('holds a tag through the tree', () => {
+    expect(holdsTag('Theta/Variant/01', 'Theta/Variant')).toBe(true);
+    expect(holdsTag('Theta/Variant', 'Theta/Variant')).toBe(true);
+    expect(holdsTag('Theta/Variants', 'Theta/Variant')).toBe(false);
+    expect(holdsTag('Theta', 'Theta/Variant')).toBe(false);
+  });
+
+  it('draws the Artimex cowl only with an Artimex core', () => {
+    expect(viewOf(worn(artimexHelmet, artimexCore)).off.get('helmet')).toBeUndefined();
+    expect([...viewOf(worn(artimexHelmet, otherCore)).off.get('helmet') ?? []]).toEqual(['theta_head_zone']);
+    expect([...viewOf(worn(artimexHelmet)).off.get('helmet') ?? []]).toEqual(['theta_head_zone']);
+  });
+
+  it('lets a chunk that is off cover nothing', () => {
+    expect(viewOf(worn(artimexHelmet, otherCore)).chunks).toEqual([]);
+    expect(viewOf(worn(artimexHelmet, artimexCore)).chunks).toHaveLength(1);
+  });
+
+  it('reads a core another piece hides as no core', () => {
+    const view = viewOf(worn(artimexHelmet, artimexCore, item('arms', { hidden: ['Armor_Torso'] })));
+    expect(view.off.get('helmet')?.has('theta_head_zone')).toBe(true);
+  });
+
+  it('draws a zone while any condition holds, and holds a condition only when every check passes', () => {
+    // The Aril arms: an Aril core and an Aril pack, together.
+    const arms = item('arms', { visibility: [{ zone: 'theta_arms_zone', when: [[
+      { ports: ['Armor_Torso'], active: ['Armor/FPS/Set/Greycat'], disable: [] },
+      { ports: ['backpack'], active: ['Armor/FPS/Set/Greycat'], disable: [] },
+    ]] }] });
+    const core = item('torso', { tagged: ['Armor/FPS/Set/Greycat'] });
+    const pack = item('backpack', { tagged: ['Armor/FPS/Set/Greycat'] });
+    expect(offZones(arms, portHolders(worn(arms, core))).has('theta_arms_zone')).toBe(true);
+    expect(offZones(arms, portHolders(worn(arms, core, pack))).size).toBe(0);
+    // The Arden-SL helmet: its core in either of two ports.
+    const helmet = item('helmet', { visibility: [{ zone: 'theta_head_zone', when: [
+      [{ ports: ['Armor_Torso'], active: ['Global/Manufacturer/RRS'], disable: [] }],
+      [{ ports: ['Torso_1'], active: ['Global/Manufacturer/RRS'], disable: [] }],
+    ] }] });
+    expect(offZones(helmet, portHolders(worn(helmet, otherCore))).size).toBe(0);
+  });
+
+  it('draws a chunk that a tag turns off until something holding it goes on', () => {
+    // The Clash core's back: drawn until any pack goes on.
+    const core = item('torso', { visibility: [{ zone: 'omega_core_zone', when: [[
+      { ports: ['backpack'], active: [], disable: ['Armor/FPS/Part/Backpack'] },
+    ]] }] });
+    expect(offZones(core, portHolders(worn(core))).size).toBe(0);
+    const pack = item('backpack', { tagged: ['Armor/FPS/Part/Backpack'] });
+    expect([...offZones(core, portHolders(worn(core, pack)))]).toEqual(['omega_core_zone']);
   });
 });
 

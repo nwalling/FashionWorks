@@ -47,12 +47,30 @@ export interface CatalogueItem {
   /** The body zones this piece covers and at which layer: 0 the body, 1 shirt,
    * trousers, boots and gloves, 2 jacket, 3 undersuit, 4 armour. */
   chunks?: Array<{ zone: string; layer: number; visible: number[] }>;
+  /** The zones this piece draws only beside the right partner -- the Artimex
+   * helmet's cowl and breathing tube with an Artimex core. A zone is drawn
+   * while any entry of `when` holds, each a list of checks that must all pass
+   * (`three/outfit.ts` `offZones`). Absent on most pieces and older cores. */
+  visibility?: Array<{ zone: string; when: PortCheck[][] }>;
+  /** The tags a visibility check can find on this piece, as paths in the
+   * game's tag tree (`Global/Manufacturer/QuirinusTech`). Only those some
+   * check reads; absent where none is. */
+  tagged?: string[];
   /** The ports this piece hides while worn: a jacket the shirt, an undersuit
    * every clothing port, a helmet the hat and hair. */
   hidden?: string[];
   /** `AttachDef.Tags`, one token each: `Set_02`, `Color_06`, and directives
    * like `$hatHair+` that change what the character draws. */
   tags?: string[];
+}
+
+/** One check of a visibility condition: it passes when the piece in one of
+ * `ports` holds every `active` tag and none of the `disable` ones, a tag being
+ * held through the tree. An empty port holds no tags. */
+export interface PortCheck {
+  ports: string[];
+  active: string[];
+  disable: string[];
 }
 
 /** An item port that hangs something off a bone: a holster. LOADOUT.md. */

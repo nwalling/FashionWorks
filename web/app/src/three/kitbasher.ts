@@ -1638,7 +1638,9 @@ export class Kitbasher {
    * drawn unless something worn hides its port; the figure's hair and head
    * likewise, and its body not at all under an undersuit that reaches from the
    * feet to the chest. Then the zone rule: each drawn mesh, and the figure at
-   * layer 0, loses the zone submeshes a piece on a higher layer covers. */
+   * layer 0, loses the zone submeshes a piece on a higher layer covers, and a
+   * piece the zones its conditions leave off -- an Artimex helmet's cowl
+   * beside any core but an Artimex. */
   private applyOutfit(): void {
     // A portrait with the helmet off draws the outfit as if nothing were on
     // the head, so what it hid -- the hair -- shows again.
@@ -1646,10 +1648,10 @@ export class Kitbasher {
       ? new Map([...this.wearing].filter(([slot]) => !BARE_HEAD_SLOTS.has(slot)))
       : this.wearing;
     const view = viewOf(shown);
-    const zoned = (objects: Object3D[], layer: number) => {
+    const zoned = (objects: Object3D[], layer: number, off?: ReadonlySet<string>) => {
       for (const object of objects) {
         object.traverse((o) => {
-          if ((o as Mesh).isMesh) showUncovered((o as Mesh).geometry, layer, view.chunks);
+          if ((o as Mesh).isMesh) showUncovered((o as Mesh).geometry, layer, view.chunks, off);
         });
       }
     };
@@ -1657,7 +1659,7 @@ export class Kitbasher {
       const drawn = !view.hiddenSlots.has(slot) && !(this.bareHead && BARE_HEAD_SLOTS.has(slot));
       for (const object of loaded.objects) object.visible = drawn;
       const item = this.wearing.get(slot);
-      if (drawn && item) zoned(loaded.objects, layerOf(item));
+      if (drawn && item) zoned(loaded.objects, layerOf(item), view.off.get(slot));
     }
     // The hair variant something worn asks for, once it is loaded; until then
     // the plain hair stands in rather than none at all.
