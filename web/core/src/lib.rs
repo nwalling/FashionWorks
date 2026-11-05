@@ -359,7 +359,8 @@ pub fn build_catalogue(dcb: &[u8], ini: &str, skeleton: &str) -> Result<String, 
         .filter_map(|r| build::build_item(&r.value, &palettes, &makers, &loc, &tags, skeleton, &r.source_path))
         .collect();
     // What the visibility conditions test, and nothing else.
-    catalog::visibility::keep_read_tags(&mut items);
+    let read = catalog::visibility::read_tags(&items);
+    catalog::visibility::trim_tagged(&mut items, &read);
     // The parts a piece wears with it, before anything leaves the list.
     build::resolve_attached(&mut items);
     // NPC-only records are in the DataCore and are not wearable, so they
@@ -386,7 +387,8 @@ pub fn build_catalogue(dcb: &[u8], ini: &str, skeleton: &str) -> Result<String, 
     });
     build::assign_sets(&mut items);
     build::link_variants(&mut items);
-    let gear = build_gear(&database, &palettes, &makers, &loc);
+    let mut gear = build_gear(&database, &palettes, &makers, &loc, &tags);
+    catalog::visibility::trim_tagged(&mut gear, &read);
 
     serde_json::to_string(&serde_json::json!({
         "skeleton": skeleton,
@@ -405,9 +407,17 @@ pub fn build_gear(
     palettes: &catalog::PaletteIndex,
     makers: &std::collections::HashMap<String, serde_json::Value>,
     loc: &catalog::Localization,
+    tags: &catalog::TagIndex,
 ) -> Vec<serde_json::Value> {
     let mut gear: Vec<serde_json::Value> = catalog::db::gear_records(database)
-        .filter_map(|r| catalog::gear::build_gear_item(&r.value, palettes, makers, loc))
+        .filter_map(|r| {
+            // What a worn piece's visibility check can find on it: a magazine
+            // in a pouch, an Apar weapon in the hand. Trimmed by the caller.
+            catalog::gear::build_gear_item(&r.value, palettes, makers, loc).map(|mut item| {
+                item["tagged"] = serde_json::json!(catalog::visibility::tagged_for(&r.value, tags));
+                item
+            })
+        })
         .filter(|g| g["geometry"].as_array().is_some_and(|a| !a.is_empty()))
         .collect();
     gear.sort_by(|a, b| {

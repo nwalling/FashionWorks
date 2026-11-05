@@ -119,9 +119,22 @@ describe('a chunk that answers to a partner', () => {
     expect([...viewOf(worn(artimexHelmet)).off.get('helmet') ?? []]).toEqual(['theta_head_zone']);
   });
 
-  it('lets a chunk that is off cover nothing', () => {
-    expect(viewOf(worn(artimexHelmet, otherCore)).chunks).toEqual([]);
-    expect(viewOf(worn(artimexHelmet, artimexCore)).chunks).toHaveLength(1);
+  it('keeps covering what a chunk that is off covers', () => {
+    // The Clash core's back goes off under a pack; the undersuit's chest piece
+    // under the core stays covered.
+    expect(viewOf(worn(artimexHelmet, otherCore)).chunks).toHaveLength(1);
+  });
+
+  it('reads a holster and the hand for gear', () => {
+    // A Morozov-SH-I Stronghold pouch: off while a magazine is in its holster.
+    const core = item('torso', { visibility: [{ zone: 'theta_pouch01_zone', when: [[
+      { ports: ['magazine_attach_2'], active: [], disable: ['Weapon/FPS/Attachment/Magazine'] },
+    ]] }] });
+    const magazine = item('magazine' as WearSlot, { tagged: ['Weapon/FPS/Attachment/Magazine'] });
+    expect(viewOf(worn(core)).off.get('torso')).toBeUndefined();
+    expect([...viewOf(worn(core), new Map([['magazine_attach_2', magazine]])).off.get('torso') ?? []])
+      .toEqual(['theta_pouch01_zone']);
+    expect(viewOf(worn(core), new Map([['magazine_attach_3', magazine]])).off.get('torso')).toBeUndefined();
   });
 
   it('reads a core another piece hides as no core', () => {

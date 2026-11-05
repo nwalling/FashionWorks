@@ -35,8 +35,10 @@
 //! Arden-SL, Palatino and Outback helmets each to their own core, and the
 //! Piecemeal core's hood to the Badami helmet.
 //!
-//! `SkipTags` is empty on every record and is not carried. A check on a port
-//! nothing is worn in -- a magazine or a hand -- reads as empty.
+//! `SkipTags` is empty on every record and is not carried. Gear is tagged too,
+//! because a port can be a holster or the hand: the Morozov-SH-I Stronghold's
+//! six pouches are each off while a magazine is in theirs, and the BUL-H4's
+//! feed wants its pack *and* an Apar weapon in the hand.
 //!
 //! The Python catalogue does not carry this: the local viewer's baked meshes
 //! keep no zone submeshes to hide, and the pipeline's DataCore export has no
@@ -202,6 +204,12 @@ pub fn holds(held: &str, wanted: &str) -> bool {
 /// or so, loot tables and interaction points among them, and a check only ever
 /// asks about a few dozen.
 pub fn keep_read_tags(items: &mut [Value]) {
+    let read = read_tags(items);
+    trim_tagged(items, &read);
+}
+
+/// Every tag some condition among `items` tests, `active` or `disable`.
+pub fn read_tags(items: &[Value]) -> HashSet<String> {
     let mut read: HashSet<String> = HashSet::new();
     for item in items.iter() {
         for chunk in item.get("visibility").and_then(Value::as_array).into_iter().flatten() {
@@ -216,6 +224,13 @@ pub fn keep_read_tags(items: &mut [Value]) {
             }
         }
     }
+    read
+}
+
+/// Keep of each item's `tagged` only the tags in `read`, dropping the field
+/// where none is left. Gear is trimmed by what the worn pieces' conditions
+/// read: a magazine in a pouch, a weapon in the hand.
+pub fn trim_tagged(items: &mut [Value], read: &HashSet<String>) {
     for item in items.iter_mut() {
         let Some(object) = item.as_object_mut() else { continue };
         let kept: Vec<Value> = object

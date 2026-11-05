@@ -394,27 +394,50 @@ helmet it is the cowl at the back of the head (4,058 vertices), the tube down
 the chest (2,958) and a piece under the chin (379); on the Geist ASD helmet the
 hood down the back (4,915).
 
+**The other conditional zones**, named the same way (`web/core/src/zones.rs`
+has the evidence for each): `omega_core_zone` is on every one of the sixteen
+meshes carrying its word that a record lists it for; `theta_core_zone` on all
+four families that condition it (Aril core, BUL-H4, VGL flight suits, Inmate
+Work undersuit); `theta_legs_zone` and `theta_arms_zone` on exactly the Aril
+meshes that list them. The Morozov-SH-I Stronghold core's six pouches are
+named by the magazine bone each lies against, 3-4 cm off, which is the port
+its record conditions it on (`examples/zone_bones.rs`).
+
 **Built** in the web catalogue and engine. `catalog::visibility` reads the tag
 tree (19,000 tags, by GUID to path) and gives each piece `visibility` --
-`{zone, when: [[{ports, active, disable}]]}` -- and `tagged`, the tags a check
-can find on it, trimmed to those some check reads (1.3 MB as read, 215 KB
-kept). `outfit.offZones` decides each worn piece's zones against what is worn
-in each port, and an off zone is neither drawn nor covers anything beneath it.
-A piece another hides holds nothing in its port, and a hand or a magazine port
-reads as empty. Catalogue 6. The Python catalogue does not carry it: the local
-viewer's baked meshes keep no zone submeshes, its DataCore export has no tag
-tree, and `chunks`, which both carry, is unchanged. `cargo run --example
-visibility_probe` lists, for every conditional chunk, the families that turn
-it on.
+`{zone, when: [[{ports, active, disable}]]}` -- and every piece and every
+piece of gear `tagged`, the tags a check can find on it, trimmed to those
+some check reads (1.3 MB as read, 215 KB kept). `outfit.offZones` decides each
+worn piece's zones against what is worn in each port and what the holsters
+and the hand hold: a Stronghold pouch goes off while a magazine is in its
+holster (59 magazines), the BUL-H4's feed shows only with its pack and an
+Apar weapon in the hand (8). A drawn weapon leaves its holster empty, as in
+the game. A piece another hides holds nothing in its port. Catalogue 6. The
+Python catalogue does not carry it: the local viewer's baked meshes keep no
+zone submeshes, its DataCore export has no tag tree, and `chunks`, which both
+carry, is unchanged. `cargo run --example visibility_probe` lists, for every
+conditional chunk, the families that turn it on.
 
-**Found and left.** The other conditional zones are not named yet, so they
-draw as before, unconditionally: the Aril and Strata `theta_arms/legs/core`,
-the Clash core's `omega_core_zone`, the Morozov-SH-I Stronghold's six magazine
-pouches (each off while a magazine is in its port), the BUL-H4's
-`theta_core_zone` (its pack, or an Apar weapon in the hand), the VGL flight
-suits' (their helmet) and the Inmate Work undersuit's (its pack). Each needs
-its word read off its meshes the way this one was. The Carnifex and Alb
-pieces' conditions ask for nothing a port can lack, and would not change.
+**A condition decides the piece's own zone, not what it covers.** The Clash
+core's back goes off under a pack, and the core still covers the undersuit's
+torso parts beneath it; were an off chunk to stop covering, the Odyssey II's
+torso part would come back through the core.
+
+**Naming `omega_core_zone` brings the covering rule to armour's torso.** 458
+cores list it at layer 4 and 210 undersuits at 3, so a core now hides the
+undersuit parts in that zone: mid-torso parts like the Odyssey II's at the
+waist and the Second Life's at the back, which would otherwise poke through. A
+core's own part in it -- the Artimex core's neck ring and cloak -- is at the
+top layer and stays drawn. `omega_arms_zone` and `omega_legs_zone` are not
+named, so arms and legs still draw the undersuit beneath them in full.
+
+**The Artimex core's ring and cloak are drawn with any helmet, or none.**
+Asked about, and settled by the game: its inventory icon, on the bare
+mannequin, shows both, and the record conditions neither. Noel chose to keep
+them as the game draws them.
+
+The Carnifex and Alb pieces' conditions ask for nothing a port can lack, and
+their zones stay drawn.
 
 ## Phases
 

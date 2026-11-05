@@ -2645,10 +2645,15 @@ the Artimex cowl the three Artimex core families and nothing else. The
 inventory icon agrees: the Artimex helmet on the bare mannequin has neither.
 
 The web catalogue carries it as `visibility` and `tagged` (catalogue 6), and
-`outfit.offZones` decides it. The Python catalogue does not -- no tag tree in
-its export, no zones in its baked meshes -- and `chunks` is unchanged in both.
-Only `theta_head_zone` is named so far; the other conditional zones still draw
-as before. CLOTHING.md, "Chunks that answer to a partner".
+`outfit.offZones` decides it, against what is worn and what the holsters and
+the hand hold (a Morozov-SH-I Stronghold pouch goes off under a magazine). The
+Python catalogue does not -- no tag tree in its export, no zones in its baked
+meshes -- and `chunks` is unchanged in both. Every conditional zone is named
+now, and a condition decides only the piece's own zone: what its chunk covers
+stays covered. Naming `omega_core_zone` also brings the covering rule to the
+torso: a core hides the undersuit's parts in that zone. The Artimex core's
+neck ring and cloak are drawn with any helmet, as the game's icon shows them.
+CLOTHING.md, "Chunks that answer to a partner".
 
 ### Still unverified
 

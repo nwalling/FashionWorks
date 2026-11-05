@@ -182,7 +182,7 @@ fn main() {
     println!("\nOVERALL {:.3}%  (bar: 99.5%)", ok as f64 / total.max(1) as f64 * 100.0);
 
     // Gear, both ways, every field. LOADOUT.md Phase 1.
-    let gear = fashionworks_core::build_gear(&database, &palettes, &makers, &loc);
+    let gear = fashionworks_core::build_gear(&database, &palettes, &makers, &loc, &tags);
     let want_gear: HashMap<&str, &Value> = manifest["gear"]
         .as_array()
         .map(|a| a.iter().filter_map(|i| Some((i["id"].as_str()?, i))).collect())

@@ -18,7 +18,10 @@
  * tube plug into the Artimex core, and are drawn only with one in the torso
  * port; the game's own icon shows the helmet bare. Each piece's `visibility`
  * says which of its zones wait on what (`catalog::visibility` in the core
- * reads it), and `offZones` decides them against what is worn.
+ * reads it), and `offZones` decides them against what is worn and carried.
+ * A condition decides only whether the piece's own zone is drawn: what it
+ * covers beneath stays covered, so the Clash core's back going off under a
+ * pack does not bare the undersuit's chest piece under the core.
  */
 
 import {
@@ -119,13 +122,16 @@ export function holdsTag(held: string, wanted: string): boolean {
 }
 
 /** The piece each port holds, lowercased: what a visibility check reads. A
- * hidden piece holds nothing, and a port nothing is worn in -- a hand, a
- * magazine pouch -- reads as empty. */
+ * hidden piece holds nothing. `gear` is what the holsters and the hand hold,
+ * by port (`weapon_attach_hand_right` for the hand); a port nothing is in
+ * reads as empty. */
 export function portHolders(
   wearing: ReadonlyMap<WearSlot, CatalogueItem>,
   hiddenSlots: ReadonlySet<WearSlot> = new Set(),
+  gear: ReadonlyMap<string, CatalogueItem> = new Map(),
 ): Map<string, CatalogueItem> {
   const out = new Map<string, CatalogueItem>();
+  for (const [port, item] of gear) out.set(port.toLowerCase(), item);
   for (const [slot, item] of wearing) if (!hiddenSlots.has(slot)) out.set(SLOT_PORT[slot].toLowerCase(), item);
   return out;
 }
@@ -142,7 +148,8 @@ function checkPasses(check: PortCheck, holders: ReadonlyMap<string, CatalogueIte
  * what `holders` hold. A zone is drawn while any of its conditions holds, and
  * a condition holds when all its checks pass: the Artimex cowl wants an
  * Artimex core in `Armor_Torso`, the Aril arms' chunk an Aril core *and* an
- * Aril pack, and the Clash core's back is drawn until any pack goes on. */
+ * Aril pack, the Clash core's back is drawn until any pack goes on, and a
+ * Morozov-SH-I Stronghold pouch until a magazine goes in its holster. */
 export function offZones(item: CatalogueItem, holders: ReadonlyMap<string, CatalogueItem>): Set<string> {
   const drawn = new Map<string, boolean>();
   for (const { zone, when } of item.visibility ?? []) {
@@ -159,8 +166,7 @@ export interface OutfitView {
   /** The zones of each worn piece its visibility conditions leave undrawn:
    * the Artimex helmet's cowl beside any core but an Artimex. */
   readonly off: ReadonlyMap<WearSlot, ReadonlySet<string>>;
-  /** Every chunk a drawn piece covers: what the zone rule hides beneath. A
-   * chunk its conditions leave undrawn covers nothing. */
+  /** Every chunk a drawn piece covers: what the zone rule hides beneath. */
   readonly chunks: readonly ZoneChunk[];
   readonly hideHair: boolean;
   readonly hideHead: boolean;
@@ -187,11 +193,16 @@ export function addedTags(item: CatalogueItem): string[] {
   });
 }
 
-export function viewOf(wearing: ReadonlyMap<WearSlot, CatalogueItem>): OutfitView {
+/** `gear` is what the holsters and the hand hold, by port, for the pieces
+ * whose zones answer to it. */
+export function viewOf(
+  wearing: ReadonlyMap<WearSlot, CatalogueItem>,
+  gear: ReadonlyMap<string, CatalogueItem> = new Map(),
+): OutfitView {
   const hidden = hiddenPorts(wearing.values());
   const hiddenSlots = new Set<WearSlot>();
   for (const slot of wearing.keys()) if (portHidden(SLOT_PORT[slot], hidden)) hiddenSlots.add(slot);
-  const holders = portHolders(wearing, hiddenSlots);
+  const holders = portHolders(wearing, hiddenSlots, gear);
   const off = new Map<WearSlot, ReadonlySet<string>>();
   for (const [slot, item] of wearing) {
     const zones = offZones(item, holders);
@@ -201,7 +212,7 @@ export function viewOf(wearing: ReadonlyMap<WearSlot, CatalogueItem>): OutfitVie
   // not also hide the skin at a hem the jacket leaves open.
   const chunks = [...wearing]
     .filter(([slot]) => !hiddenSlots.has(slot))
-    .flatMap(([slot, item]) => (item.chunks ?? []).filter((chunk) => !off.get(slot)?.has(chunk.zone)));
+    .flatMap(([, item]) => item.chunks ?? []);
   const tags = [...wearing].filter(([slot]) => !hiddenSlots.has(slot)).flatMap(([, item]) => addedTags(item));
   return {
     hiddenSlots,

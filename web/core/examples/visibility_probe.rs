@@ -63,6 +63,8 @@ fn main() {
     visibility::keep_read_tags(&mut items);
     let trimmed: usize = items.iter().filter_map(|i| i.get("tagged")).map(|t| t.to_string().len()).sum();
 
+    let mut gear = fashionworks_core::build_gear(&database, &palettes, &makers, &loc, &tags);
+    visibility::trim_tagged(&mut gear, &visibility::read_tags(&items));
     let conditional: Vec<&Value> = items.iter().filter(|i| i.get("visibility").is_some()).collect();
     println!("{} items, {} with a conditional chunk", items.len(), conditional.len());
     let mut seen = BTreeSet::new();
@@ -87,8 +89,15 @@ fn main() {
                         .filter(|other| passes(other, check))
                         .map(|other| family(other["class_name"].as_str().unwrap_or("")))
                         .collect();
+                    // A holster or the hand holds gear.
+                    let gear_families: BTreeSet<String> = gear
+                        .iter()
+                        .filter(|g| passes(g, check))
+                        .map(|g| family(g["class_name"].as_str().unwrap_or("")))
+                        .collect();
                     let shown = if slots.is_empty() {
-                        "a port nothing is worn in: reads empty".to_string()
+                        format!("gear: {} of {} pass{}", gear.iter().filter(|g| passes(g, check)).count(), gear.len(),
+                            if gear_families.len() <= 6 { format!(" {gear_families:?}") } else { String::new() })
                     } else if families.len() > 12 {
                         format!("{} families", families.len())
                     } else {

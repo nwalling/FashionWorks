@@ -71,19 +71,49 @@ const BODY: &[(u32, &str)] = &[
 /// colourways. It is the shirt's hem, which a jacket covering the hips hides.
 const GARMENT: &[(u32, &str)] = &[(232552810, "hips_zone")];
 
-/// Zones armour carries, named the same way.
+/// Zones armour carries, named the same way: a word carried by the meshes of
+/// the records that list the zone, read off the 606 male character meshes the
+/// pipeline has extracted.
 ///
-/// `theta_head_zone` is what a helmet draws only beside its own core -- the
-/// Artimex cowl and breathing tube, the Geist ASD hood
-/// (`catalog::visibility`). Of the 606 male character meshes the pipeline has
-/// extracted, eleven carry this word, and the ten a record points at belong to
-/// the eight families whose records list `theta_head_zone`: the Artimex, Geist
-/// ASD, Arden-SL, Palatino, Outback, Inmate Work and THP helmets and the
-/// Piecemeal core. The eleventh, `m_kap_light_combat_helmet_02_01`, no record
-/// names. On the Artimex helmet
-/// it is three submeshes: the cowl at the back of the head, the tube down the
-/// chest and the piece under the chin.
-const ARMOUR: &[(u32, &str)] = &[(2583318635, "theta_head_zone")];
+/// * `theta_head_zone` is what a helmet draws only beside its own core -- the
+///   Artimex cowl and breathing tube, the Geist ASD hood
+///   (`catalog::visibility`). Eleven meshes carry it, and the ten a record
+///   names belong to the eight families whose records list the zone: the
+///   Artimex, Geist ASD, Arden-SL, Palatino, Outback, Inmate Work and Ixonia
+///   helmets and the Piecemeal core. (`m_kap_light_combat_helmet_02_01`, the
+///   eleventh, no record names.) On the Artimex helmet it is three submeshes:
+///   the cowl at the back of the head, the tube down the chest and the piece
+///   under the chin.
+/// * `omega_core_zone`: every one of the sixteen meshes carrying it that a
+///   record names lists the zone -- cores at layer 4, undersuits at 3. On a
+///   core it is a part at the neck or the back (the Artimex core's neck ring
+///   and cloak, the Clash core's back plate); on an undersuit a torso part a
+///   core covers (the Odyssey II's at the waist, the BUL-H4's collar).
+/// * `theta_core_zone`: on all four families whose records condition it -- the
+///   Aril core, the BUL-H4, the VGL flight suits and the Inmate Work undersuit.
+///   Three more meshes carry it as their main part without listing the zone
+///   (the Ixonia helmet, two Carrion cores, the Vagabond jacket), where
+///   nothing reads it.
+/// * `theta_legs_zone`: on exactly the two meshes whose records list it, the
+///   Aril core and legs. `theta_arms_zone`: on the one, the Aril arms.
+/// * `theta_pouch01..06_zone`: the Morozov-SH-I Stronghold core's six magazine
+///   pouches. Each pouch's submeshes lie 3-4 cm from one `magazine_attach_N`
+///   bone of the core's own skeleton (`examples/zone_bones.rs`), and that is
+///   the port the record conditions the pouch on -- pouch 01 on
+///   `magazine_attach_2`, 02 on 3, 03 on 8, 04 on 6, 05 on 7, 06 on 4.
+const ARMOUR: &[(u32, &str)] = &[
+    (2583318635, "theta_head_zone"),
+    (3423257195, "omega_core_zone"),
+    (220912766, "theta_core_zone"),
+    (2424359756, "theta_legs_zone"),
+    (347428306, "theta_arms_zone"),
+    (450076817, "theta_pouch01_zone"),
+    (992117880, "theta_pouch02_zone"),
+    (3234042855, "theta_pouch03_zone"),
+    (1097721502, "theta_pouch04_zone"),
+    (495489989, "theta_pouch05_zone"),
+    (255744764, "theta_pouch06_zone"),
+];
 
 /// The zone a submesh word names, where it is known.
 pub fn name(word: u32) -> Option<&'static str> {
@@ -104,6 +134,10 @@ mod tests {
         assert_eq!(name(3955070026), Some("torso01_zone"));
         assert_eq!(name(232552810), Some("hips_zone"), "the shirt hem");
         assert_eq!(name(2583318635), Some("theta_head_zone"), "the Artimex cowl");
+        let mut words: Vec<u32> = BODY.iter().chain(GARMENT).chain(ARMOUR).map(|(w, _)| *w).collect();
+        words.sort_unstable();
+        words.dedup();
+        assert_eq!(words.len(), BODY.len() + GARMENT.len() + ARMOUR.len(), "no word names two zones");
         assert_eq!(name(1), None);
     }
 }

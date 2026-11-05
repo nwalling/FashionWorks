@@ -1647,7 +1647,7 @@ export class Kitbasher {
     const shown = this.bareHead
       ? new Map([...this.wearing].filter(([slot]) => !BARE_HEAD_SLOTS.has(slot)))
       : this.wearing;
-    const view = viewOf(shown);
+    const view = viewOf(shown, this.gearHolders());
     const zoned = (objects: Object3D[], layer: number, off?: ReadonlySet<string>) => {
       for (const object of objects) {
         object.traverse((o) => {
@@ -1681,6 +1681,17 @@ export class Kitbasher {
       for (const object of loaded.objects) object.visible = visible;
       if (visible) zoned(loaded.objects, 0);
     }
+  }
+
+  /** What each gear port holds, for the pieces whose zones answer to it: a
+   * holster its item, the hand the held one -- whose holster is then empty, as
+   * in the game, where a drawn weapon leaves it. */
+  private gearHolders(): Map<string, CatalogueItem> {
+    const out = new Map<string, CatalogueItem>();
+    for (const [port, carried] of this.carried) {
+      out.set(port === this.holdingPort ? HAND : port, carried.item);
+    }
+    return out;
   }
 
   /** Load the figure's part for a geometry tag -- the hair under a hat -- and
@@ -2333,6 +2344,8 @@ export class Kitbasher {
     if (previous) this.mountCarried(previous);
     const next = port ? this.carried.get(port) : undefined;
     if (next) this.mountCarried(next);
+    // A holster emptied or filled can show or hide a pouch, the hand a feed.
+    this.applyOutfit();
   }
 
   /** The pose to fall back to when the hand empties: crouched stays crouched. */
@@ -2706,6 +2719,7 @@ export class Kitbasher {
     }
     await this.attachMagazine(carried);
     this.mountCarried(carried);
+    this.applyOutfit();
     this.evict();
     this.frameLoadout();
     // Clones share the template's materials, so one refine serves every copy.
@@ -2731,6 +2745,7 @@ export class Kitbasher {
     this.carried.delete(port);
     const wasHeld = this.holdingPort === port;
     if (wasHeld) this.holdingPort = null;
+    this.applyOutfit();
     this.evict();
     const status = `${displayName(carried.item)} ${port === HAND ? 'put down' : 'put away'}`;
     this.publish({ status });
