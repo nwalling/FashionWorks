@@ -423,61 +423,50 @@
   color: var(--sc-text);
 }
 
-/* The overlays over the canvas.
+/* The bar above the canvas: pose, animate and hold on the left, the scene on
+ * the right. In the page's flow rather than over the canvas, so no control
+ * ever sits on the figure (it used to be two overlays, at the top right and
+ * bottom centre, and the figure stood behind both). It wraps on a narrow
+ * stage, the scene side keeping to the right.
  *
- * OrbitControls listens on the canvas, so anything over it steals drag and
- * wheel. Each overlay lets the pointer through and only its controls take it:
- * a drag starting in any gap still orbits, a wheel still zooms.
- *
- * Their surface is 88% of the card, not glassier: the host's contrast test
- * composites backgrounds up the DOM chain and cannot see the canvas, so it
- * measures overlay text against the card. Mostly opaque keeps the real
- * contrast close to that over any lighting or backdrop. No backdrop-filter:
- * blurring a live canvas costs the GPU every frame. */
-.fw-kit-scene,
-.fw-kit-dock {
-  position: absolute;
-  pointer-events: none;
+ * It is stacked above the canvas because the More popover hangs from it, over
+ * the canvas, and the canvas comes later in the page. */
+.fw-kit-bar {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 16px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--sc-border);
   font-size: 13px;
 }
 
-.fw-kit-scene button,
-.fw-kit-scene select,
-.fw-kit-dock button,
-.fw-kit-more {
-  pointer-events: auto;
-}
-
-.fw-kit-scene > .fw-kit-group,
-.fw-kit-more,
-.fw-kit-dock {
-  background: color-mix(in srgb, var(--sc-card) 88%, transparent);
-  border: 1px solid var(--sc-border);
-  border-radius: 10px;
-}
-
-/* Bounded by the canvas on both sides, wrapping onto a second line rather
- * than growing left over the column when the canvas is narrow. The gaps it
- * leaves still pass the pointer through to orbit. */
+.fw-kit-dock,
 .fw-kit-scene {
-  top: 12px;
-  right: 12px;
-  left: 12px;
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
   align-items: center;
-  gap: 8px;
+  gap: 6px 8px;
+}
+
+.fw-kit-scene {
+  position: relative;
+  justify-content: flex-end;
+  margin-left: auto;
 }
 
 .fw-kit-scene button {
   white-space: nowrap;
 }
 
-.fw-kit-scene > .fw-kit-group {
-  padding: 4px 6px;
-}
-
+/* The popover is the one surface left over the canvas, and only while it is
+ * open. 88% of the card, not glassier: the host's contrast test composites
+ * backgrounds up the DOM chain and cannot see the canvas, so it measures this
+ * text against the card. No backdrop-filter: blurring a live canvas costs the
+ * GPU every frame. */
 .fw-kit-more {
   position: absolute;
   top: calc(100% + 6px);
@@ -488,6 +477,9 @@
   flex-direction: column;
   gap: 6px;
   padding: 8px;
+  background: color-mix(in srgb, var(--sc-card) 88%, transparent);
+  border: 1px solid var(--sc-border);
+  border-radius: 10px;
 }
 
 .fw-kit-more[hidden] {
@@ -505,31 +497,9 @@
   flex: 0 0 64px;
 }
 
-/* The popover's own rows need no second surface. */
-.fw-kit-more .fw-kit-group {
-  padding: 0;
-}
-
-.fw-kit-dock {
-  bottom: 14px;
-  /* Centred by auto margins between both edges, not by left: 50%, which
-   * leaves an absolutely placed box only half the stage to grow into. */
-  left: 0;
-  right: 0;
-  margin: 0 auto;
-  width: fit-content;
-  max-width: calc(100% - 24px);
-  box-sizing: border-box;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  align-items: center;
-  gap: 6px 8px;
-  padding: 6px 8px;
-}
-
-/* Dividers between poses, animate and hold. */
-.fw-kit-dock > * + * {
+/* Dividers between poses, animate and hold, and between the scene's groups. */
+.fw-kit-dock > * + *,
+.fw-kit-scene > .fw-kit-group + * {
   border-left: 1px solid var(--sc-border);
   padding-left: 8px;
 }
@@ -558,16 +528,17 @@
   }
 }
 
-/* The portrait panel (Portrait.tsx): under the scene cluster, on the same
- * mostly-opaque card surface as the other overlays. The previews are circles
- * because that is how every Hangarworks client crops an avatar, the small
- * one at the member list's 34 px. */
+/* The portrait panel (Portrait.tsx), and the loadouts one: at the canvas's
+ * top right, under the bar's scene controls, on a mostly-opaque card surface
+ * like the More popover's. The previews are circles because that is how
+ * every Hangarworks client crops an avatar, the small one at the member
+ * list's 34 px. */
 .fw-kit-portrait {
   position: absolute;
-  top: calc(var(--fw-kit-scene-bottom, 44px) + 12px);
+  top: 12px;
   right: 12px;
   width: 280px;
-  max-height: calc(100% - var(--fw-kit-scene-bottom, 44px) - 96px);
+  max-height: calc(100% - 24px);
   overflow-y: auto;
   box-sizing: border-box;
   display: flex;
@@ -579,7 +550,6 @@
   border-radius: 10px;
   color: var(--sc-text);
   font-size: 13px;
-  pointer-events: auto;
 }
 
 .fw-kit-portrait-head {

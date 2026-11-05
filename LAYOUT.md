@@ -20,6 +20,7 @@ arrangement, not as a pixel spec.
 | 2: the overlays | done | Scene cluster (top right), More popover and pose dock (bottom centre) on the viewport. Orbit and zoom still work in every gap between overlay controls. |
 | 3: narrow | done | At 720px and below, stage over column still holds. Tiles become chips, the cluster folds into one Scene button, the dock wraps. Nothing scrolls sideways. |
 | 4: verified in the host | here: done. host: waits on the release | `npm run check` green here. The host's `test-fashionworks-theme.mjs` finds no AA failures in any theme. The canvas keeps its size when the mode changes and when the hold group appears. |
+| 5: one bar | built, awaiting preview | The overlays leave the canvas for one bar above it (2026-11-05): pose, animate and hold on the left, the scene on the right. Nothing is drawn over the figure; only the More popover and the portrait and loadouts panels open over the canvas, and only while open. |
 
 ## Why
 
@@ -340,4 +341,32 @@ component.
 
 **Not done here, by the brief's own order:** the minor release, and the
 host's `test-fashionworks-theme.mjs` and `test-fashionworks-archive.mjs`.
+
+## One bar (2026-11-05)
+
+Noel, with a screenshot of the hosted kitbasher: the scene cluster sat over
+the figure's head and the pose dock over its knees. He asked for the
+controls out of the viewport, then for one bar rather than two.
+
+**The bar sits above the canvas, in the page's flow.** Pose, animate and hold
+on the left (`.fw-kit-dock`, the dock's old class), the scene on the right
+(`.fw-kit-scene`): body, light, quality, Portrait, Save image, Loadouts and
+More. Groups are divided by rules rather than by card surfaces, since nothing
+is under them now. It wraps on a narrow stage, the scene side keeping to the
+right, and at 720px and below the scene is still one Scene button.
+
+**What this gives back, and what it costs.** The figure is never behind a
+control, which also settles the framing follow-up above: the dock no longer
+covers the shins. The cost is the overlays' reason for being: problem 4
+returns in a small way. The bar is one line at a desktop width, but where it
+wraps -- a narrow window, or the hold group appearing on one -- the canvas
+shortens by a row. That trades a resize on a rare event for a control over
+the figure all the time.
+
+**What stays over the canvas.** The More popover hangs from the bar (the bar
+is stacked above the canvas for it), and the portrait and loadouts panels sit
+at the canvas's top right, 12px in -- no longer measured against the
+cluster's height, since the cluster is not on the canvas. All three are open
+only while used. The pointer rules the overlays needed (`pointer-events`
+none on the containers) are gone with them.
 

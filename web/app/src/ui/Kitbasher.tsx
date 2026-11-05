@@ -229,18 +229,6 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
   const moreId = useId();
   const moreButton = useRef<HTMLButtonElement>(null);
   const sceneRef = useRef<HTMLDivElement>(null);
-  // The toolbar wraps onto a second line on a narrow canvas; the panels in
-  // its corner start below however tall it is (`--fw-kit-scene-bottom`).
-  useEffect(() => {
-    const scene = sceneRef.current;
-    const canvas = scene?.parentElement;
-    if (!scene || !canvas || typeof ResizeObserver === 'undefined') return undefined;
-    const observer = new ResizeObserver(() => {
-      canvas.style.setProperty('--fw-kit-scene-bottom', `${scene.offsetTop + scene.offsetHeight}px`);
-    });
-    observer.observe(scene);
-    return () => observer.disconnect();
-  }, []);
   useEffect(() => {
     if (!moreOpen) return undefined;
     const onKey = (event: KeyboardEvent) => {
@@ -867,80 +855,12 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
         </aside>
 
         <div className="fw-kit-stage">
-          <div className="fw-kit-canvas">
-            <Viewer tokens={tokens} onScene={onScene} className="fw-view fw-kit-view" />
-            {/* Overlays over the canvas. Their containers let the pointer
-                through, so a drag or wheel in any gap still orbits and zooms;
-                only the controls themselves take it. */}
-            <div className="fw-kit-scene" ref={sceneRef}>
-              {!narrow && bodySwitch}
-              {!narrow && lightSelect}
-              {!narrow && qualitySelect}
-              {!narrow && (
-                <button
-                  type="button"
-                  className="fw-kit-portrait-button"
-                  aria-expanded={portraitOpen}
-                  disabled={!state}
-                  title="A head-and-shoulders picture of your character in this outfit, to download as an avatar"
-                  onClick={() => {
-                    setMoreOpen(false);
-                    setKitsOpen(false);
-                    setPortraitOpen((open) => !open);
-                  }}
-                >
-                  Portrait
-                </button>
-              )}
-              {!narrow && imageButton}
-              {!narrow && kitsButton}
-              <button
-                type="button"
-                ref={moreButton}
-                className="fw-kit-more-button"
-                aria-expanded={moreOpen}
-                aria-controls={moreId}
-                onClick={() => setMoreOpen((open) => !open)}
-              >
-                {narrow ? 'Scene' : 'More'}
-              </button>
-              {/* Rendered closed too, and hidden, so the file inputs it holds
-                  stay in the page for their pickers. */}
-              <div
-                id={moreId}
-                className="fw-kit-more"
-                role="group"
-                aria-label={narrow ? 'Scene' : 'More'}
-                hidden={!moreOpen}
-              >
-                {narrow && (
-                  <>
-                    <div className="fw-kit-more-row">{bodySwitch}</div>
-                    {lightSelect && <div className="fw-kit-more-row">{lightSelect}</div>}
-                    {qualitySelect && <div className="fw-kit-more-row">{qualitySelect}</div>}
-                  </>
-                )}
-                {moreRows}
-              </div>
-            </div>
-            {kitsOpen && props.kits && state && engine.current && (
-              <Kits
-                engine={engine.current}
-                state={state}
-                catalogue={catalogue}
-                host={props.kits}
-                onClose={closeKits}
-              />
-            )}
-            {portraitOpen && state && engine.current && (
-              <Portrait
-                engine={engine.current}
-                state={state}
-                backgrounds={backgrounds}
-                onLoadCharacter={() => chfPicker.current?.click()}
-                onClose={closePortrait}
-              />
-            )}
+          {/* One bar above the canvas, so nothing is ever drawn over the
+              figure: what is used while looking at it -- pose, animate,
+              hold -- on the left, the scene on the right. Only the More
+              popover and the panels open over the canvas, and only while
+              they are open. */}
+          <div className="fw-kit-bar">
             <div className="fw-kit-dock">
               <span className="fw-kit-group" role="group" aria-label="Pose">
                 {poses.map((pose) => (
@@ -999,6 +919,78 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
                 </span>
               )}
             </div>
+            <div className="fw-kit-scene" ref={sceneRef}>
+              {!narrow && bodySwitch}
+              {!narrow && lightSelect}
+              {!narrow && qualitySelect}
+              {!narrow && (
+                <button
+                  type="button"
+                  className="fw-kit-portrait-button"
+                  aria-expanded={portraitOpen}
+                  disabled={!state}
+                  title="A head-and-shoulders picture of your character in this outfit, to download as an avatar"
+                  onClick={() => {
+                    setMoreOpen(false);
+                    setKitsOpen(false);
+                    setPortraitOpen((open) => !open);
+                  }}
+                >
+                  Portrait
+                </button>
+              )}
+              {!narrow && imageButton}
+              {!narrow && kitsButton}
+              <button
+                type="button"
+                ref={moreButton}
+                className="fw-kit-more-button"
+                aria-expanded={moreOpen}
+                aria-controls={moreId}
+                onClick={() => setMoreOpen((open) => !open)}
+              >
+                {narrow ? 'Scene' : 'More'}
+              </button>
+              {/* Rendered closed too, and hidden, so the file inputs it holds
+                  stay in the page for their pickers. */}
+              <div
+                id={moreId}
+                className="fw-kit-more"
+                role="group"
+                aria-label={narrow ? 'Scene' : 'More'}
+                hidden={!moreOpen}
+              >
+                {narrow && (
+                  <>
+                    <div className="fw-kit-more-row">{bodySwitch}</div>
+                    {lightSelect && <div className="fw-kit-more-row">{lightSelect}</div>}
+                    {qualitySelect && <div className="fw-kit-more-row">{qualitySelect}</div>}
+                  </>
+                )}
+                {moreRows}
+              </div>
+            </div>
+          </div>
+          <div className="fw-kit-canvas">
+            <Viewer tokens={tokens} onScene={onScene} className="fw-view fw-kit-view" />
+            {kitsOpen && props.kits && state && engine.current && (
+              <Kits
+                engine={engine.current}
+                state={state}
+                catalogue={catalogue}
+                host={props.kits}
+                onClose={closeKits}
+              />
+            )}
+            {portraitOpen && state && engine.current && (
+              <Portrait
+                engine={engine.current}
+                state={state}
+                backgrounds={backgrounds}
+                onLoadCharacter={() => chfPicker.current?.click()}
+                onClose={closePortrait}
+              />
+            )}
           </div>
           <p className="fw-kit-status">
             <span aria-live="polite">{state?.status ?? 'starting…'}</span>
