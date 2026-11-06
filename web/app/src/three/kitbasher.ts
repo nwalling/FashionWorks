@@ -2370,6 +2370,20 @@ export class Kitbasher {
     this.applyOutfit();
   }
 
+  /** Why a pose is not on offer just now, or null. Standing at ease puts the
+   * weapon back in its holster, and one held with nothing worn to holster it
+   * has nowhere to go: the game's player sets have no lowered stance to stand
+   * at ease with it in hand (only the male background characters' do), so
+   * idle would be the raised aim under another name. Rest still poses, the
+   * weapon in the hand, and so does idle with something in the hand that has
+   * no stance of its own, which stands at ease already. */
+  poseRefusal(label: string): string | null {
+    if (label !== 'idle' || this.holdingPort !== HAND) return null;
+    const item = this.carried.get(HAND)?.item;
+    if (!item?.anim_set || !WEAPON_POSES[item.anim_set]) return null;
+    return `Nothing worn holsters ${displayName(item)}: put it down, or wear armour that holsters it, to stand at ease`;
+  }
+
   /** The pose to fall back to when the hand empties: crouched stays crouched. */
   private unarmedPose(): string {
     return this.state.pose === 'crouch' ? 'crouch' : 'idle';
@@ -2408,6 +2422,13 @@ export class Kitbasher {
     if (this.disposed || !this.rig) return;
     // "ready" was a pose once, and identical to raised; old callers get raised.
     const asked = typeof pose === 'string' ? pose : pose.label;
+    // A pose not on offer (`poseRefusal`) leaves the figure as it is and
+    // says why: its button is greyed, not gone, and a press lands here.
+    const refused = this.poseRefusal(asked);
+    if (refused) {
+      this.publish({ status: refused });
+      return;
+    }
     const label = asked === 'ready' ? 'raised' : asked;
     // Standing at ease or at rest puts the weapon away, as the game does;
     // raising draws one. Crouch keeps whatever is in the hand.
@@ -2571,8 +2592,10 @@ export class Kitbasher {
       return;
     }
     if (ask !== this.emoteAsk || this.disposed) return;
-    if (this.state.pose !== 'idle' || this.holdingPort) {
-      await this.setPose('idle');
+    // A weapon nothing holsters stays in the hand, raised, as it always did.
+    const standing = this.poseRefusal('idle') ? 'raised' : 'idle';
+    if (this.state.pose !== standing || (standing === 'idle' && this.holdingPort)) {
+      await this.setPose(standing);
       if (ask !== this.emoteAsk || this.disposed) return;
     }
     const rig = this.rig;

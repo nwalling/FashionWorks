@@ -342,6 +342,16 @@ the weapon back in its holster, **raised** draws one -- the last held, else
 the first carried weapon, rifles first -- and **crouch** keeps what is in the
 hand. Removing the held item keeps a crouch crouched.
 
+**Idle is greyed while nothing worn holsters the weapon** (2026-11-06, Noel's
+call). A weapon the body's own hand holds has nowhere to go at ease, and the
+player sets have no lowered stance to stand at ease with it -- only the male
+background characters' `pistol_lowered` clips, nothing female -- so idle
+drew the raised aim under another name. The button stays, greyed with the
+reason on hover (`poseRefusal`), and a press leaves the pose as it is and
+puts the reason in the status line. Rest still poses, the weapon in the hand;
+a hand item with no stance (a gadget) stands at ease already and is not
+refused.
+
 The clips:
 
 | anim set | stand raised | crouch | female |

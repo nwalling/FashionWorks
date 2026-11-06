@@ -253,9 +253,12 @@ function emoteTitle(emote: Emote): string {
   return `${emote.text || emoteLabel(emote)}${ways}${off}`;
 }
 
-/** What each pose button does, which with a weapon includes where it goes. */
-const POSE_TITLES: Record<string, (holding: boolean) => string> = {
-  rest: (holding) => `The skeleton's rest pose${holding ? '; the weapon goes back in its holster' : ''}`,
+/** What each pose button does, which with a weapon includes where it goes:
+ * `holding` is the port it came from, and one held with nothing worn to
+ * holster it (`HAND`) stays in the hand. */
+const POSE_TITLES: Record<string, (holding: string | null) => string> = {
+  rest: (holding) => `The skeleton's rest pose${
+    holding === HAND ? '; the weapon stays in the hand' : holding ? '; the weapon goes back in its holster' : ''}`,
   idle: (holding) => (holding ? 'Stand at ease; the weapon goes back in its holster' : 'Stand at ease'),
   raised: (holding) => (holding ? 'Weapon raised' : 'Draw a holstered weapon and raise it'),
   crouch: (holding) => (holding ? 'Crouch with the weapon raised' : 'Crouch'),
@@ -1028,18 +1031,24 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
           <div className="fw-kit-bar" ref={barRef}>
             <div className="fw-kit-dock" ref={dockRef}>
               <span className="fw-kit-group" role="group" aria-label="Pose">
-                {poses.map((pose) => (
-                  <button
-                    key={pose}
-                    type="button"
-                    aria-pressed={state?.pose === pose}
-                    disabled={busy}
-                    title={POSE_TITLES[pose]?.(Boolean(state?.holding))}
-                    onClick={() => void engine.current?.setPose(pose)}
-                  >
-                    {pose}
-                  </button>
-                ))}
+                {poses.map((pose) => {
+                  // Greyed rather than disabled, so the hover still says why
+                  // and a press puts the reason in the status line.
+                  const refused = engine.current?.poseRefusal(pose) ?? null;
+                  return (
+                    <button
+                      key={pose}
+                      type="button"
+                      aria-pressed={state?.pose === pose}
+                      aria-disabled={refused ? true : undefined}
+                      disabled={busy}
+                      title={refused ?? POSE_TITLES[pose]?.(state?.holding ?? null)}
+                      onClick={() => void engine.current?.setPose(pose)}
+                    >
+                      {pose}
+                    </button>
+                  );
+                })}
               </span>
               {!animateFolded && <span className="fw-kit-group">{animateButton}</span>}
               {emotes.length > 0 && (

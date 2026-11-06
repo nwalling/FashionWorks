@@ -64,11 +64,14 @@
   outline-offset: 2px;
 }
 
-.fw-kit button:hover:not(:disabled) {
+.fw-kit button:hover:not(:disabled, [aria-disabled='true']) {
   border-color: var(--sc-border-bright, var(--sc-border));
 }
 
-.fw-kit button:disabled {
+/* `aria-disabled` is a button not on offer that still explains itself: it
+ * keeps its hover title and its focus, which `disabled` does not everywhere. */
+.fw-kit button:disabled,
+.fw-kit button[aria-disabled='true'] {
   opacity: 0.55;
   cursor: default;
 }
