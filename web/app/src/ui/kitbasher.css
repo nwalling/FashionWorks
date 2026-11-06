@@ -426,8 +426,10 @@
 /* The bar above the canvas: pose, animate and hold on the left, the scene on
  * the right. In the page's flow rather than over the canvas, so no control
  * ever sits on the figure (it used to be two overlays, at the top right and
- * bottom centre, and the figure stood behind both). It wraps on a narrow
- * stage, the scene side keeping to the right.
+ * bottom centre, and the figure stood behind both). One row: where the scene
+ * controls would not fit beside the dock they fold into the Scene button
+ * (`Kitbasher.tsx`, `useSceneFolded`), and only a dock too wide for the
+ * stage on its own still wraps.
  *
  * It is stacked above the canvas because the More popover hangs from it, over
  * the canvas, and the canvas comes later in the page. */
@@ -506,7 +508,8 @@
 
 /* Narrow: the tiles drop their second line and wrap as chips, since at 45%
  * of a phone's height four rows of tall tiles would leave no listing. The
- * scene controls fold into one button (`Kitbasher.tsx`, `NARROW`). */
+ * scene controls are always folded into one button here (`Kitbasher.tsx`,
+ * `NARROW`), and above it whenever they do not fit. */
 @media (max-width: 720px) {
   .fw-kit-tiles {
     display: flex;

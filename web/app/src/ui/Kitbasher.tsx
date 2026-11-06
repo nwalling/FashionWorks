@@ -9,7 +9,8 @@
  * Colours are all tokens through `kitbasher.css`; nothing here has a hex value.
  */
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { RefObject } from 'react';
 
 import type { ArchiveClient } from '../archive/client';
 import {
@@ -156,6 +157,68 @@ function useNarrow(): boolean {
   return narrow;
 }
 
+/** A layout effect where there is a layout; on a server render, where React
+ * warns that it does nothing, a plain effect. */
+const useLayoutEffectInBrowser = typeof window === 'undefined' ? useEffect : useLayoutEffect;
+
+/** The width a row's items want laid end to end: their own widths and the
+ * gaps between them. What is not drawn, or is out of the row's flow (the
+ * More popover), is left out. */
+function rowWidth(row: HTMLElement): number {
+  const items = [...row.children].filter((item): item is HTMLElement => item instanceof HTMLElement
+    && item.getClientRects().length > 0 && getComputedStyle(item).position !== 'absolute');
+  const gap = Number.parseFloat(getComputedStyle(row).columnGap) || 0;
+  return items.reduce((sum, item) => sum + item.getBoundingClientRect().width, 0)
+    + gap * Math.max(0, items.length - 1);
+}
+
+/** Whether the bar's scene controls fold into the Scene button: always at
+ * `NARROW`, and above it whenever they would not fit on the bar's one row
+ * beside the dock -- which grows with what is held, so no fixed width
+ * would do.
+ *
+ * Folded there is nothing to measure, so they are tried out again whenever
+ * there is more room beside the dock than when they last folded: put out,
+ * measured and folded back inside one layout effect, before anything is
+ * painted. No width is kept, which could go stale while they are folded --
+ * the light list arriving, Save image saying "saving…". */
+function useSceneFolded(
+  bar: RefObject<HTMLElement>,
+  dock: RefObject<HTMLElement>,
+  scene: RefObject<HTMLElement>,
+  narrow: boolean,
+): boolean {
+  const [crowded, setCrowded] = useState(false);
+  // The room beside the dock when the scene controls last did not fit.
+  const foldedAt = useRef(0);
+  useLayoutEffectInBrowser(() => {
+    if (narrow) return undefined;
+    const decide = () => {
+      const [row, left, right] = [bar.current, dock.current, scene.current];
+      if (!row || !left || !right) return;
+      const style = getComputedStyle(row);
+      const spare = row.clientWidth - (Number.parseFloat(style.paddingLeft) || 0)
+        - (Number.parseFloat(style.paddingRight) || 0)
+        - (Number.parseFloat(style.columnGap) || 0) - rowWidth(left);
+      // Half a pixel of slack: widths are fractional and the row is not.
+      if (crowded) {
+        if (spare > foldedAt.current + 0.5) setCrowded(false);
+      } else if (rowWidth(right) > spare + 0.5) {
+        foldedAt.current = spare;
+        setCrowded(true);
+      }
+    };
+    decide();
+    if (typeof ResizeObserver !== 'function') return undefined;
+    const observer = new ResizeObserver(decide);
+    for (const element of [bar.current, dock.current, scene.current]) {
+      if (element) observer.observe(element);
+    }
+    return () => observer.disconnect();
+  }, [bar, dock, scene, narrow, crowded]);
+  return narrow || crowded;
+}
+
 /** What each pose button does, which with a weapon includes where it goes. */
 const POSE_TITLES: Record<string, (holding: boolean) => string> = {
   rest: (holding) => `The skeleton's rest pose${holding ? '; the weapon goes back in its holster' : ''}`,
@@ -228,7 +291,10 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
   }, [narrow]);
   const moreId = useId();
   const moreButton = useRef<HTMLButtonElement>(null);
+  const barRef = useRef<HTMLDivElement>(null);
+  const dockRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<HTMLDivElement>(null);
+  const folded = useSceneFolded(barRef, dockRef, sceneRef, narrow);
   useEffect(() => {
     if (!moreOpen) return undefined;
     const onKey = (event: KeyboardEvent) => {
@@ -569,6 +635,24 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
     </button>
   );
 
+  // The portrait panel is desktop only, so at `NARROW` there is no button.
+  const portraitButton = !narrow && (
+    <button
+      type="button"
+      className="fw-kit-portrait-button"
+      aria-expanded={portraitOpen}
+      disabled={!state}
+      title="A head-and-shoulders picture of your character in this outfit, to download as an avatar"
+      onClick={() => {
+        setMoreOpen(false);
+        setKitsOpen(false);
+        setPortraitOpen((open) => !open);
+      }}
+    >
+      Portrait
+    </button>
+  );
+
   const kitsButton = props.kits && (
     <button
       type="button"
@@ -588,8 +672,9 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
 
   const moreRows = (
     <>
-      {narrow && (
+      {folded && (
         <div className="fw-kit-more-row">
+          {portraitButton}
           {imageButton}
           {kitsButton}
         </div>
@@ -860,8 +945,8 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
               hold -- on the left, the scene on the right. Only the More
               popover and the panels open over the canvas, and only while
               they are open. */}
-          <div className="fw-kit-bar">
-            <div className="fw-kit-dock">
+          <div className="fw-kit-bar" ref={barRef}>
+            <div className="fw-kit-dock" ref={dockRef}>
               <span className="fw-kit-group" role="group" aria-label="Pose">
                 {poses.map((pose) => (
                   <button
@@ -920,27 +1005,16 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
               )}
             </div>
             <div className="fw-kit-scene" ref={sceneRef}>
-              {!narrow && bodySwitch}
-              {!narrow && lightSelect}
-              {!narrow && qualitySelect}
-              {!narrow && (
-                <button
-                  type="button"
-                  className="fw-kit-portrait-button"
-                  aria-expanded={portraitOpen}
-                  disabled={!state}
-                  title="A head-and-shoulders picture of your character in this outfit, to download as an avatar"
-                  onClick={() => {
-                    setMoreOpen(false);
-                    setKitsOpen(false);
-                    setPortraitOpen((open) => !open);
-                  }}
-                >
-                  Portrait
-                </button>
+              {!folded && (
+                <>
+                  {bodySwitch}
+                  {lightSelect}
+                  {qualitySelect}
+                  {portraitButton}
+                  {imageButton}
+                  {kitsButton}
+                </>
               )}
-              {!narrow && imageButton}
-              {!narrow && kitsButton}
               <button
                 type="button"
                 ref={moreButton}
@@ -949,7 +1023,7 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
                 aria-controls={moreId}
                 onClick={() => setMoreOpen((open) => !open)}
               >
-                {narrow ? 'Scene' : 'More'}
+                {folded ? 'Scene' : 'More'}
               </button>
               {/* Rendered closed too, and hidden, so the file inputs it holds
                   stay in the page for their pickers. */}
@@ -957,10 +1031,10 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
                 id={moreId}
                 className="fw-kit-more"
                 role="group"
-                aria-label={narrow ? 'Scene' : 'More'}
+                aria-label={folded ? 'Scene' : 'More'}
                 hidden={!moreOpen}
               >
-                {narrow && (
+                {folded && (
                   <>
                     <div className="fw-kit-more-row">{bodySwitch}</div>
                     {lightSelect && <div className="fw-kit-more-row">{lightSelect}</div>}

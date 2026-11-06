@@ -20,7 +20,7 @@ arrangement, not as a pixel spec.
 | 2: the overlays | done | Scene cluster (top right), More popover and pose dock (bottom centre) on the viewport. Orbit and zoom still work in every gap between overlay controls. |
 | 3: narrow | done | At 720px and below, stage over column still holds. Tiles become chips, the cluster folds into one Scene button, the dock wraps. Nothing scrolls sideways. |
 | 4: verified in the host | here: done. host: waits on the release | `npm run check` green here. The host's `test-fashionworks-theme.mjs` finds no AA failures in any theme. The canvas keeps its size when the mode changes and when the hold group appears. |
-| 5: one bar | built, awaiting preview | The overlays leave the canvas for one bar above it (2026-11-05): pose, animate and hold on the left, the scene on the right. Nothing is drawn over the figure; only the More popover and the portrait and loadouts panels open over the canvas, and only while open. |
+| 5: one bar | released, 0.16.0 and 0.16.2 | The overlays leave the canvas for one bar above it (2026-11-05): pose, animate and hold on the left, the scene on the right. Nothing is drawn over the figure; only the More popover and the portrait and loadouts panels open over the canvas, and only while open. Since 0.16.2 the bar is one row at every width: the scene folds into Scene when it does not fit ("One row" below). |
 
 ## Why
 
@@ -369,4 +369,33 @@ at the canvas's top right, 12px in -- no longer measured against the
 cluster's height, since the cluster is not on the canvas. All three are open
 only while used. The pointer rules the overlays needed (`pointer-events`
 none on the containers) are gone with them.
+
+## One row (2026-11-06)
+
+Noel took the offer after 0.16.0: the bar wrapped to two rows at 1280 wide,
+three at 1024 and four at 768, each row taken off the canvas.
+
+**The scene folds whenever it does not fit, not at a breakpoint.** Body,
+light, quality, Portrait, Save image and Loadouts go into the Scene button
+whenever they would not fit on the bar's row beside the dock
+(`useSceneFolded`, `Kitbasher.tsx`), as they always did at 720px and below.
+A width cannot decide it, because the dock grows with what is held: the hold
+group adds a button per carried weapon. Folded, the popover holds the scene
+first, then Portrait, Save image and Loadouts on one row, then More's own
+rows. Portrait goes with them, since above 720px the panel exists.
+
+**Folded there is nothing to measure,** so the scene is tried out again
+whenever there is more room beside the dock than when it last folded: put
+out, measured and folded back inside one layout effect, before a frame is
+painted. That keeps no width of its own, which a cache would: one read
+before the light list arrived, or while Save image said "saving…", would be
+stale by the time it was used.
+
+Measured in headless Chrome on the built package, the tool given the whole
+window as Hangarworks gives it: one row, 41px, at every width from 390 to
+1600. Unfolded at 1440 and above, folded from 1366 down; a 360px stand-in
+added to the dock folds it at 1600 and removing it unfolds it again. The
+canvas is 576px tall at a 900px window wherever the stage sits beside the
+column. Measure it in a pane that is drawing frames: a hidden pane delivers
+no `ResizeObserver` notices at all.
 
