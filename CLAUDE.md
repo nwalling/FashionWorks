@@ -2658,6 +2658,18 @@ torso: a core hides the undersuit's parts in that zone. The Artimex core's
 neck ring and cloak are drawn with any helmet, as the game's icon shows them.
 CLOTHING.md, "Chunks that answer to a partner".
 
+### The game's emotes play, from its own list (2026-11-06)
+
+`ANIMATION.md` is the research and the record. The emote list is one record,
+`ChatEmoteRecord`, and `Animations/Mannequin/ADB/Players/playerEmoteAnims.adb`
+maps its tags to clip sequences. **The ADB is binary CryXML in the archive**
+-- a dump made with StarBreaker's extract is text, and reading the archive's
+bytes as text finds nothing -- so `catalog::emotes::adb_text` converts it
+first. Emote clips bind to our rig with nothing unresolved, play once over
+the idle (`EmotePlay`, not the loop, whose seam closing would bend them), and
+the floor ones need no rule of their own: seating the feet each frame puts a
+seated figure's hips at 0.087 m against the clip's 0.109.
+
 ### Still unverified
 
 - Only one set has been converted end to end. `scx convert` has not been run

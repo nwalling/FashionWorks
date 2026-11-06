@@ -130,7 +130,38 @@ Whether to offer the emotes the game has switched off (the dances, bows and
 sleep) is Noel's call: they are in the archive and play, but the game does
 not offer them in 4.10.2. The self-harm emote is out either way.
 
-## 5. Not determined
+## 5. Built: the emote menu (2026-11-06)
+
+Noel asked for the menu with the dances and bows. An **emote** button beside
+*animate* opens it: the emotes, then the signs, each by the game's own
+command, its hover giving the game's line ("You feel the music."), how many
+ways it plays, and whether 4.10.2 switches it off.
+
+- **From the visitor's archive.** The catalogue (version 7) reads the record
+  and the ADB while it is built (`catalog::emotes`). The ADB is **binary
+  CryXML** in the archive; StarBreaker's extract writes it out as text, which
+  is how the research read it, and a text scanner over the raw file found
+  nothing. It is converted first (`adb_text`). 47 kinds and 111 variants on
+  4.10.2: 31 emotes and 16 signs.
+- **Played once** (`three/emote.ts`, `EmotePlay`): a sequence of clips
+  blended in from the still pose and back over 0.2 s, as the fragments do.
+  Not `ClipLoop`, whose seam-closing would bend a one-shot. A weapon goes
+  back in its holster and the figure stands at ease first; a loop playing
+  stops for the emote and starts again after; a pose cuts it short. Each
+  press plays the kind's next variant.
+- **The clips** are found in `emotes.dba` by exact name (`sampleClip` now
+  prefers it to the first name containing it), else loose as
+  `emotes/<name>.caf`, where the signs are; female first, then male.
+
+Measured on the built package against 4.10.2 in headless Chrome, both
+bodies: every emote played its clip's length and returned to the idle
+(wave 4.0 s, salute 4.8 s across its two clips, bow 7.0 s, dances 19-24 s),
+loading in 0.2-0.7 s the first time. 108-142 bones move. **Sitting needed
+nothing new:** seating the feet each frame brings the hips to 0.087 m against
+the clip's own 0.109, and the figure sits on the floor hugging its knees. No
+console errors.
+
+## 6. Not determined
 
 - The face channel-id scheme.
 - Whether the disabled emotes are reachable some other way in 4.10.2.
