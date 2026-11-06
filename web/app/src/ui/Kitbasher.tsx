@@ -174,7 +174,7 @@ function rowWidth(row: HTMLElement): number {
 }
 
 /** The deepest the bar folds: `useBarFold`. */
-const BAR_FOLDS = 2;
+const BAR_FOLDS = 5;
 
 /** How far the bar folds to keep to one row:
  *
@@ -184,7 +184,14 @@ const BAR_FOLDS = 2;
  *   what is held, so no fixed width would do;
  * * **2** -- *animate* in the Scene button too, where the dock alone leaves
  *   no room for it: a tablet's width, or a half window, with the emote
- *   button in the dock.
+ *   button in the dock;
+ * * **3** -- what is held as one list in place of a button for each;
+ * * **4** -- that list in the Scene button too: a weapon in hand at a
+ *   tablet's width, where the stage beside the column leaves the bar about
+ *   420px and the poses, emote and Scene take 385 of it. With empty hands
+ *   there is no hold row, and these two levels change nothing;
+ * * **5** -- *rest*, the least used pose, in the Scene button too: the same
+ *   width with larger buttons, a weapon adding *raised* to the poses.
  *
  * Folded there is less to measure, so a level is left -- tried one lower --
  * whenever there is more room beside the dock than when it was reached: put
@@ -358,6 +365,9 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
   const fold = useBarFold(barRef, dockRef, sceneRef, narrow);
   const folded = fold >= 1;
   const animateFolded = fold >= 2;
+  const holdFolded = fold >= 3;
+  const holdInScene = fold >= 4;
+  const restFolded = fold >= 5;
   useEffect(() => {
     if (!moreOpen) return undefined;
     const onKey = (event: KeyboardEvent) => {
@@ -648,6 +658,43 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
           {body}
         </button>
       ))}
+    </span>
+  );
+
+  // One pose's button. Greyed rather than disabled when it is not on offer,
+  // so the hover still says why and a press puts the reason in the status
+  // line.
+  const poseButton = (pose: string) => {
+    const refused = engine.current?.poseRefusal(pose) ?? null;
+    return (
+      <button
+        key={pose}
+        type="button"
+        aria-pressed={state?.pose === pose}
+        aria-disabled={refused ? true : undefined}
+        disabled={busy}
+        title={refused ?? POSE_TITLES[pose]?.(state?.holding ?? null)}
+        onClick={() => void engine.current?.setPose(pose)}
+      >
+        {pose}
+      </button>
+    );
+  };
+
+  // What is held, as one list: the bar's buttons folded (`useBarFold`).
+  const holdList = holdable.length > 0 && (
+    <span className="fw-kit-group">
+      <span className="fw-kit-label">hold</span>
+      <select
+        className="fw-kit-select"
+        aria-label="In hand"
+        value={state?.holding ?? ''}
+        disabled={busy}
+        onChange={(event) => void engine.current?.hold(event.target.value || null)}
+      >
+        <option value="">{carrying.has(HAND) ? 'put down' : 'nothing'}</option>
+        {holdable.map(([port, item]) => <option key={port} value={port}>{titleOf(item)}</option>)}
+      </select>
     </span>
   );
 
@@ -1031,24 +1078,7 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
           <div className="fw-kit-bar" ref={barRef}>
             <div className="fw-kit-dock" ref={dockRef}>
               <span className="fw-kit-group" role="group" aria-label="Pose">
-                {poses.map((pose) => {
-                  // Greyed rather than disabled, so the hover still says why
-                  // and a press puts the reason in the status line.
-                  const refused = engine.current?.poseRefusal(pose) ?? null;
-                  return (
-                    <button
-                      key={pose}
-                      type="button"
-                      aria-pressed={state?.pose === pose}
-                      aria-disabled={refused ? true : undefined}
-                      disabled={busy}
-                      title={refused ?? POSE_TITLES[pose]?.(state?.holding ?? null)}
-                      onClick={() => void engine.current?.setPose(pose)}
-                    >
-                      {pose}
-                    </button>
-                  );
-                })}
+                {poses.filter((pose) => !(restFolded && pose === 'rest')).map(poseButton)}
               </span>
               {!animateFolded && <span className="fw-kit-group">{animateButton}</span>}
               {emotes.length > 0 && (
@@ -1096,7 +1126,8 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
                   </div>
                 </span>
               )}
-              {holdable.length > 0 && (
+              {holdFolded && !holdInScene && holdList}
+              {holdable.length > 0 && !holdFolded && (
                 <span className="fw-kit-group" role="radiogroup" aria-label="In hand">
                   <span className="fw-kit-label">hold</span>
                   <button
@@ -1161,6 +1192,8 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
                 {folded && (
                   <>
                     {animateFolded && <div className="fw-kit-more-row">{animateButton}</div>}
+                    {holdInScene && holdList && <div className="fw-kit-more-row">{holdList}</div>}
+                    {restFolded && poses.includes('rest') && <div className="fw-kit-more-row">{poseButton('rest')}</div>}
                     <div className="fw-kit-more-row">{bodySwitch}</div>
                     {lightSelect && <div className="fw-kit-more-row">{lightSelect}</div>}
                     {qualitySelect && <div className="fw-kit-more-row">{qualitySelect}</div>}

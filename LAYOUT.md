@@ -405,6 +405,25 @@ from a phone's width to a desktop's goes all the way out. The emote menu
 hangs from the bar's left edge, no wider than the bar; hung from its button,
 the dock's third, it ran off the window's right edge at 768.
 
+**Three more, for what is held (0.17.3).** A weapon adds *raised* to the
+poses and a hold row to the dock, and with one in hand the Main App measured
+three rows (157px) at 768 and 390: the 0.17.1 checks were run empty-handed.
+At 768 the stage sits beside the column and the bar is 418px; poses, emote
+and Scene take 385 of it, so no hold control fits beside them. The fold
+gains three levels: **3** turns the hold buttons into one list, which is
+enough at 1024 with larger buttons; **4** moves that list into the Scene
+button, under *animate*; **5** moves *rest*, the least used pose, there too,
+which the larger buttons need at 768 (20px short at level 4). With empty
+hands levels 3 and 4 change nothing.
+
+Measured in headless Chrome on the built package, inset as Hangarworks insets
+it, with the package's buttons and with larger ones (7px 12px, 14px):
+empty-handed, a pistol in the hand, and a pistol in hand with a rifle on the
+back, at 1600, 1280, 1024, 768 and 390 -- one row in every case but one: a
+weapon in hand at 390 with the larger buttons is two (85px). Empty-handed at
+390 the larger buttons now fit one row, *rest* folded. The list holds and
+puts down.
+
 Measured in headless Chrome on the built package, the tool given the whole
 window as Hangarworks gives it: one row, 41px, at every width from 390 to
 1600. Unfolded at 1440 and above, folded from 1366 down; a 360px stand-in

@@ -336,7 +336,8 @@ armour does, so a hip holster sits on the trousers' own hip.
 `weapon_attach_hand_right`, and the engine gives it to a weapon only when no
 holster will take it -- armour keeps its rifles on the back. A weapon in the
 hand has nowhere to go at ease, so it stays held and the stance stays its
-own (idle is greyed for it, LOADOUT.md); letting go of it ("put down" in place of "nothing") puts it down, and
+own (idle is greyed for it, LOADOUT.md) until something worn offers a
+free holster that takes it, when it moves there, still held; letting go of it ("put down" in place of "nothing") puts it down, and
 holding something from a holster frees the hand the same way. Grenades,
 magazines and pens are not held.
 

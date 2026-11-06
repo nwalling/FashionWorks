@@ -2163,9 +2163,10 @@ export class Kitbasher {
     );
     this.frameLoadout();
     this.refineLater(loaded);
-    const status = gear.removed.length
+    const status = (gear.removed.length
       ? `${name}: ${describePorts(gear.ports)}; ${gear.removed.join(', ')} came off`
-      : `${name} · ${triangles.toLocaleString()} triangles`;
+      : `${name} · ${triangles.toLocaleString()} triangles`)
+      + (gear.homed ? ` · ${gear.homed}` : '');
     this.publish({ busy: false, ports: gear.ports, status });
     // The held item came off with its holster: nothing is in the hand, so a
     // weapon stance would be holding air. The removal is the news, so it keeps
@@ -2236,7 +2237,11 @@ export class Kitbasher {
       if (port !== HAND || !inHand) await this.carry(item, port);
     }
     if (inHand) {
-      await this.carry(inHand, HAND);
+      // Into a holster of this outfit that takes it, and held from there; the
+      // hand alone only when nothing worn holsters it.
+      const home = this.freeHolsterFor(inHand);
+      if (home && await this.carry(inHand, home)) await this.hold(home);
+      else await this.carry(inHand, HAND);
     } else if (gearReturning.holding && this.carried.has(gearReturning.holding)) {
       await this.hold(gearReturning.holding);
     } else if (hadHold) {
@@ -2358,8 +2363,9 @@ export class Kitbasher {
   private setHeld(port: string | null): void {
     if (port === this.holdingPort) return;
     // A weapon with no holster behind it has nowhere to go but the hand: at
-    // ease it stays there. Putting it down is `hold(null)`'s to do.
-    if (port === null && this.holdingPort === HAND) return;
+    // ease it stays there, unless something worn holsters it after all.
+    // Putting it down is `hold(null)`'s to do.
+    if (port === null && this.holdingPort === HAND && !this.homeHand()) return;
     const previous = this.holdingPort ? this.carried.get(this.holdingPort) : undefined;
     this.holdingPort = port;
     if (port) this.lastHeld = port;
@@ -2380,8 +2386,8 @@ export class Kitbasher {
   poseRefusal(label: string): string | null {
     if (label !== 'idle' || this.holdingPort !== HAND) return null;
     const item = this.carried.get(HAND)?.item;
-    if (!item?.anim_set || !WEAPON_POSES[item.anim_set]) return null;
-    return `Nothing worn holsters ${displayName(item)}: put it down, or wear armour that holsters it, to stand at ease`;
+    if (!item?.anim_set || !WEAPON_POSES[item.anim_set] || this.freeHolsterFor(item)) return null;
+    return `Nothing worn holsters ${displayName(item)}: put it down, or wear something that holsters it, to stand at ease`;
   }
 
   /** The pose to fall back to when the hand empties: crouched stays crouched. */
@@ -2919,8 +2925,14 @@ export class Kitbasher {
    * points and four magazine points with it; whatever hung there comes off,
    * and the status names it -- the same rule equip-set follows. Gear whose
    * port merely changed owner (a backpack went on, and now holds the rifles)
-   * moves with it. */
-  private revalidateGear(): { removed: string[]; ports: Map<string, OwnedPort>; lostHold: boolean } {
+   * moves with it.
+   *
+   * A weapon in the hand that something now worn holsters moves to that
+   * holster, still held: the hand alone is for what nothing worn takes, and
+   * standing at ease can now put it away. `homed` says where it went. */
+  private revalidateGear(): {
+    removed: string[]; ports: Map<string, OwnedPort>; lostHold: boolean; homed: string | null;
+  } {
     const ports = this.ports();
     const { kept, removed } = revalidate(this.carried, ports);
     const lostHold = removed.some(({ port }) => port === this.holdingPort);
@@ -2933,7 +2945,31 @@ export class Kitbasher {
       carried.port = owned;
       this.mountCarried(carried);
     }
-    return { removed: tally(removed.map(({ carried }) => displayName(carried.item))), ports, lostHold };
+    const homed = this.homeHand(ports);
+    return { removed: tally(removed.map(({ carried }) => displayName(carried.item))), ports, lostHold, homed };
+  }
+
+  /** Move the hand's weapon to a free holster that takes it, still held, and
+   * say where; null when there is none. */
+  private homeHand(ports = this.ports()): string | null {
+    const inHand = this.carried.get(HAND);
+    const home = inHand ? this.freeHolsterFor(inHand.item, ports) : null;
+    if (!inHand || !home) return null;
+    this.carried.delete(HAND);
+    inHand.port = ports.get(home)!;
+    this.carried.set(home, inHand);
+    if (this.holdingPort === HAND) this.holdingPort = home;
+    if (this.lastHeld === HAND) this.lastHeld = home;
+    this.mountCarried(inHand);
+    this.applyOutfit();
+    return `${displayName(inHand.item)}: the ${portLabel(inHand.port.port)} holster takes it now`;
+  }
+
+  /** A free holster on what is worn that takes the item, or null. */
+  private freeHolsterFor(item: CatalogueItem, ports = this.ports()): string | null {
+    const worn = new Map([...ports].filter(([name]) => name !== HAND));
+    const choice = portFor(item, worn, new Set(this.carried.keys()));
+    return 'port' in choice ? choice.port.port.name : null;
   }
 
   /** Worn, or as it left the factory. Re-composites everything on the body. */

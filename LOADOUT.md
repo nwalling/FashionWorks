@@ -352,6 +352,17 @@ puts the reason in the status line. Rest still poses, the weapon in the hand;
 a hand item with no stance (a gadget) stands at ease already and is not
 refused.
 
+**And the weapon finds a holster when one appears** (0.17.3, from the Main
+App's check of 0.17.2). The reason said to wear something that holsters it,
+and doing so changed nothing: the hand kept the pistol, the legs' new hip
+holster showed empty, idle stayed greyed, and picking the pistol again put a
+second one in the holster. Now a weapon in the hand moves to a free holster
+that takes it as soon as something worn offers one, still held
+(`homeHand`): on any armor or clothing change, the status saying "the
+sidearm holster takes it now", and on an outfit switch, where the held
+weapon crosses into the new outfit's holster. Put into the hand on purpose
+with a holster free, idle holsters it there.
+
 The clips:
 
 | anim set | stand raised | crouch | female |
