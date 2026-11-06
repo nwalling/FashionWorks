@@ -382,7 +382,10 @@ whenever they would not fit on the bar's row beside the dock
 A width cannot decide it, because the dock grows with what is held: the hold
 group adds a button per carried weapon. Folded, the popover holds the scene
 first, then Portrait, Save image and Loadouts on one row, then More's own
-rows. Portrait goes with them, since above 720px the panel exists.
+rows. Portrait goes with them, since above 720px the panel exists. The
+popover is as wide as its widest row, never under 240px nor wider than the
+window: at a fixed 240px, Hangarworks' larger buttons put Loadouts on a row
+of its own (Noel, 2026-11-06).
 
 **Folded there is nothing to measure,** so the scene is tried out again
 whenever there is more room beside the dock than when it last folded: put

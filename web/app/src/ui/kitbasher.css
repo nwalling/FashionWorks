@@ -473,7 +473,13 @@
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
-  width: 240px;
+  /* As wide as its widest row, so Portrait, Save image and Loadouts share
+   * one at whatever size the host draws its buttons (Hangarworks' are larger
+   * than the defaults, and Loadouts wrapped alone at a fixed 240px). Never
+   * narrower than that, nor wider than the window. */
+  width: max-content;
+  min-width: 240px;
+  max-width: calc(100vw - 24px);
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
