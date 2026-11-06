@@ -17,6 +17,7 @@ use serde_json::Value;
 
 pub mod build;
 pub mod db;
+pub mod emotes;
 pub(crate) mod fields;
 pub mod gear;
 mod flags;

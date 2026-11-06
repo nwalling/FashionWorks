@@ -160,6 +160,22 @@ export interface Catalogue {
   /** Every item, armour and gear, by class name -- how a rifle finds the
    * magazine it ships with. */
   readonly byClass: Map<string, CatalogueItem>;
+  /** The game's emotes, by kind. Empty for a catalogue built without the
+   * emote database. ANIMATION.md. */
+  readonly emotes: Emote[];
+}
+
+/** One kind of emote, as the game's emote record lists it. */
+export interface Emote {
+  /** The chat command without its number: `wave`, `asl_hello`. */
+  readonly kind: string;
+  /** The line the game prints for it: "You wave." */
+  readonly text: string;
+  /** Whether 4.10.2 offers it. Dances and bows are switched off in the game
+   * and offered here anyway. */
+  readonly in_game: boolean;
+  /** Each way it plays: a sequence of clip names, in order. */
+  readonly variants: string[][];
 }
 
 /** Words that end the product part of a name. Mirrors the pipeline's
@@ -303,7 +319,7 @@ function isAnatomy(item: CatalogueItem): boolean {
 }
 
 export function readCatalogue(json: string): Catalogue {
-  const parsed = JSON.parse(json) as { items: CatalogueItem[]; gear?: CatalogueItem[] };
+  const parsed = JSON.parse(json) as { items: CatalogueItem[]; gear?: CatalogueItem[]; emotes?: Emote[] };
   const items = parsed.items.filter(
     (item) => item.geometry.length > 0
       && !item.flags.some((f) => HIDDEN_FLAGS.includes(f))
@@ -360,7 +376,8 @@ export function readCatalogue(json: string): Catalogue {
   // magazine it ships with may be a record the listing would not show.
   const byClass = new Map<string, CatalogueItem>();
   for (const item of [...items, ...(parsed.gear ?? [])]) byClass.set(item.class_name.toLowerCase(), item);
-  return { items, bySlot, families, lines, gear, gearBySlot, byClass };
+  const emotes = (parsed.emotes ?? []).filter((e) => e.variants.length > 0);
+  return { items, bySlot, families, lines, gear, gearBySlot, byClass, emotes };
 }
 
 /** Every piece sold under the same product name in the same slot. */

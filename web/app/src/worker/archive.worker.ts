@@ -527,7 +527,14 @@ function reportCatalogue(
   const ini = new TextDecoder('utf-8').decode(archive.read(iniIndex));
   progress('item names', 0.4);
 
-  const json = wasm.buildCatalogue(dcb, ini, skeleton);
+  // The emote fragments, naming each emote tag's clips, as the archive holds
+  // them (binary CryXML). An archive without them builds a catalogue without
+  // emotes. ANIMATION.md.
+  const emoteIndex = archive.find('Data\\Animations\\Mannequin\\ADB\\Players\\playerEmoteAnims.adb');
+  const emoteAnims = emoteIndex === undefined || emoteIndex === null
+    ? new Uint8Array(0)
+    : archive.read(emoteIndex);
+  const json = wasm.buildCatalogue(dcb, ini, skeleton, emoteAnims);
   // The customizer's tables come out of the same DataCore, which is not kept:
   // a player's `.chf` names its head material and items against them.
   try {

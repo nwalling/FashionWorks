@@ -505,6 +505,51 @@
   flex: 0 0 64px;
 }
 
+/* The emote menu hangs from its button in the dock, on the More popover's
+ * surface, for the same reasons. Forty-odd emotes and the signs wrap in a
+ * block about the width of the dock's own buttons, and scroll inside it where
+ * a short window cannot hold them all. */
+.fw-kit-emotes-group {
+  position: relative;
+}
+
+.fw-kit-emotes {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  width: min(440px, calc(100vw - 24px));
+  max-height: min(480px, 60vh);
+  overflow-y: auto;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  background: color-mix(in srgb, var(--sc-card) 88%, transparent);
+  border: 1px solid var(--sc-border);
+  border-radius: 10px;
+}
+
+.fw-kit-emotes[hidden] {
+  display: none;
+}
+
+.fw-kit-emotes-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fw-kit-emotes-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.fw-kit-emotes-list button {
+  white-space: nowrap;
+}
+
 /* Dividers between poses, animate and hold, and between the scene's groups. */
 .fw-kit-dock > * + *,
 .fw-kit-scene > .fw-kit-group + * {

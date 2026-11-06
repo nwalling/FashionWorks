@@ -343,8 +343,12 @@ impl Archive {
 /// `skeleton` is "male" or "female". Female is WEB.md phase 6 and nothing has
 /// been run through it; the argument exists because `select_wearables` takes it
 /// and threading it now is free.
+///
+/// `emote_anims` is `Animations\Mannequin\ADB\Players\playerEmoteAnims.adb`
+/// as the archive holds it -- binary CryXML -- which maps the emote record's
+/// tags to clips; empty leaves the catalogue without emotes.
 #[wasm_bindgen(js_name = buildCatalogue)]
-pub fn build_catalogue(dcb: &[u8], ini: &str, skeleton: &str) -> Result<String, JsValue> {
+pub fn build_catalogue(dcb: &[u8], ini: &str, skeleton: &str, emote_anims: &[u8]) -> Result<String, JsValue> {
     use catalog::{build, db, tint, Localization};
 
     let database = db::open(dcb).map_err(|e| JsValue::from_str(&format!("parsing DataCore: {e}")))?;
@@ -389,6 +393,14 @@ pub fn build_catalogue(dcb: &[u8], ini: &str, skeleton: &str) -> Result<String, 
     build::link_variants(&mut items);
     let mut gear = build_gear(&database, &palettes, &makers, &loc, &tags);
     catalog::visibility::trim_tagged(&mut gear, &read);
+    // The emote menu: the game's list, from its one record, with the clips
+    // `playerEmoteAnims.adb` gives each (`emote_anims`; empty if the archive
+    // has none, and then there is no menu). ANIMATION.md.
+    let emotes = db::index_by_name(&database, "ChatEmoteRecord")
+        .values()
+        .next()
+        .map(|record| catalog::emotes::build(record, &loc, emote_anims))
+        .unwrap_or_default();
 
     serde_json::to_string(&serde_json::json!({
         "skeleton": skeleton,
@@ -396,6 +408,7 @@ pub fn build_catalogue(dcb: &[u8], ini: &str, skeleton: &str) -> Result<String, 
         "palettes": palettes.len(),
         "items": items,
         "gear": gear,
+        "emotes": emotes,
     }))
     .map_err(|e| JsValue::from_str(&format!("serialising the catalogue: {e}")))
 }
@@ -1761,10 +1774,22 @@ impl Archive {
             parse_dba(&bytes).map_err(|e| JsValue::from_str(&format!("parsing .dba: {e}")))?
         };
         let needle = clip_name.to_ascii_lowercase();
+        // The clip of exactly that name first -- a male `.dba` names clips
+        // bare, a female one by their source path -- so that asking for
+        // `..._generic_01` never plays a `..._generic_01_b` stored before it.
+        let exact = format!("/{needle}.caf");
         let clip = db
             .clips
             .iter()
-            .find(|c| needle.is_empty() || c.name.to_ascii_lowercase().contains(&needle))
+            .find(|c| {
+                let name = c.name.to_ascii_lowercase();
+                name == needle || name.ends_with(&exact)
+            })
+            .or_else(|| {
+                db.clips
+                    .iter()
+                    .find(|c| needle.is_empty() || c.name.to_ascii_lowercase().contains(&needle))
+            })
             .ok_or_else(|| JsValue::from_str(&format!("no clip matching {clip_name}")))?;
 
         let wanted: std::collections::HashMap<u32, usize> = rig

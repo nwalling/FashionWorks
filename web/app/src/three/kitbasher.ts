@@ -97,6 +97,7 @@ import {
 } from './materials';
 import { fringeOf, sortInnerFirst, strandCoordinate, strandFrame } from './hair';
 import { DEFAULT_PRESET, LIGHT_PRESETS, StudioLighting } from './lighting';
+import { EmotePlay } from './emote';
 import { ClipLoop, FADE_SECONDS, type LoopMode, smooth } from './idle';
 import { hasEight, padEight, skinEight } from './skin8';
 import { decalRoughness, padDecalUvs, withDecal } from './decal';
@@ -470,6 +471,8 @@ export interface KitbasherState {
   readonly figure: boolean;
   /** Whether the pose plays as a loop rather than holding still. */
   readonly animated: boolean;
+  /** The kind of emote playing, or null. ANIMATION.md. */
+  readonly emote: string | null;
   /** The player's character on the figure, by file name, or null for the
    * default face. CHARACTER.md. */
   readonly character: string | null;
@@ -757,8 +760,18 @@ export class Kitbasher {
   /** Where the lowest foot sits at rest: the floor the loop seats feet on. */
   private restGround: number | null = null;
 
-  /** The loop playing over the still pose, and the frame it asked for. */
-  private loop: ClipLoop | null = null;
+  /** The loop or emote playing over the still pose, and the frame it asked
+   * for. */
+  private loop: ClipLoop | EmotePlay | null = null;
+  /** Which variant of each emote kind plays next: each press plays the next
+   * in the game's order, so every one can be seen. */
+  private readonly emoteNext = new Map<string, number>();
+  /** Emote clips already sampled, by body and clip name. A clip costs a read
+   * of its database; the emotes' is 11 MB. */
+  private readonly emoteClips = new Map<string, ClipPayload>();
+  /** Bumped on every emote asked for, so one whose clips are still loading
+   * when another is asked for never plays. */
+  private emoteAsk = 0;
   private loopFrame = 0;
   /** Bumped on every start and stop, so a loop that was superseded while its
    * clip loaded never starts, and a stale frame callback does nothing. */
@@ -835,6 +848,7 @@ export class Kitbasher {
       holding: null,
       figure: true,
       animated: false,
+      emote: null,
       character: null,
     };
     if (view.renderer && view.lights) {
@@ -2443,6 +2457,8 @@ export class Kitbasher {
   async setAnimated(on: boolean): Promise<void> {
     if (on === this.state.animated) return;
     this.publish({ animated: on });
+    // An emote playing finishes first; the loop starts as it ends.
+    if (on && this.loop instanceof EmotePlay) return;
     if (on) await this.startLoop(this.state.pose);
     else this.stopLoop(true);
   }
@@ -2517,6 +2533,85 @@ export class Kitbasher {
     this.loopTicket += 1;
     cancelAnimationFrame(this.loopFrame);
     this.loop = null;
+    if (this.state.emote) this.publish({ emote: null });
+  }
+
+  // ---------------------------------------------------------------- emotes
+
+  /** Play an emote of `kind` once, standing at ease. ANIMATION.md.
+   *
+   * The game's emotes are the unarmed body's, so a weapon goes back in its
+   * holster and the figure stands at ease first, as the idle pose does. Each
+   * press plays the kind's next variant. The emote blends in from the still
+   * pose and back to it; a loop that was playing stops for it and starts
+   * again after. Anything that poses the figure meanwhile cuts it short. */
+  async emote(kind: string): Promise<void> {
+    if (!this.rig) await this.init();
+    if (this.disposed || !this.rig) return;
+    const emote = this.state.catalogue.emotes.find((e) => e.kind === kind);
+    if (!emote || emote.variants.length === 0) return;
+    const ask = ++this.emoteAsk;
+    const n = (this.emoteNext.get(kind) ?? 0) % emote.variants.length;
+    this.emoteNext.set(kind, n + 1);
+    const sequence = emote.variants[n]!;
+
+    let payloads: ClipPayload[];
+    try {
+      payloads = await Promise.all(sequence.map((clip) => this.emoteClip(clip)));
+    } catch (error) {
+      this.publish({ status: `${kind}: ${error instanceof Error ? error.message : String(error)}` });
+      return;
+    }
+    if (ask !== this.emoteAsk || this.disposed) return;
+    if (this.state.pose !== 'idle' || this.holdingPort) {
+      await this.setPose('idle');
+      if (ask !== this.emoteAsk || this.disposed) return;
+    }
+    const rig = this.rig;
+    if (!rig) return;
+    // From the still pose: a loop playing is put back to it first.
+    this.stopLoop(false);
+    const ticket = this.loopTicket;
+    const play = new EmotePlay(payloads, rig.byName);
+    const hips = rig.byName.get('Hips') ?? null;
+    const still = hips?.position.clone() ?? null;
+    this.stillHips = still;
+    this.loop = play;
+    const variant = emote.variants.length > 1 ? ` (${n + 1} of ${emote.variants.length})` : '';
+    this.publish({ emote: kind, status: `${emote.text || kind}${variant}` });
+    const started = performance.now();
+    const tick = (now: number) => {
+      if (ticket !== this.loopTicket) return;
+      const seconds = Math.max(0, now - started) / 1000;
+      if (seconds >= play.seconds) {
+        play.restore();
+        this.seatLoop(hips, still);
+        this.loop = null;
+        this.publish({ emote: null });
+        if (this.state.animated) void this.startLoop(this.state.pose);
+        return;
+      }
+      play.apply(seconds);
+      this.seatLoop(hips, still);
+      this.loopFrame = requestAnimationFrame(tick);
+    };
+    this.loopFrame = requestAnimationFrame(tick);
+  }
+
+  /** One emote clip for this body: from the emotes' database, or loose
+   * beside it, where the sign-language ones are. */
+  private async emoteClip(clip: string): Promise<ClipPayload> {
+    const key = `${this.state.body}:${clip}`;
+    const hit = this.emoteClips.get(key);
+    if (hit) return hit;
+    let payload: ClipPayload;
+    try {
+      payload = (await this.fromBody({ db: 'emotes.dba', clip }, (path) => this.client.clip(path, clip))).clip;
+    } catch {
+      payload = (await this.fromBody({ db: `emotes/${clip}.caf`, clip: '' }, (path) => this.client.clip(path, ''))).clip;
+    }
+    this.emoteClips.set(key, payload);
+    return payload;
   }
 
   /** Seat the feet for this frame: from the still pose's hips, lowered or

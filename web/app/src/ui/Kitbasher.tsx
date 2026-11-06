@@ -27,6 +27,7 @@ import {
   type Catalogue,
   type CatalogueItem,
   type ClothingSlot,
+  type Emote,
   type GearSlot,
   type WearSlot,
 } from '../archive/catalogue';
@@ -219,6 +220,19 @@ function useSceneFolded(
   return narrow || crowded;
 }
 
+/** An emote's button: the game's command, a sign without its `asl_`. */
+function emoteLabel(emote: Emote): string {
+  return emote.kind.replace(/^asl_/, '').replace(/_/g, ' ');
+}
+
+/** What an emote's button says on hover: the game's own line for it, how
+ * many ways it plays, and whether the game offers it. */
+function emoteTitle(emote: Emote): string {
+  const ways = emote.variants.length > 1 ? ` ${emote.variants.length} ways; each press plays the next.` : '';
+  const off = emote.in_game ? '' : ' Switched off in the game in 4.10.2.';
+  return `${emote.text || emoteLabel(emote)}${ways}${off}`;
+}
+
 /** What each pose button does, which with a weapon includes where it goes. */
 const POSE_TITLES: Record<string, (holding: boolean) => string> = {
   rest: (holding) => `The skeleton's rest pose${holding ? '; the weapon goes back in its holster' : ''}`,
@@ -289,6 +303,30 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
   useEffect(() => {
     if (narrow) setPortraitOpen(false);
   }, [narrow]);
+  // The emote menu: a disclosure like More, closing on Escape, a click
+  // outside and the button again -- and, on a phone, on an emote chosen, since
+  // there it covers the figure that is about to play it.
+  const [emotesOpen, setEmotesOpen] = useState(false);
+  const emotesId = useId();
+  const emotesButton = useRef<HTMLButtonElement>(null);
+  const emotesRef = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!emotesOpen) return undefined;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setEmotesOpen(false);
+      emotesButton.current?.focus();
+    };
+    const onPointer = (event: PointerEvent) => {
+      if (!emotesRef.current?.contains(event.target as Node)) setEmotesOpen(false);
+    };
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('pointerdown', onPointer);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('pointerdown', onPointer);
+    };
+  }, [emotesOpen]);
   const moreId = useId();
   const moreButton = useRef<HTMLButtonElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
@@ -454,6 +492,13 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
 
   const busy = state?.busy ?? true;
   const poses = engine.current?.poseOptions() ?? ['rest', 'idle', 'crouch'];
+  // The emotes, then the signs: the game lists the sign-language emotes
+  // among the rest as `asl_*` commands.
+  const emotes = catalogue.emotes;
+  const emoteGroups = [
+    { label: 'emotes', list: emotes.filter((e) => !e.kind.startsWith('asl_')) },
+    { label: 'signs', list: emotes.filter((e) => e.kind.startsWith('asl_')) },
+  ].filter((group) => group.list.length > 0);
   const lighting = engine.current?.lightingOptions() ?? [];
   const holdable = [...carrying].filter(([, item]) => HOLDABLE.has(item.slot));
   const countOf = (name: string) => (isGearSlot(name)
@@ -972,6 +1017,51 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
                   animate
                 </button>
               </span>
+              {emotes.length > 0 && (
+                <span className="fw-kit-group fw-kit-emotes-group" ref={emotesRef}>
+                  <button
+                    type="button"
+                    ref={emotesButton}
+                    aria-expanded={emotesOpen}
+                    aria-controls={emotesId}
+                    disabled={!state}
+                    title="The game's emotes: wave, cheer, dance, the signs and the rest"
+                    onClick={() => setEmotesOpen((open) => !open)}
+                  >
+                    emote
+                  </button>
+                  <div
+                    id={emotesId}
+                    className="fw-kit-emotes"
+                    role="group"
+                    aria-label="Emotes"
+                    hidden={!emotesOpen}
+                  >
+                    {emoteGroups.map(({ label, list }) => (
+                      <div key={label} className="fw-kit-emotes-section">
+                        <span className="fw-kit-label">{label}</span>
+                        <div className="fw-kit-emotes-list">
+                          {list.map((emote) => (
+                            <button
+                              key={emote.kind}
+                              type="button"
+                              aria-pressed={state?.emote === emote.kind}
+                              disabled={busy}
+                              title={emoteTitle(emote)}
+                              onClick={() => {
+                                if (narrow) setEmotesOpen(false);
+                                void engine.current?.emote(emote.kind);
+                              }}
+                            >
+                              {emoteLabel(emote)}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </span>
+              )}
               {holdable.length > 0 && (
                 <span className="fw-kit-group" role="radiogroup" aria-label="In hand">
                   <span className="fw-kit-label">hold</span>

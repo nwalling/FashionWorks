@@ -31,7 +31,8 @@ export const STORE_HANDLES = 'handles';
 // 5: names behind a `,P` key resolve, and a placeholder name does not.
 // 6: a piece's conditional chunks (`visibility`) and the tags they test
 //    (`tagged`): the Artimex cowl drawn only with an Artimex core.
-export const CATALOGUE_VERSION = 6;
+// 7: the game's emotes (`emotes`), from its emote record and fragments.
+export const CATALOGUE_VERSION = 7;
 
 export interface CachedCatalogue {
   /** The archive fingerprint this was built from. */
