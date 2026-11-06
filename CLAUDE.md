@@ -20,6 +20,9 @@ is go** — with the conditions recorded under "Legal" at the foot of this file.
 that site: the same boundary, as steps rather than as a spec.
 `LOADOUT.md` is the plan for weapons, holsters and the raised pose, with the
 port survey and clip measurements it rests on.
+`ANIMATION.md` is the research on what else the archive can make the figure
+do: the game's emote record and its clips, display poses, idles, sitting,
+and why faces are not yet playable.
 `CLOTHING.md` is the plan for clothing as a wearable layer instead of armour:
 the body's ports, the undersuit that carries armour and hides clothing, and the
 layered body zones that decide what shows.
