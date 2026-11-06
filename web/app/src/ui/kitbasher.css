@@ -505,19 +505,18 @@
   flex: 0 0 64px;
 }
 
-/* The emote menu hangs from its button in the dock, on the More popover's
- * surface, for the same reasons. Forty-odd emotes and the signs wrap in a
- * block about the width of the dock's own buttons, and scroll inside it where
- * a short window cannot hold them all. */
-.fw-kit-emotes-group {
-  position: relative;
-}
-
+/* The emote menu hangs from the bar, under the dock, on the More popover's
+ * surface, for the same reasons. From the bar and not from its button: the
+ * button is the dock's third, and a menu hung from it ran off the window's
+ * right edge at a tablet's width, where the page cannot scroll sideways to
+ * the emotes it hid. Forty-odd emotes and the signs wrap in a block no wider
+ * than the bar, and scroll inside it where a short window cannot hold them
+ * all. */
 .fw-kit-emotes {
   position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  width: min(440px, calc(100vw - 24px));
+  top: 100%;
+  left: 12px;
+  width: min(440px, calc(100% - 24px));
   max-height: min(480px, 60vh);
   overflow-y: auto;
   box-sizing: border-box;

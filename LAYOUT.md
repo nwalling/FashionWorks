@@ -394,6 +394,17 @@ painted. That keeps no width of its own, which a cache would: one read
 before the light list arrived, or while Save image said "saving…", would be
 stale by the time it was used.
 
+**A second fold, for the emote button (0.17.1).** 0.17.0 put *emote* in the
+dock, and in Hangarworks the dock grew to 325px: at 768 and 390 it and the
+Scene button no longer fitted one row, and the bar wrapped (Main App's check,
+2026-11-06). So the fold has two levels (`useBarFold`): the scene first, then
+*animate* too, which goes to the top of the Scene popover. Unfolding is tried
+whenever there is more room beside the dock than when a level was reached,
+and a level just unfolded to keeps unfolding while each fits, so one resize
+from a phone's width to a desktop's goes all the way out. The emote menu
+hangs from the bar's left edge, no wider than the bar; hung from its button,
+the dock's third, it ran off the window's right edge at 768.
+
 Measured in headless Chrome on the built package, the tool given the whole
 window as Hangarworks gives it: one row, 41px, at every width from 390 to
 1600. Unfolded at 1440 and above, folded from 1366 down; a 360px stand-in

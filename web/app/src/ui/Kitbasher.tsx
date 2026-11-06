@@ -173,27 +173,39 @@ function rowWidth(row: HTMLElement): number {
     + gap * Math.max(0, items.length - 1);
 }
 
-/** Whether the bar's scene controls fold into the Scene button: always at
- * `NARROW`, and above it whenever they would not fit on the bar's one row
- * beside the dock -- which grows with what is held, so no fixed width
- * would do.
+/** The deepest the bar folds: `useBarFold`. */
+const BAR_FOLDS = 2;
+
+/** How far the bar folds to keep to one row:
  *
- * Folded there is nothing to measure, so they are tried out again whenever
- * there is more room beside the dock than when they last folded: put out,
- * measured and folded back inside one layout effect, before anything is
- * painted. No width is kept, which could go stale while they are folded --
- * the light list arriving, Save image saying "saving…". */
-function useSceneFolded(
+ * * **0** -- everything out;
+ * * **1** -- the scene controls in the Scene button: always at `NARROW`, and
+ *   above it whenever they would not fit beside the dock, which grows with
+ *   what is held, so no fixed width would do;
+ * * **2** -- *animate* in the Scene button too, where the dock alone leaves
+ *   no room for it: a tablet's width, or a half window, with the emote
+ *   button in the dock.
+ *
+ * Folded there is less to measure, so a level is left -- tried one lower --
+ * whenever there is more room beside the dock than when it was reached: put
+ * out, measured and folded back inside one layout effect, before anything is
+ * painted. No width is kept, which could go stale while folded -- the light
+ * list arriving, Save image saying "saving…". */
+function useBarFold(
   bar: RefObject<HTMLElement>,
   dock: RefObject<HTMLElement>,
   scene: RefObject<HTMLElement>,
   narrow: boolean,
-): boolean {
-  const [crowded, setCrowded] = useState(false);
-  // The room beside the dock when the scene controls last did not fit.
-  const foldedAt = useRef(0);
+): number {
+  const [level, setLevel] = useState(0);
+  const floor = narrow ? 1 : 0;
+  const shown = Math.max(level, floor);
+  // The room beside the dock at each level when it was last looked at:
+  // unset for a level just folded to, -Infinity for one just unfolded to, which
+  // keeps unfolding while each level fits -- one resize from a phone's width
+  // to a desktop's goes all the way out, not one level.
+  const lastSpare = useRef<Array<number | undefined>>([]);
   useLayoutEffectInBrowser(() => {
-    if (narrow) return undefined;
     const decide = () => {
       const [row, left, right] = [bar.current, dock.current, scene.current];
       if (!row || !left || !right) return;
@@ -201,12 +213,20 @@ function useSceneFolded(
       const spare = row.clientWidth - (Number.parseFloat(style.paddingLeft) || 0)
         - (Number.parseFloat(style.paddingRight) || 0)
         - (Number.parseFloat(style.columnGap) || 0) - rowWidth(left);
+      const before = lastSpare.current[shown];
+      lastSpare.current[shown] = spare;
       // Half a pixel of slack: widths are fractional and the row is not.
-      if (crowded) {
-        if (spare > foldedAt.current + 0.5) setCrowded(false);
-      } else if (rowWidth(right) > spare + 0.5) {
-        foldedAt.current = spare;
-        setCrowded(true);
+      if (rowWidth(right) > spare + 0.5) {
+        if (shown < BAR_FOLDS) {
+          lastSpare.current[shown + 1] = undefined;
+          setLevel(shown + 1);
+        }
+        return;
+      }
+      const roomier = before === Number.NEGATIVE_INFINITY || (before !== undefined && spare > before + 0.5);
+      if (shown > floor && roomier) {
+        lastSpare.current[shown - 1] = Number.NEGATIVE_INFINITY;
+        setLevel(shown - 1);
       }
     };
     decide();
@@ -216,8 +236,8 @@ function useSceneFolded(
       if (element) observer.observe(element);
     }
     return () => observer.disconnect();
-  }, [bar, dock, scene, narrow, crowded]);
-  return narrow || crowded;
+  }, [bar, dock, scene, shown, floor]);
+  return shown;
 }
 
 /** An emote's button: the game's command, a sign without its `asl_`. */
@@ -332,7 +352,9 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
   const barRef = useRef<HTMLDivElement>(null);
   const dockRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<HTMLDivElement>(null);
-  const folded = useSceneFolded(barRef, dockRef, sceneRef, narrow);
+  const fold = useBarFold(barRef, dockRef, sceneRef, narrow);
+  const folded = fold >= 1;
+  const animateFolded = fold >= 2;
   useEffect(() => {
     if (!moreOpen) return undefined;
     const onKey = (event: KeyboardEvent) => {
@@ -680,6 +702,19 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
     </button>
   );
 
+  // In the dock, or in the Scene button where the dock has no room for it.
+  const animateButton = (
+    <button
+      type="button"
+      aria-pressed={state?.animated ?? false}
+      disabled={!state || state.pose === 'rest'}
+      title="Play the pose as a loop: the character customizer's idle standing at ease, breathing otherwise"
+      onClick={() => void engine.current?.setAnimated(!(state?.animated ?? false))}
+    >
+      animate
+    </button>
+  );
+
   // The portrait panel is desktop only, so at `NARROW` there is no button.
   const portraitButton = !narrow && (
     <button
@@ -1006,17 +1041,7 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
                   </button>
                 ))}
               </span>
-              <span className="fw-kit-group">
-                <button
-                  type="button"
-                  aria-pressed={state?.animated ?? false}
-                  disabled={!state || state.pose === 'rest'}
-                  title="Play the pose as a loop: the character customizer's idle standing at ease, breathing otherwise"
-                  onClick={() => void engine.current?.setAnimated(!(state?.animated ?? false))}
-                >
-                  animate
-                </button>
-              </span>
+              {!animateFolded && <span className="fw-kit-group">{animateButton}</span>}
               {emotes.length > 0 && (
                 <span className="fw-kit-group fw-kit-emotes-group" ref={emotesRef}>
                   <button
@@ -1126,6 +1151,7 @@ export function Kitbasher(props: KitbasherProps): JSX.Element {
               >
                 {folded && (
                   <>
+                    {animateFolded && <div className="fw-kit-more-row">{animateButton}</div>}
                     <div className="fw-kit-more-row">{bodySwitch}</div>
                     {lightSelect && <div className="fw-kit-more-row">{lightSelect}</div>}
                     {qualitySelect && <div className="fw-kit-more-row">{qualitySelect}</div>}
