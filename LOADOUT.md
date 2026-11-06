@@ -347,7 +347,7 @@ The clips:
 | anim set | stand raised | crouch | female |
 | --- | --- | --- | --- |
 | `stocked` | `stocked_alerted_stand_idle_turn360_raised` | `stocked_alerted_crouch_idle_01` | same clips |
-| `pistol` | `pistol_alerted_stand_idle_upperbody_01` over `nw_stand_idle_turn360_planted` | `pistol_alerted_crouch_idle_iron_01` | same |
+| `pistol` | `pistol_alerted_stand_idle_upperbody_01` over `nw_stand_idle_turn360_planted` | `pistol_alerted_crouch_idle_upperbody_01` over `nw_neutral_crouch_idle` (2026-11-06; `pistol_alerted_crouch_idle_iron_01`, used until then, is no held pose: hips at standing height, arms up in a Y) | same |
 | `knife` | `knife_alerted_stand_idle_01` | upper-body over the crouch idle | upper-body only |
 | `multitool` | deferred | -- | -- |
 

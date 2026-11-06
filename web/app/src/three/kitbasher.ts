@@ -363,7 +363,15 @@ const NW_CROUCH: ClipSpec = { db: 'weapons/no_weapon/locomotion/crouch.dba', cli
  * on -- so the gun is in the hands without any IK of ours. A list is applied
  * in order over the rest pose: the pistol set has only an **upper-body** idle
  * (89 bones, hips untouched), so it rides on the unarmed standing idle for the
- * legs, as the game layers it. */
+ * legs, as the game layers it.
+ *
+ * Crouched too. `pistol_alerted_crouch_idle_iron_01`, which this once used
+ * alone, is not a held pose: on either body it left the hips at standing
+ * height and threw both arms up in a Y, the pistol over the head -- hands at
+ * 2.2 m on the male. Laid over the unarmed crouch it still held them above
+ * the head. The crouch set's own upper-body idle over the unarmed crouch
+ * aims the pistol two-handed at the chest (hands 0.79-0.84 m, head
+ * 0.94-0.98), as the knife already does. */
 export const WEAPON_POSES: Record<string, Record<string, readonly ClipSpec[]>> = {
   stocked: {
     raised: [{ db: 'weapons/stocked/locomotion/stand.dba', clip: 'stocked_alerted_stand_idle_turn360_raised' }],
@@ -371,7 +379,7 @@ export const WEAPON_POSES: Record<string, Record<string, readonly ClipSpec[]>> =
   },
   pistol: {
     raised: [NW_IDLE, { db: 'weapons/pistol/locomotion/stand.dba', clip: 'pistol_alerted_stand_idle_upperbody_01' }],
-    crouch: [{ db: 'weapons/pistol/locomotion/crouch.dba', clip: 'pistol_alerted_crouch_idle_iron_01' }],
+    crouch: [NW_CROUCH, { db: 'weapons/pistol/locomotion/crouch.dba', clip: 'pistol_alerted_crouch_idle_upperbody_01' }],
   },
   knife: {
     raised: [NW_IDLE, { db: 'weapons/knife.dba', clip: 'knife_alerted_stand_idle_upperbody_01' }],
