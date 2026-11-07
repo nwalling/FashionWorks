@@ -993,6 +993,40 @@ seven groups against a `.mtl` with six submaterials; the seventh holds 28 of its
 27,938 triangles. The pipeline emits six primitives for this mesh, so it drops
 the orphan somewhere in Collada or Blender without saying so.
 
+**The game does not draw it either (2026-11-07).** Reported by Noel with CIG's
+render: the GCD-Army arms and legs wore flat grey plates on the shoulder,
+forearm and thigh. Their meshes are the ORC-mkX XenoThreat v2's -- each names
+`m_cds_medium_armor_03_01_01` as its own material, fifteen submaterials, with
+the xeno overlay plates on 12 and 13 (8,909 and 2,524 vertices on the arms) --
+and GCD-Army's record overrides that with a material of nine. The web port
+clamped 12 and 13 onto the last submaterial, an unlit lamp (`helmet_light_m`,
+Illum, Specular 0.503 read as metal), which drew the overlay as bright grey
+metal. The game's icon and CIG's render show the armour's own plates beneath,
+painted dark like the rest; reading the missing slots from the mesh's own
+material would draw the xeno overlay, which neither shows. So a group past
+the list of a material the record or the definition names is not drawn
+(`three/geometry.ts`). Agrees with the icons on the Lynx colourways (their
+materials drop the canonical's `cushion_*` slot, and the clamp drew a tan pad
+under the chest plate).
+
+**Under a material the kitbasher chose, it still clamps**, because there a
+group past the list says the choice is wrong. Discovered: the Aponte Explorer
+Goggles (class `rmb_goggles_02_01_01` on a `goggles_03` mesh that names
+`m_rmb_goggles_03_01_01`; the strap the icon shows sits past the discovered
+material's two submaterials), and the "Payback" Killshot and Pulverizer, where
+one part's class-name discovery is reused for every part and leaves 90% of
+each weapon past a four-submaterial cosmetic material. Borrowed from the other
+body's node (`f_` material on an `m_` mesh): the FBL-8a Core (Modified), whose
+icon shows no canisters where the clamp draws them, and a Martel Dress whose
+male mesh is a Navy jumpsuit, which hidden would show holes. The figure's
+materials are the kitbasher's choice too. In 4.10.200 the rule moves 111
+items: the GCD-Army arms and legs, 90 Lynx colourways, the damaged Venture
+helmet (`..._helmet_dmg_...`, whose shattered visor sits past a plain Venture
+material) and two Aril Red Alert helmets -- plus the Defiance helmets' 28
+triangles and a few on six Pyro multi-tools and a Parallax.
+`examples/material_alpha.rs` reads which submaterial each group was painted
+for (vertex alpha), which agrees with the group's id on every mesh checked.
+
 ### The archive is Z-up, and the mapping is (x, y, z) -> (x, z, -y)
 
 Checked against the pipeline rather than assumed: the Sunchaser helmet's GLB

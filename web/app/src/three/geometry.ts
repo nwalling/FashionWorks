@@ -40,13 +40,42 @@ export interface BuiltGeometry {
   orphanGroups: number;
 }
 
+/** What becomes of a group whose material id is past the material's list. */
+export type MissingSubmaterial = 'hide' | 'clamp';
+
 /**
  * `materialCount` is how many submaterials the `.mtl` actually declares. A
- * group beyond it is passed through as its own group with a clamped index, and
- * counted, because a mesh really can reference a submaterial that does not
- * exist -- the Sunchaser helmet has seven groups against six submaterials.
+ * mesh really can reference a submaterial that does not exist, and a group
+ * beyond the list is counted and, when the material is one the game names
+ * (`missing` `hide`), not drawn: the game draws nothing there.
+ *
+ * Settled on the GCD-Army arms and legs. Their meshes are the ORC-mkX
+ * XenoThreat v2's -- each names `m_cds_medium_armor_03_01_01` as its own
+ * material, fifteen submaterials with the xeno overlay plates on 12 and 13 --
+ * and GCD-Army's record overrides it with a material of nine. The game's icon
+ * and CIG's render show the plain plates beneath, painted like the armour round
+ * them. Clamped onto the last submaterial -- an unlit lamp, `helmet_light_m` --
+ * the overlay drew as bright grey metal over them. Reading the missing slots
+ * from the mesh's own material instead would draw the overlay, which neither
+ * shows. The Lynx colourways agree with their icons the same way (their
+ * materials drop the canonical's `cushion_*` slot, and no tan pad shows under
+ * the chest plate), and the Python pipeline already left such groups out (the
+ * Sunchaser helmet's seventh group, against six submaterials).
+ *
+ * A material the kitbasher chose itself -- discovered by class or mesh name,
+ * borrowed from the other body's node, or the figure's -- `clamp`s, as before:
+ * there a group past the list says the choice is wrong, not that the game
+ * hides the part. The Aponte Explorer Goggles' discovered material is another
+ * goggle's, and the strap the icon shows sits past its two submaterials.
+ *
+ * With no material at all (`materialCount` 0) every group draws with the one
+ * placeholder, at index 0.
  */
-export function buildGeometry(mesh: MeshPayload, materialCount: number): BuiltGeometry {
+export function buildGeometry(
+  mesh: MeshPayload,
+  materialCount: number,
+  missing: MissingSubmaterial = 'hide',
+): BuiltGeometry {
   const geometry = new BufferGeometry();
   geometry.setAttribute('position', new BufferAttribute(toYUp(mesh.positions), 3));
 
@@ -83,11 +112,9 @@ export function buildGeometry(mesh: MeshPayload, materialCount: number): BuiltGe
     if (group.count === 0) continue;
     const beyond = materialCount > 0 && group.materialId >= materialCount;
     if (beyond) orphanGroups += 1;
-    geometry.addGroup(
-      group.start,
-      group.count,
-      beyond ? Math.max(0, materialCount - 1) : group.materialId,
-    );
+    if (beyond && missing === 'hide') continue;
+    const index = materialCount === 0 ? 0 : beyond ? materialCount - 1 : group.materialId;
+    geometry.addGroup(group.start, group.count, index);
     // The zone rides on the group, for `zones.showUncovered`.
     (geometry.groups[geometry.groups.length - 1] as { zone?: string | null }).zone = group.zone ?? null;
   }

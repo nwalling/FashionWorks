@@ -67,7 +67,7 @@ import type {
   MeshPayload,
   PropPayload,
 } from '../worker/archive.worker';
-import { buildGeometry } from './geometry';
+import { buildGeometry, type MissingSubmaterial } from './geometry';
 import {
   describePorts,
   HAND,
@@ -1231,7 +1231,12 @@ export class Kitbasher {
     const material: MaterialPayload = mtl
       ? (await this.client.material(mtl)).material
       : { submaterials: [], library: {} };
-    const count = Math.max(1, material.submaterials.length);
+    const count = material.submaterials.length;
+    // A group past a material the record names for this mesh is not drawn, as
+    // in the game; past one discovered or borrowed here, it says the choice is
+    // wrong (`buildGeometry`).
+    const named = item.materials[0] && !borrowedFromOtherBody(item.materials[0], item.geometry[0]?.source);
+    const missing: MissingSubmaterial = named ? 'hide' : 'clamp';
     const { materials, refine } = await this.materialsFor(
       item,
       material,
@@ -1243,7 +1248,7 @@ export class Kitbasher {
     for (const payload of payloads) {
       if (socket) {
         const prop = payload as PropPayload;
-        const object = new Mesh(drawnOnly(buildGeometry(prop, count).geometry, materials), materials);
+        const object = new Mesh(drawnOnly(buildGeometry(prop, count, missing).geometry, materials), materials);
         object.frustumCulled = false;
         shaded(object);
         if (prop.mount) {
@@ -1252,7 +1257,7 @@ export class Kitbasher {
         }
         objects.push(object);
       } else {
-        const object = new SkinnedMesh(drawnOnly(buildGeometry(payload, count).geometry, materials), materials);
+        const object = new SkinnedMesh(drawnOnly(buildGeometry(payload, count, missing).geometry, materials), materials);
         object.frustumCulled = false;
         shaded(object);
         objects.push(object);
@@ -1591,7 +1596,7 @@ export class Kitbasher {
     textureSize: number,
   ): Promise<Loaded> {
     const material: MaterialPayload = (await this.client.material(materialPath)).material;
-    const count = Math.max(1, material.submaterials.length);
+    const count = material.submaterials.length;
     const { materials, refine } = await this.materialsFor(
       FIGURE_ITEM,
       material,
@@ -1602,7 +1607,9 @@ export class Kitbasher {
     // Nothing reads a figure texture back, so its CPU copy goes once it is on
     // the GPU: about 40% of what the figure held.
     for (const texture of textureSlots(materials)) releaseAfterUpload(texture);
-    const object = new SkinnedMesh(drawnOnly(buildGeometry(payload, count).geometry, materials), materials);
+    // The figure's materials are the kitbasher's choice (`m_body_character_customizer`
+    // for its tone), so a slot past one clamps, as a discovered material's does.
+    const object = new SkinnedMesh(drawnOnly(buildGeometry(payload, count, 'clamp').geometry, materials), materials);
     object.frustumCulled = false;
     // Hair cards shade as a volume round the head (`setHairVolume`).
     object.geometry.computeBoundingBox();
@@ -2691,6 +2698,9 @@ export class Kitbasher {
       // parts that use it; a chambered round keeps its ammunition material.
       let mtl = part.material;
       if (item.materials[0] && (!mtl || mtl.toLowerCase() === base)) mtl = item.materials[0];
+      // Named by the definition or the record, a material's missing slots are
+      // not drawn; discovered here, they clamp (`buildGeometry`).
+      const missing: MissingSubmaterial = mtl ? 'hide' : 'clamp';
       if (!mtl) mtl = await this.materialPathFor(item, part.mesh.materialFile);
       let material = empty;
       if (mtl) {
@@ -2700,7 +2710,7 @@ export class Kitbasher {
           material = empty;
         }
       }
-      const count = Math.max(1, material.submaterials.length);
+      const count = material.submaterials.length;
       // A rifle is a torso's length and earns the full maps; a magazine, a
       // pen or a grenade is a few centimetres, and eight of them on a belt at
       // full size would cost more than the armour they hang on.
@@ -2711,7 +2721,7 @@ export class Kitbasher {
         item.slot === 'primary' || item.slot === 'sidearm' ? 'weapon' : 'small',
       );
       if (refine) refines.push(refine);
-      const mesh = new Mesh(drawnOnly(buildGeometry(part.mesh, count).geometry, materials), materials);
+      const mesh = new Mesh(drawnOnly(buildGeometry(part.mesh, count, missing).geometry, materials), materials);
       mesh.name = part.name;
       mesh.frustumCulled = false;
       shaded(mesh);
@@ -3151,6 +3161,18 @@ function padVertexColors(geometry: BufferGeometry): void {
   if (geometry.hasAttribute('fwColor')) return;
   const colors = new Uint8Array(geometry.getAttribute('position').count * 4).fill(255);
   geometry.setAttribute('fwColor', new BufferAttribute(colors, 4, true));
+}
+
+/** Whether a worn piece's material is the other body's, which the catalogue
+ * takes when this body's node names none (`catalog::geometry::materials_for`).
+ * CIG prefixes each body's files `m_` and `f_`: the FBL-8a Core (Modified)
+ * draws `f_cds_combat_light_03_01_01` on `m_cds_combat_light_core_03`, the
+ * Martel Dress `f_dil_dress_01_01_greeter` on a male Navy jumpsuit. Such a
+ * material is the kitbasher's choice for the mesh, not the record's. */
+function borrowedFromOtherBody(material: string, mesh: string | undefined): boolean {
+  const prefix = (path: string | undefined) => path?.split('/').pop()?.slice(0, 2).toLowerCase();
+  const [own, worn] = [prefix(mesh), prefix(material)];
+  return (own === 'm_' && worn === 'f_') || (own === 'f_' && worn === 'm_');
 }
 
 function drawnOnly<G extends { groups: Array<{ materialIndex?: number }> }>(geometry: G, materials: Material[]): G {

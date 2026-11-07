@@ -339,7 +339,7 @@ async function main(): Promise<void> {
       ? ((await ask({ type: 'material', path: mtl }, 'material')).material as MaterialPayload)
       : ({ submaterials: [], library: {} } as MaterialPayload);
     const composited = await compositeSurfaces(material, paletteOf(item), fetchTexture, wear);
-    const count = Math.max(1, material.submaterials.length);
+    const count = material.submaterials.length;
     const materials = material.submaterials.length
       ? material.submaterials.map((sub) => materialFor(sub.name, composited))
       : [materialFor('', composited)];

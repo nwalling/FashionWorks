@@ -54,7 +54,11 @@ pub struct Submesh {
     /// does not exist. The pipeline emits six primitives for this mesh, so it
     /// drops the orphan somewhere in Collada or Blender without saying so. The
     /// id is passed through as written and the caller decides, because silently
-    /// dropping geometry here would hide the same thing one layer lower.
+    /// dropping geometry here would hide the same thing one layer lower. The
+    /// kitbasher does not draw it, as the game does not: the GCD-Army arms and
+    /// legs wear the ORC-mkX XenoThreat v2's overlay plates on 12 and 13 of a
+    /// nine-submaterial material, and the game's icons show the armour beneath
+    /// (`three/geometry.ts`).
     pub material_id: u32,
     pub first_index: u32,
     pub index_count: u32,
