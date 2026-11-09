@@ -1025,6 +1025,21 @@ damaged Venture helmets (`..._helmet_dmg_...`, whose shattered visor sits past
 a plain Venture material) and two Aril Red Alert helmets -- plus the eight
 Defiance helmets' 28 triangles and 18 on six Pyro multi-tools.
 
+**The damaged Venture's icon shows the visor the rule hides, and is not the
+record's render.** `rsi_explorer_armor_light_helmet_dmg_01_01_20` puts
+`m_rsi_explorer_01_helmet_damage.skin` under the plain Venture Olive material
+(six submaterials); the mesh's seventh group, 17,901 vertices painted for
+slot 7, is the shattered visor, and its icon (a 2560x1440 scene, a face behind
+cracked glass) draws it. The only material with that slot is
+`explorer/glass-break/m_rsi_explorer_helmet_break_01_01_{01,20}.mtl`, slot 7
+`glss_break`, one per damaged colourway. Nothing in the DataCore names either
+(0 occurrences of `helmet_break`, `glass-break` or `glss_break` in 4.10.2's
+`Game2.dcb`), and the mesh's own `MTL_NAME` is a bare
+`m_rsi_explorer_helmet_break_01_01_01`, which beside the mesh does not exist.
+So the icon was drawn with that material applied by hand, a still from a
+scene, and says nothing about the item as the game builds it; the rule stands
+on the GCD-Army's references.
+
 **A single material is never short of a slot (0.17.4).** A `.mtl` with no
 `SubMaterials` block is one material, and the engine draws it on every group
 of the mesh whatever the id. 0.17.3 read it as a list of one and hid the rest:
