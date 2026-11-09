@@ -551,6 +551,18 @@ fn by_slot(layers: Vec<LayerRef>) -> Vec<LayerRef> {
     out
 }
 
+/// Whether a `.mtl` is one material rather than a list: no `SubMaterials`
+/// block, the root itself the material. The engine draws a single material on
+/// every group of a mesh whatever the group's id, so a group past index 0 is not
+/// missing a slot. The display mannequins name `default_grey.mtl` on meshes of
+/// eight groups and draw grey all over.
+pub fn is_single(bytes: &[u8]) -> bool {
+    starbreaker_cryxml::from_bytes(bytes).is_ok_and(|xml| {
+        let root = xml.root();
+        !xml.node_children(root).any(|c| xml.node_tag(c) == "SubMaterials")
+    })
+}
+
 /// Parse an armour `.mtl` into its submaterials.
 pub fn parse(bytes: &[u8]) -> Result<Vec<SubMaterial>, String> {
     let file: MtlFile = mtl::parse_mtl(bytes).map_err(|e| format!("parsing .mtl: {e}"))?;

@@ -363,6 +363,13 @@ sidearm holster takes it now", and on an outfit switch, where the held
 weapon crosses into the new outfit's holster. Put into the hand on purpose
 with a holster free, idle holsters it there.
 
+**And a held weapon stays in the hand when its holster goes** (0.17.4, from
+the Main App's check of 0.17.3). Adopted by the legs' holster, the pistol
+then came off with the legs -- "Arclight Pistol came off with it", the hand
+empty -- though it was visibly held throughout. A held weapon whose port is
+lost now goes back to the hand, if the hand takes it, and stays drawn; one
+put away in that holster still comes off with it (`revalidateGear`).
+
 The clips:
 
 | anim set | stand raised | crouch | female |

@@ -26,7 +26,7 @@ import {
 } from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
-import { buildGeometry } from './src/three/geometry';
+import { buildGeometry, missingFor } from './src/three/geometry';
 import { applyClip, buildRig, mountMatrix, type BuiltRig } from './src/three/rig';
 import { applyTheme, isLight } from './src/three/sceneTheme';
 import { compositeSurfaces, materialFor, type PaletteEntry } from './src/three/surface';
@@ -352,7 +352,7 @@ async function main(): Promise<void> {
         const prop = (await ask(
           { type: 'prop', path: geometry.source, socket }, 'prop',
         )).prop as PropPayload;
-        const object = new Mesh(buildGeometry(prop, count).geometry, materials);
+        const object = new Mesh(buildGeometry(prop, count, missingFor(!!mtl, material)).geometry, materials);
         object.frustumCulled = false;
         if (prop.mount) {
           object.matrixAutoUpdate = false;
@@ -361,7 +361,7 @@ async function main(): Promise<void> {
         objects.push(object);
       } else {
         const mesh = (await ask({ type: 'mesh', path: geometry.source }, 'mesh')).mesh as MeshPayload;
-        const object = new SkinnedMesh(buildGeometry(mesh, count).geometry, materials);
+        const object = new SkinnedMesh(buildGeometry(mesh, count, missingFor(!!mtl, material)).geometry, materials);
         object.frustumCulled = false;
         objects.push(object);
       }

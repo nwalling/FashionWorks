@@ -1019,11 +1019,22 @@ each weapon past a four-submaterial cosmetic material. Borrowed from the other
 body's node (`f_` material on an `m_` mesh): the FBL-8a Core (Modified), whose
 icon shows no canisters where the clamp draws them, and a Martel Dress whose
 male mesh is a Navy jumpsuit, which hidden would show holes. The figure's
-materials are the kitbasher's choice too. In 4.10.200 the rule moves 111
-items: the GCD-Army arms and legs, 90 Lynx colourways, the damaged Venture
-helmet (`..._helmet_dmg_...`, whose shattered visor sits past a plain Venture
-material) and two Aril Red Alert helmets -- plus the Defiance helmets' 28
-triangles and a few on six Pyro multi-tools and a Parallax.
+materials are the kitbasher's choice too. In 4.10.200 the rule moves 110
+looks on the male body: the GCD-Army arms and legs, 90 Lynx colourways, the
+damaged Venture helmets (`..._helmet_dmg_...`, whose shattered visor sits past
+a plain Venture material) and two Aril Red Alert helmets -- plus the eight
+Defiance helmets' 28 triangles and 18 on six Pyro multi-tools.
+
+**A single material is never short of a slot (0.17.4).** A `.mtl` with no
+`SubMaterials` block is one material, and the engine draws it on every group
+of the mesh whatever the id. 0.17.3 read it as a list of one and hid the rest:
+the display mannequins (`mannequin_undersuit`, listed as a Beacon Undersuit,
+and the `mannequin_display*` core and helmet) name `default_grey.mtl` on
+meshes of several groups, and drew 73%, 60% and all but one triangle of
+them as holes (undersuit, helmet, core). The core's material payload says
+`single` (`material::is_single`) and `geometry.missingFor` clamps under it.
+Found by scanning every look for the Item DB's redraw list, which counted 113
+where the rule meant 110.
 `examples/material_alpha.rs` reads which submaterial each group was painted
 for (vertex alpha), which agrees with the group's id on every mesh checked.
 

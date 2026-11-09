@@ -67,7 +67,7 @@ import type {
   MeshPayload,
   PropPayload,
 } from '../worker/archive.worker';
-import { buildGeometry, type MissingSubmaterial } from './geometry';
+import { buildGeometry, missingFor } from './geometry';
 import {
   describePorts,
   HAND,
@@ -1234,9 +1234,9 @@ export class Kitbasher {
     const count = material.submaterials.length;
     // A group past a material the record names for this mesh is not drawn, as
     // in the game; past one discovered or borrowed here, it says the choice is
-    // wrong (`buildGeometry`).
-    const named = item.materials[0] && !borrowedFromOtherBody(item.materials[0], item.geometry[0]?.source);
-    const missing: MissingSubmaterial = named ? 'hide' : 'clamp';
+    // wrong (`buildGeometry`, `missingFor`).
+    const named = !!item.materials[0] && !borrowedFromOtherBody(item.materials[0], item.geometry[0]?.source);
+    const missing = missingFor(named, material);
     const { materials, refine } = await this.materialsFor(
       item,
       material,
@@ -2699,8 +2699,8 @@ export class Kitbasher {
       let mtl = part.material;
       if (item.materials[0] && (!mtl || mtl.toLowerCase() === base)) mtl = item.materials[0];
       // Named by the definition or the record, a material's missing slots are
-      // not drawn; discovered here, they clamp (`buildGeometry`).
-      const missing: MissingSubmaterial = mtl ? 'hide' : 'clamp';
+      // not drawn; discovered here, they clamp (`buildGeometry`, `missingFor`).
+      const named = !!mtl;
       if (!mtl) mtl = await this.materialPathFor(item, part.mesh.materialFile);
       let material = empty;
       if (mtl) {
@@ -2721,7 +2721,7 @@ export class Kitbasher {
         item.slot === 'primary' || item.slot === 'sidearm' ? 'weapon' : 'small',
       );
       if (refine) refines.push(refine);
-      const mesh = new Mesh(drawnOnly(buildGeometry(part.mesh, count, missing).geometry, materials), materials);
+      const mesh = new Mesh(drawnOnly(buildGeometry(part.mesh, count, missingFor(named, material)).geometry, materials), materials);
       mesh.name = part.name;
       mesh.frustumCulled = false;
       shaded(mesh);
@@ -2939,12 +2939,27 @@ export class Kitbasher {
    *
    * A weapon in the hand that something now worn holsters moves to that
    * holster, still held: the hand alone is for what nothing worn takes, and
-   * standing at ease can now put it away. `homed` says where it went. */
+   * standing at ease can now put it away. `homed` says where it went.
+   *
+   * The other way round, a held weapon whose holster goes stays in the hand:
+   * it is visibly held, and taking off the legs should not empty it. */
   private revalidateGear(): {
     removed: string[]; ports: Map<string, OwnedPort>; lostHold: boolean; homed: string | null;
   } {
     const ports = this.ports();
-    const { kept, removed } = revalidate(this.carried, ports);
+    const { kept, removed: lost } = revalidate(this.carried, ports);
+    const hand = ports.get(HAND);
+    const removed = lost.filter(({ port, carried }) => {
+      if (port !== this.holdingPort || port === HAND || !hand || this.carried.has(HAND)) return true;
+      if (refusal(hand.port, carried.item) !== null) return true;
+      this.carried.delete(port);
+      carried.port = hand;
+      this.carried.set(HAND, carried);
+      this.holdingPort = HAND;
+      if (this.lastHeld === port) this.lastHeld = HAND;
+      this.mountCarried(carried);
+      return false;
+    });
     const lostHold = removed.some(({ port }) => port === this.holdingPort);
     for (const { port, carried } of removed) {
       carried.instance.removeFromParent();

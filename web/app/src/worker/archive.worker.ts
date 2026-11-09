@@ -202,6 +202,9 @@ export interface MaterialPayload {
   }>;
   /** Every distinct detail layer the piece references, by lowercased path. */
   library: Record<string, LayerMaterial>;
+  /** The file is one material, not a list: the engine draws it on every
+   * group, whatever the group's id (`missingFor`). Absent on older cores. */
+  single?: boolean;
 }
 
 export interface TexturePayload {

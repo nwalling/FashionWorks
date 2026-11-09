@@ -1248,6 +1248,7 @@ impl Archive {
             submaterials.push(&entry);
         }
         js_sys::Reflect::set(&out, &"submaterials".into(), &submaterials.into())?;
+        js_sys::Reflect::set(&out, &"single".into(), &JsValue::from_bool(material::is_single(&bytes)))?;
 
         let lib = js_sys::Object::new();
         for (key, resolved) in &library {

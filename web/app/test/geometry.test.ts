@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildGeometry, toYUp } from '../src/three/geometry';
+import { buildGeometry, missingFor, toYUp } from '../src/three/geometry';
 import type { MeshPayload } from '../src/worker/archive.worker';
 
 describe('archive Z-up to three.js Y-up', () => {
@@ -78,5 +78,16 @@ describe('groups past the material list', () => {
     const built = buildGeometry(mesh(), 0);
     expect(indices(built)).toEqual([0, 0, 0]);
     expect(built.orphanGroups).toBe(0);
+  });
+
+  it('hide only under a named list, never under a single material', () => {
+    // The display mannequins name `default_grey.mtl`, one material with no
+    // SubMaterials block, on meshes of eight groups: grey all over in game.
+    expect(missingFor(true, { single: false })).toBe('hide');
+    expect(missingFor(true, {})).toBe('hide');
+    expect(missingFor(true, { single: true })).toBe('clamp');
+    expect(missingFor(false, { single: false })).toBe('clamp');
+    const built = buildGeometry(mesh(), 1, missingFor(true, { single: true }));
+    expect(indices(built)).toEqual([0, 0, 0]);
   });
 });

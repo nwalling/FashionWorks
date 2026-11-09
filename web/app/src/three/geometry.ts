@@ -44,6 +44,17 @@ export interface BuiltGeometry {
 export type MissingSubmaterial = 'hide' | 'clamp';
 
 /**
+ * Hide a group past the list only when the record or the definition `named`
+ * the material and the material is a list. A single material -- a `.mtl` with
+ * no `SubMaterials` block -- is drawn by the engine on every group of the
+ * mesh: the display mannequins name `default_grey.mtl` on meshes of eight
+ * groups and are grey all over, where hiding drew seven of them as holes.
+ */
+export function missingFor(named: boolean, material: { single?: boolean }): MissingSubmaterial {
+  return named && !material.single ? 'hide' : 'clamp';
+}
+
+/**
  * `materialCount` is how many submaterials the `.mtl` actually declares. A
  * mesh really can reference a submaterial that does not exist, and a group
  * beyond the list is counted and, when the material is one the game names
