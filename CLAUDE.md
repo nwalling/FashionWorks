@@ -176,6 +176,7 @@ The root docs are plans and research. Read the one that matches the work.
 When you verify a new fact, add it as a `###` section to the matching file in
 `docs/verified-facts/`, or start a new topic file there. CLAUDE.md gets at most
 one index line for it.
+
 ## Layout
 
 ```
