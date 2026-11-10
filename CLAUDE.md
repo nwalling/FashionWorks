@@ -81,7 +81,7 @@ need a single stage.
 ./fashionworks use-p4k /Volumes/<card>/LIVE   # point at an install
 ./fashionworks build                          # catalog + rig + convert
 ./fashionworks run                            # viewer
-./fashionworks check                          # tests, lint, typecheck, build
+./fashionworks check                          # pipeline + viewer: tests, lint, typecheck, build
 ```
 
 Pipeline:
@@ -121,6 +121,14 @@ extract/.venv/bin/python -m pytest -q     # from extract/
 extract/.venv/bin/ruff check extract
 npm --prefix viewer run typecheck
 npm --prefix viewer run build
+```
+
+The web kitbasher (`./fashionworks check` does not cover it):
+
+```bash
+web/core/build-wasm.sh                    # Rust core -> web/core/pkg
+npm --prefix web/app run check            # typecheck, CSS lint, tests
+npm --prefix web/app run build            # the package, then check-package.mjs
 ```
 
 ## Verified facts
