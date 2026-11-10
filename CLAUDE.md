@@ -8,36 +8,10 @@ A Star Citizen FPS-armor kitbasher. Pipeline:
 Data.p4k -> catalog (JSON) -> geometry/textures -> Blender normalize -> .glb + manifest.json -> React/Three.js viewer
 ```
 
-`LIGHTING.md` is the web kitbasher's lighting: the 2026-11-02 review, the
-metered exposure, the presets as the game's own scenes; the local viewer's
-older deferred plan is kept at its end.
 `WEB-LEGAL.md` holds the Phase 0 legal research: what CIG's EULA and
 Fandom FAQ actually say, the options, and **the go/no-go, which is decided and
 is go** — with the conditions recorded under "Legal" at the foot of this file.
-`WEB.md` holds the plan for a public web front end on sc-hangarworks.org.
-`WEB-INTEGRATION.md` is the contract the Hangarworks site builds against.
-`WEB-INTEGRATION-PLAN.md` is the ordered plan handed to the agent that builds
-that site: the same boundary, as steps rather than as a spec.
-`LOADOUT.md` is the plan for weapons, holsters and the raised pose, with the
-port survey and clip measurements it rests on.
-`ANIMATION.md` is the research on what else the archive can make the figure
-do: the game's emote record and its clips, display poses, idles, sitting,
-and why faces are not yet playable.
-`CLOTHING.md` is the plan for clothing as a wearable layer instead of armour:
-the body's ports, the undersuit that carries armour and hides clothing, and the
-layered body zones that decide what shows.
-`CHARACTER.md` is the plan for loading a player's own character from the
-`.chf` the game's customizer saves: the face as a per-region blend of library
-heads, the skin tone, eyes and hair colour, and the head items it names.
-`RENDERING.md` is the plan for closing the gap to a studio render -- tone
-mapping, the game's own probes as IBL, per-pixel LayerBlend, a body -- with
-the archive measurements it rests on and the boundaries it keeps.
-`LAYOUT.md` is the plan for rearranging the kitbasher's controls: the toolbar
-folded into the left column and two overlays on the viewport, layout only.
-`HAIR.md` is the research on hair and facial hair: the three generations of
-hair material in the archive, what a card's inputs and vertex streams are --
-the normal stream is the strand, not the card's normal -- the methods
-ranked against that data, and the record of building them (§9).
+The other root docs are described in the index under "Verified facts".
 
 `PLAN.md` is the design document. This file is the operational one: what is
 decided, what is verified, and what to run. When the two disagree, this file wins
@@ -170,17 +144,17 @@ The root docs are plans and research. Read the one that matches the work.
 | --- | --- | --- |
 | `PLAN.md` | The original design document | architecture changes; correct it when this file disagrees |
 | `README.md` | The public overview of the repository | anything a visitor reads first |
-| `ANIMATION.md` | What the archive offers for poses, idles and emotes, and why faces are not yet playable | new animation or emote work |
-| `CHARACTER.md` | Loading a player's `.chf`: face blend, skin tone, eyes, hair color, head items | character loading |
-| `CLOTHING.md` | Clothing as a wearable layer: body ports, the undersuit, layered body zones | clothing slots and zones |
-| `HAIR.md` | Hair and facial hair: material generations, card inputs, ranked methods, the build record (§9) | hair shading |
-| `LAYOUT.md` | Rearranging the kitbasher's controls: the left column and two viewport overlays | the kitbasher's layout |
-| `LIGHTING.md` | The web kitbasher's lighting: the 2026-11-02 review, metered exposure, presets; the local viewer's deferred plan at its end | lighting presets |
+| `ANIMATION.md` | What the archive offers: the game's emote record and its clips, display poses, idles, sitting, and why faces are not yet playable | new animation or emote work |
+| `CHARACTER.md` | Loading a player's `.chf`: the face as a per-region blend of library heads, skin tone, eyes, hair color, head items | character loading |
+| `CLOTHING.md` | Clothing as a wearable layer: the body's ports, the undersuit that carries armor and hides clothing, layered body zones | clothing slots and zones |
+| `HAIR.md` | Hair and facial hair: three material generations, a card's inputs and vertex streams (the normal stream is the strand, not the card's normal), ranked methods, the build record (§9) | hair shading |
+| `LAYOUT.md` | Rearranging the kitbasher's controls: the toolbar folded into the left column and two viewport overlays, layout only | the kitbasher's layout |
+| `LIGHTING.md` | The web kitbasher's lighting: the 2026-11-02 review, metered exposure, the presets as the game's own scenes; the local viewer's deferred plan at its end | lighting presets |
 | `LOADOUT.md` | Weapons, holsters and the raised pose, with the port survey and clip measurements | gear and holsters |
-| `RENDERING.md` | Closing the gap to a studio render: tone mapping, probes as IBL, per-pixel LayerBlend, a body | rendering features |
+| `RENDERING.md` | Closing the gap to a studio render: tone mapping, the game's probes as IBL, per-pixel LayerBlend, a body; the archive measurements it rests on and the boundaries it keeps | rendering features |
 | `WEB.md` | The plan for the public web front end on sc-hangarworks.org | the web front end |
 | `WEB-INTEGRATION.md` | The contract the Hangarworks site builds against | anything Hangarworks consumes |
-| `WEB-INTEGRATION-PLAN.md` | The ordered plan handed to the agent that builds that site | integration steps |
+| `WEB-INTEGRATION-PLAN.md` | The ordered plan handed to the agent that builds that site: the same boundary as steps, not a spec | integration steps |
 | `WEB-LEGAL.md` | The Phase 0 legal research and the go decision, with its conditions | anything public: hosting, notices, distribution |
 
 When you verify a new fact, add it as a `###` section to the matching file in
