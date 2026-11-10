@@ -231,8 +231,9 @@ viewer/src/
 - `viewer/public/assets` is a symlink to `data/out`, created by
   `npm run link-assets`. It is gitignored and does not survive a fresh clone.
 - In dev the viewer exposes `window.__kitbasher` (renderer, scene, camera) and
-  `window.__store`. That is how the swap-leak and latency numbers above were
-  measured. Both are stripped from production builds.
+  `window.__store`. That is how the swap-leak and latency numbers in
+  `docs/verified-facts/pipeline.md` were measured. Both are stripped from
+  production builds.
 - Geometry and materials are shared with the `useGLTF` cache. Only geometry that
   `binding.ts` cloned for a skin-index remap may be disposed *by the viewer*.
   Everything else is owned by `three/gltfCache.ts`, which disposes a whole GLB
