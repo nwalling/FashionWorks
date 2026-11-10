@@ -11,7 +11,7 @@ a non-empty value wins. A path segment may be:
 * ``[]``  — map over every element of a list and return the first hit
 * ``*``   — try every value of a dict at that level
 
-STATUS: UNVERIFIED. See CLAUDE.md -> "Verified facts".
+STATUS: UNVERIFIED. See docs/verified-facts/catalogue.md.
 """
 
 from __future__ import annotations

@@ -41,7 +41,7 @@ tree are metal (18.4%), so this is not a corner. 46 items were rendering
 identically to a sibling purely from this -- the Lynx arms, the Oracle helmets,
 the Stirling Exploration backpacks among them.
 
-**Regression-checked against every piece this file already validated**, by
+**Regression-checked against every piece these notes already validated**, by
 baking each twice and diffing per submaterial: Defiance Core Sunchaser, Beacon
 Undersuit Orange and Odyssey II Undersuit Tan/Black are bit-identical, 0 of 5,
 7 and 12 submaterials changed. Corbel Halcyon moves slightly and stays plainly
@@ -109,7 +109,7 @@ coverage measurements alone.
 **Closed by the icons (2026-11-02).** Drawn on main against the game's own
 icon, the arms carry gold on the pauldron frame and the forearm, as the icon
 shows, at 19% of the piece. Some later fix moved them; which one was not
-traced. See "The catalogue held against the game's icons" below.
+traced. See "The catalogue held against the game's icons" in `icon-reviews.md`.
 
 ### Open: the backpack shell takes the wrong palette entry
 

@@ -14,7 +14,7 @@ failures that look like parsing bugs and are not:
 
 Clip-to-archive is itself -90 about X, so clip-to-scene is the two composed --
 which is exactly the conversion the pipeline's `to_gltf_quat` applies, and why
-`CLAUDE.md` already records the clip reaching glTF "through a 180 degree
+"Poses" below already records the clip reaching glTF "through a 180 degree
 rotation about X".
 
 Getting it wrong is legible once you know the shape of it. Converting a clip
@@ -25,7 +25,7 @@ head, hips, hands and feet all at anatomically perfect distances.
 
 ### A clip's local rotations apply directly here, and not in the pipeline
 
-`CLAUDE.md` lists "copy the local rotations" as a refuted approach, and it is --
+"Poses" below lists "copy the local rotations" as a refuted approach, and it is --
 **for the pipeline**, whose rig has been through Collada, Blender and the glTF
 exporter, so its bone frames no longer match the ones the clip was authored
 against.

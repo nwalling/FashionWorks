@@ -65,7 +65,7 @@ None of today's tools run in a browser. Each stage has a web equivalent:
 | `catalog.py` | ported; runs once per game build and is cached |
 
 **The expensive part is not the port, it is the knowledge.** The verified facts in
-`CLAUDE.md` — the geometry tree trap, record-type collisions, slot matching by
+`docs/verified-facts/` — the geometry tree trap, record-type collisions, slot matching by
 name, per-vertex stray weights, the 180° socket yaw, `TintMode`, metal-texture
 normalisation, and a blend table that took four attempts — each cost real
 debugging. Carry them over by test, not by memory:
@@ -458,7 +458,7 @@ by CRC32, and lands on the pipeline's own figures: head **1.704** against 1.70,
 hips **1.001** against 1.00, hands at **-0.307** and **+0.302** against ±0.31 at
 hip height, feet at **0.103**.
 
-Two things that cost real time, both recorded in `CLAUDE.md`:
+Two things that cost real time, both recorded in `docs/verified-facts/`:
 
 - **There are three up-axes, not two.** The `.chr` is +Z up, an animation clip's
   world space is **-Y** up, three.js is +Y. Archive-to-scene is -90 degrees
@@ -535,7 +535,7 @@ vertices at UV and normal seams on export. A port that expects them to match
 will chase a difference that is not there.
 
 *Armour skinning is in a stream upstream does not decode, and this explains a
-fact already in CLAUDE.md.* `starbreaker-3d` parses `IVOBONEMAP` at 12 bytes and
+fact already in `docs/verified-facts/`.* `starbreaker-3d` parses `IVOBONEMAP` at 12 bytes and
 falls through on **`IVOBONEMAP32`**, which is what armour actually ships. That
 is why "StarBreaker's `skin export` writes a rigid mesh" and why the Python
 pipeline has to route through cgf-converter for anything skinned.
@@ -562,7 +562,7 @@ that arithmetic rather than assuming it.
 *Stray-weight redistribution is smaller than expected, and the reason is the
 graft.* Once the 35 attachment bones are on the armature, **most armour meshes
 have no stray weight at all** -- measured across eighteen, all but one came out
-at 0.00%. CLAUDE.md's "41 joints of which only 16 exist" is against the *base*
+at 0.00%. `docs/verified-facts/catalogue.md`'s "41 joints of which only 16 exist" is against the *base*
 220, not the canonical 255.
 
 What is left is simulation geometry. The worst mesh measured,
@@ -624,7 +624,7 @@ and world position**, to within a millimetre. The 35th,
 `.dae` and the `.gltf` alike, while the armature says `RightUpLeg_Start_sIk1`
 and places it 27 mm away -- a divergence Blender's import introduced. The port
 follows the archive, so `graft_diff` lists it as expected rather than failing
-on it, and `CLAUDE.md` records it against the Python pipeline.
+on it, and `docs/verified-facts/rig.md` records it against the Python pipeline.
 
 `.skin` → three.js geometry; canonical skeleton with grafted attachment bones;
 per-vertex stray-weight redistribution; socket placement with its 180° yaw;

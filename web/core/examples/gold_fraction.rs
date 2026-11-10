@@ -1,6 +1,6 @@
 //! Re-run the store-render comparison against the port's own composite.
 //!
-//! WEB.md phase 3's second exit criterion. `CLAUDE.md` records the anchor: CIG's
+//! WEB.md phase 3's second exit criterion. `docs/verified-facts/layerblend.md` records the anchor: CIG's
 //! store renders put the Sunchaser torso at **36.0% gold** and the upper back at
 //! **33.0%**, with a gold-to-non-gold contrast of 2.48 on that sheet and 3.47 on
 //! the user's; the viewer read 2.33-2.55 before the blend-table fix and 3.81
@@ -34,7 +34,7 @@ use serde_json::Value;
 
 const SIZE: usize = 1024;
 
-/// The anchor, from `CLAUDE.md`: the gold-to-non-gold contrast CIG's two
+/// The anchor, from `docs/verified-facts/measurement.md`: the gold-to-non-gold contrast CIG's two
 /// captures of the Sunchaser show, 2.95 on the store render and 3.47 on the
 /// user's sheet.
 ///

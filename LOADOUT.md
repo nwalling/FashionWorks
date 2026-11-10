@@ -36,7 +36,7 @@ Where it differed from the plan:
   `.cga`s whose groups live in their node's space. Both handled.
 - **Raising the arms exposed an armour bug**, not a gear one: orphaned wrist
   piston weight on the Defiance arms, now resolved through the piece's own
-  bone hierarchy (CLAUDE.md).
+  bone hierarchy (`docs/verified-facts/web-kitbasher.md`).
 
 It targets the web kitbasher (`web/`), which is where the product lives now,
 with the Python pipeline kept at catalogue parity the same way the rest of the
@@ -465,7 +465,7 @@ an upper-body clip over a full-body one, and the female set. Then the
 left-hand measurement across the stocked meshes, and IK only if it says so.
 **Exit:** raised with a rifle on both bodies, pistol and knife raised, the
 magazine travelling with the weapon; the hand-gap table recorded in
-`CLAUDE.md` with the decision it led to.
+`docs/verified-facts/web-kitbasher.md` with the decision it led to.
 
 **Phase 4 — Share URL, sets, hardening**
 

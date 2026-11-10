@@ -477,7 +477,7 @@ because clothing names ("Drake Jacket Blue") may not follow armour's "Line Slot
 Edition" shape.
 
 **Exit:** the clothing counts above reproduced by both catalogues; colourway
-families that share a name prefix, as `CLAUDE.md` requires of armour.
+families that share a name prefix, as `docs/verified-facts/variants.md` requires of armour.
 
 ### Phase 2 -- the outfit model
 

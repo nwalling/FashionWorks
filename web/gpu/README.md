@@ -18,7 +18,7 @@ live.
 
 ## What the shader implements
 
-Every rule in `CLAUDE.md`'s LayerBlend sections, and each one is cited at the
+Every rule in the LayerBlend sections of `docs/verified-facts/` (`layerblend.md`, `palette.md`), and each one is cited at the
 line that implements it:
 
 - the **blend table**, settled on the fourth attempt, with three refuted

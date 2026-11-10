@@ -39,7 +39,7 @@ reference decides them.
 nothing sets it.** 21 of 11,652 armour LayerBlend submaterials and 0 of 5,227
 weapon ones, while 11,356 and 4,923 bind the map. Armour's maps are near-white
 (the one decoded reads 245 mean green), so reading them as occlusion anyway
-never showed -- which is how the earlier "inferred, not confirmed" note above
+never showed -- which is how the earlier "inferred, not confirmed" note in `layerblend.md`
 survived. A weapon's is a per-panel mask with whole panels black (the P8-SC's
 has its rails black and its receiver white), and read as occlusion it took a
 third of the light off every standard weapon. `material.rs` binds `hal` only

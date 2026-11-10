@@ -2,7 +2,7 @@
  * from this page to their downloads folder (WEB-LEGAL.md). */
 
 /** How long a download's object URL is kept: `click()` only queues the
- * navigation, and revoking at once can lose the file (CLAUDE.md). */
+ * navigation, and revoking at once can lose the file (docs/verified-facts/local-viewer.md). */
 const OBJECT_URL_TTL_MS = 60_000;
 
 export function downloadBlob(blob: Blob, name: string): void {

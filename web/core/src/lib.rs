@@ -1905,7 +1905,7 @@ impl Archive {
         // The clip's own local rotations, per bone.
         //
         // **The pipeline cannot use these and this port can**, which is worth
-        // being explicit about because `CLAUDE.md` records "copy the local
+        // being explicit about because `docs/verified-facts/animation.md` records "copy the local
         // rotations" as a refuted approach. It is refuted *for the pipeline*:
         // its rig has been through Collada, Blender and the glTF exporter, so
         // its bone frames no longer match the ones the clip was authored

@@ -153,7 +153,7 @@ texture. The flat palette multiply that used to sit on top is gone.
 `link_variants` keyed on `(slot, geometry_key)`, and the mesh alone is too
 loose in the same way the `Set_<n>` tag is too loose the other way. `Defiance
 Legs Sunchaser` and `ADP-mk4 Legs Woodland` are both
-`m_cds_heavy_armor_01_legs.skin` -- the genuine reuse recorded above, which is
+`m_cds_heavy_armor_01_legs.skin` -- the genuine reuse recorded in `layerblend.md`, which is
 not to be "fixed" -- so eleven pieces across two product lines became **one**
 family. `sharedName` then found no common prefix, fell back to the canonical
 member's name, and every Defiance colourway disappeared as a swatch under

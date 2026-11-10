@@ -10,7 +10,7 @@ measured. §3 describes the shader before §9.
 
 The companion files: CHARACTER.md "Hair, brows and skin, held to the
 customizer" (the colour model, the dye gradient, the highlight width);
-CLAUDE.md "A player's character". The probes are
+`docs/verified-facts/clothing-and-character.md` "A player's character". The probes are
 `web/core/examples/hair_frame.rs` (vertex streams and the tangent frame),
 `strand_units.rs` (the vertex red's unit) and `hair_streams.rs` (colour
 channels against depth).
@@ -427,6 +427,6 @@ close-up -- the portrait spans 1.3 and keeps about half. And past a strand or
 two a pixel the cut-out kept only the densest texels, the roots; from 2 to 5
 texels it dissolves into the blended pass, at the density `OpacityMipScale`
 gives and no more. Coverage of the region holds 42-33% from 0.5 to 6 m
-against the reference's 40-34%, where it fell to 20%. `CLAUDE.md` has the
+against the reference's 40-34%, where it fell to 20%. `docs/verified-facts/clothing-and-character.md` has the
 figures. Loading the hair masks at 2048 or 4096 would let a close-up resolve
 strands again, and the offset with them; not done, for memory.

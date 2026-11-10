@@ -45,7 +45,7 @@ Released in `@fashionworks/web` 0.7.0 (FashionWorks `faee59f`), vendored into Ha
 
 The per-piece gold targets are the in-game sheet's, measured at a different
 framing; they are directions, not pass marks. The arms and legs gap is the
-known open palette-index question in `CLAUDE.md`, which no rendering phase is
+known open palette-index question in `docs/verified-facts/palette.md`, which no rendering phase is
 expected to close. What the phases must do is move contrast into the band and
 hue toward the name without moving gold coverage the wrong way.
 
@@ -97,7 +97,7 @@ anchored at the head, its 1 m attenuation radius dropped.
 Sunchaser mid-band. `classic` reproduces the pre-Phase-1 baseline to within
 0.2 on every figure, so the preset plumbing itself changes nothing. p95
 luminance rose (83 -> 99 against the in-game 68): specular response, which
-`CLAUDE.md` already says no lighting value fixes.
+`docs/verified-facts/lighting.md` already says no lighting value fixes.
 
 **The harness's hue targets now come from the items' own data**: Corbel's
 palette entry A `#f6c000` (46.8), Beacon's BaseLayer3 tint (30.2), Lynx's
@@ -587,7 +587,7 @@ Ordered by what a visitor sees per unit of work. Each phase ships on its own.
 
 Everything after this changes how armour looks, so first make "better" a
 number. A fixed set of pieces, camera and lighting, rendered headless from the
-built package and scored with the measures `CLAUDE.md` already trusts:
+built package and scored with the measures `docs/verified-facts/measurement.md` already trusts:
 
 - Defiance Sunchaser: gold-to-non-gold contrast against the store renders
   (2.48-2.95 band) and gold fraction on the silhouette;
@@ -708,7 +708,7 @@ small; do it if the harness or a visitor shows a joint artefact.
 
 ## Risks
 
-- **Every colour measurement in `CLAUDE.md` was taken under today's lights.**
+- **Every colour measurement in `docs/verified-facts/` was taken under today's lights.**
   Phase 1 changes them; the harness pins the reference preset so old and new
   numbers stay comparable, and the reference band is re-checked, not assumed.
 - **The inventory probe may be dark** (it is an indoor capture), so exposure

@@ -95,9 +95,10 @@ tools/build.sh      builds the extraction tools from source
 data/               generated, gitignored
 ```
 
-`CLAUDE.md` is the working reference: tool decisions, verified facts about the
-game data, and the traps found along the way. `PLAN.md` is the original design,
-annotated where reality disagreed with it.
+`CLAUDE.md` is the working reference: tool decisions, commands and the traps
+found along the way. `docs/verified-facts/` holds the verified facts about the
+game data, one file per topic, indexed from `CLAUDE.md`. `PLAN.md` is the
+original design, annotated where reality disagreed with it.
 
 ## Legal
 

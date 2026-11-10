@@ -45,7 +45,7 @@ export function bonePosition(archive: Float32Array | number[]): Vector3 {
  * angle. Three frames are in play:
  *
  * * the `.chr` skeleton, **+Z up**;
- * * an animation clip's world space, **-Y up** -- which `CLAUDE.md` records;
+ * * an animation clip's world space, **-Y up** -- which `docs/verified-facts/animation.md` records;
  * * three.js, **+Y up**.
  *
  * Archive to scene is -90 degrees about X. Clip to archive is another -90.
@@ -125,7 +125,7 @@ export function mountMatrix(rows: Float32Array | number[]): Matrix4 {
 
 /** Apply a clip's own local rotations to the rig.
  *
- * **The pipeline cannot do this and this port can.** `CLAUDE.md` records "copy
+ * **The pipeline cannot do this and this port can.** `docs/verified-facts/animation.md` records "copy
  * the local rotations" as refuted -- the character ends up on its back -- but
  * that is true of the *pipeline's* rig, which has been through Collada,
  * Blender and the glTF exporter and whose bone frames no longer match the ones

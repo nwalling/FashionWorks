@@ -98,7 +98,7 @@ between their backdrop greys. **The Hangarworks item renderer's `--exposure
 toe**; against a metered preset its exposure wants to be 1. `LIGHTING.md`
 has the review and the presets, which are now the game's own scenes.
 
-The lesson is the one "Compare contrast, not absolute luminance" already
+The lesson is the one "Compare contrast, not absolute luminance" (`measurement.md`) already
 states: an absolute level fitted through a non-linear curve fits the curve.
 Sunchaser contrast moves from 3.22 to 2.38 (band 2.48-3.47) and the Defiance
 torso from mean 34 to 54 against the dim capture's 34; the old figures were

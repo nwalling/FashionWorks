@@ -25,7 +25,7 @@ they are marked as such.
   latency is ~17 ms (one frame). Re-measure with `window.__kitbasher.gl.info`.
   This holds for swapping *between items already loaded*. It says nothing about
   the cost of each new one, which on real assets is 13.6 MB retained forever --
-  see "The GLB cache needs a byte budget" below.
+  see "The GLB cache needs a byte budget" in `local-viewer.md`.
 - **Tinting has to work from the bound mesh list, not the loaded scene.**
   Binding reparents meshes out of the cloned item scene and under the base
   character, so traversing the clone afterwards finds nothing. This was a real
@@ -68,7 +68,7 @@ right. Measured on the Sunchaser core and arms (RENDERING.md Phase 6): **A is
 255 minus the submaterial index**, exactly, on all 13 submaterials; B tracks
 the island's V (Spearman 0.95 core, -0.88 arms); R sits at 160-161 and G at
 16i + 5 on 99% of vertices, constant per island. Where a decal is placed the
-colour is its UV instead -- see "Decals, decoded" below.
+colour is its UV instead -- see "Decals, decoded" in `decals-and-submaterials.md`.
 
 **Option A is restored, but only because Blender does the remap.** Re-exporting
 each item against the canonical armature makes every item GLB carry the same
@@ -191,5 +191,5 @@ preserves custom normals where they do exist.
   conversion has not been attempted, and Collada intermediates are large.
 - Placeholder junk in the catalog (`<= PLACEHOLDER =>`, `Body`) is flagged
   and hidden; the unresolved names are explained under "A name key can carry
-  `,P`" above.
+  `,P`" in `catalogue.md`.
 - 331 items have no manufacturer code.

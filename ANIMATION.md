@@ -3,7 +3,7 @@
 Research, 2026-11-06, asked for by Noel: "a wider variety of animations and
 emotes ... everything the data.p4k could offer us". Read off 4.10.2
 (`/Volumes/Plex/SC Data`, build 4.10.196.368). Nothing here is built yet.
-`CLAUDE.md` "Poses" and `LOADOUT.md` record what the kitbasher already plays:
+`docs/verified-facts/animation.md` "Poses" and `LOADOUT.md` record what the kitbasher already plays:
 the customizer idle, the stand/crouch/raised stances and the weapon sets.
 
 ## 1. The inventory
@@ -91,7 +91,7 @@ apart end to end) and are only for chaining.
 
 **Floor emotes need the clip's hip height.** Lying is 0.178 m and sitting
 0.109 m. The kitbasher applies rotations only and seats the feet
-(`CLAUDE.md`, "The floor shadow, and poses that floated"). That is right for
+(`docs/verified-facts/lighting.md`, "The floor shadow, and poses that floated"). That is right for
 standing and crouching and wrong for lying down: the hips would stay at
 standing height. The player needs a floor rule for these, taken from the
 clip.

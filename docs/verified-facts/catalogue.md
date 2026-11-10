@@ -24,8 +24,8 @@ dropped would have survived as a phantom item, and `global.ini` was extracted
 once and kept, which came out as the new pieces all `unnamed`. Both now carry
 the archive's key (`dcb.archive_key`) and are rebuilt when it changes.
 
-These are the figures after the phantom-record fix and the variant-linking fix
-below, both of which change the counts. An earlier reading of 2615 items in 165
+These are the figures after the phantom-record fix below and the variant-linking fix
+in `variants.md`, both of which change the counts. An earlier reading of 2615 items in 165
 sets included 140 tint-palette records that are not items at all, and grouped
 eleven pieces spanning two product lines as one colourway family.
 

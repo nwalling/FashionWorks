@@ -2,7 +2,7 @@
 # One-set, end-to-end smoke test (PLAN.md §2 / Task 1).
 #
 # Prove the pipeline on a single armor set before generalising anything. Every
-# step prints what it found; record the answers in CLAUDE.md -> "Verified facts"
+# step prints what it found; record the answers in docs/verified-facts/ (indexed from CLAUDE.md)
 # and do not move on to Task 2 until that section is filled in.
 #
 # Usage: scripts/spike.sh <set-name-fragment>   e.g. scripts/spike.sh pathfinder
@@ -58,7 +58,7 @@ echo "     $SCX rig --skeleton male"
 echo "     $SCX convert --slot helmet"
 
 echo
-echo "== 5. check these by hand in Blender, and write the answers into CLAUDE.md =="
+echo "== 5. check these by hand in Blender, and write the answers into docs/verified-facts/ =="
 cat <<'NOTES'
   - Do the armor .skin bone names match the .chr skeleton exactly?
   - Is the exported bone set the full skeleton or a subset? (decides §5.3 A vs B)

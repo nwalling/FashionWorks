@@ -843,7 +843,7 @@ export class Kitbasher {
       // As it left the factory, as the game shows a piece in its icons, its
       // store renders and on a new character: the Zeus, Stirling, CSP-68H,
       // Lynx and Artimex icons are clean where the worn surface paints bright
-      // chips over every painted plate (WEAR in CLAUDE.md). Wear is the toggle.
+      // chips over every painted plate (docs/verified-facts/layerblend.md). Wear is the toggle.
       wear: false,
       status: '',
       busy: false,

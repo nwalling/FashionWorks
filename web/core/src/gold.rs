@@ -2,7 +2,7 @@
 //!
 //! This is the measure the blend table was settled on, and it is the one WEB.md
 //! phase 3 re-runs: *Sunchaser torso 36.0% and upper back 33.0% gold against
-//! CIG's store renders.* Two rules from `CLAUDE.md` govern how it is taken, and
+//! CIG's store renders.* Two rules from `docs/verified-facts/measurement.md` govern how it is taken, and
 //! both were learned by getting them wrong:
 //!
 //! * **Compare contrast, not absolute luminance.** Two in-game captures of the

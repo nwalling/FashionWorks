@@ -5,7 +5,7 @@
  * numbers. It drives a page that exposes the kitbasher as `window.__kit` --
  * `kitbasher.html` (the *built* package, by default) or `studio.html` (source)
  * -- in headless Chrome, poses fixed scenes under fixed cameras, and scores
- * them with the measures `CLAUDE.md` already trusts:
+ * them with the measures `docs/verified-facts/measurement.md` already trusts:
  *
  * - **Sunchaser**, per piece: gold fraction of the piece's visible pixels, and
  *   gold-to-non-gold contrast pooled over the armour, against the in-game
@@ -57,7 +57,7 @@ const TWEAK = process.env.FW_HARNESS_TWEAK ? JSON.parse(process.env.FW_HARNESS_T
 const ONLY = args.includes('--scenes') ? new Set(args[args.indexOf('--scenes') + 1].split(',')) : null;
 const wanted = (name) => !ONLY || ONLY.has(name);
 
-/** What the numbers are held against. Sources are CLAUDE.md's sections. */
+/** What the numbers are held against. Sources are the sections of docs/verified-facts/. */
 export const REFERENCE = {
   // "Sunchaser, measured on screen against the in-game reference".
   sunchaserGold: { helmet: 50.1, torso: 24.5, arms: [8.9, 11.8], legs: 5.3 },

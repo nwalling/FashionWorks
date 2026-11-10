@@ -102,7 +102,7 @@ Tasks:
    - Cgf-Converter on the `.skin` files and the `.chr` → glTF/DAE into `data/interim`.
    - Open in Blender manually: confirm bone names on the armor `.skin` match the `.chr` skeleton, confirm vertex groups exist, confirm scale (StarEngine units are meters; check for 100x or Y-up/Z-up issues).
    - Export one `.glb`, load in a throwaway R3F page with `useGLTF`, confirm it renders and the skeleton is present.
-4. Write down every discovered fact (actual record type names, actual paths, unit scale, bone naming, texture suffixes) into `CLAUDE.md` → "Verified facts". Do not proceed until this section is populated.
+4. Write down every discovered fact (actual record type names, actual paths, unit scale, bone naming, texture suffixes) into `docs/verified-facts/` (indexed from `CLAUDE.md` → "Verified facts"). Do not proceed until this section is populated.
 
 Exit criteria: one helmet and one torso from the same set render on the base skeleton in the browser.
 
@@ -309,8 +309,8 @@ Each task is one session or PR. Acceptance criteria are what Claude Code should 
 
 ## 7a. Task 1 spike results (2026-09-13, build 1.0.191.55227)
 
-Run against a real 158 GB `Data.p4k`. Full detail in CLAUDE.md → "Verified
-facts"; the parts that change this plan:
+Run against a real 158 GB `Data.p4k`. Full detail in `docs/verified-facts/catalogue.md`
+("Verified against real game data"); the parts that change this plan:
 
 - **§3.1 was right about the field path and the attach types.** `Char_Armor_*`
   is real, and `Geometry.Geometry.Geometry.path` resolves.

@@ -39,7 +39,7 @@ environment x1.5 for weapons and x4 for ship parts. Its notes describe the
 old `hangar` as "a standard weapon black with hot highlights" -- the toe.
 Studio x2 is 0.98 of the design point: Noel's eye had found it.
 
-**2. Wear was on by default.** See `CLAUDE.md`, "A piece is drawn as it
+**2. Wear was on by default.** See `docs/verified-facts/layerblend.md`, "A piece is drawn as it
 left the factory".
 
 **Also found:**
@@ -73,7 +73,7 @@ reflective: a black suit is not brightened. `classic` alone is unmetered.
 Neutral stays the curve. Both alpha solves -- the portrait's and the item
 renderer's -- rely on it being affine between their two backdrop greys, and
 at its design point it reproduces a base colour as authored, which is what
-the palette work in `CLAUDE.md` is measured in.
+the palette work in `docs/verified-facts/` is measured in.
 
 **Its shoulder starts at 0.6, not 0.76** (2026-11-03, `three/toneCurve.ts`).
 Metered, a white paint under the key reaches 1.2-1.6, where Khronos's
@@ -129,7 +129,7 @@ face at 0.42 of the Idris hangar's; its key is the ceiling floods instead.
 Coverage and two of three hues hold. The contrast falls just under the band
 because the toe was squaring it: a ratio read through `6.25 x^2` is the ratio
 squared, which flatters an accent. The Defiance torso now reads brighter than
-the dim capture it was once tuned to, an absolute level `CLAUDE.md` already
+the dim capture it was once tuned to, an absolute level `docs/verified-facts/measurement.md` already
 says not to trust. Beacon's bright orange (median 171 of 255) loses 2.7
 degrees at the curve's shoulder.
 

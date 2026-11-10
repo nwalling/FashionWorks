@@ -31,7 +31,7 @@ rig, so the list stays pinned. `cargo run --example rig_union` reports the
 difference by name.
 
 **Four attachment bones sit where Blender's import put them, not where the
-archive says**, which extends the `wep_sidearm_attach_override` note above from
+archive says**, which extends the `wep_sidearm_attach_override` note below from
 one bone to four. Each differs on exactly one axis while the other two match to
 four decimals:
 

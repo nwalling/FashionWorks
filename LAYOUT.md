@@ -189,7 +189,7 @@ labels kept visible, and a **More** button.
 - Frame the figure so the dock doesn't sit on the feet. Check whether the
   default camera framing already leaves room at the bottom. If not, note it for
   a follow-up rather than changing the camera in this change: the framing is
-  measured work (CLAUDE.md, "Verified by rendering real armor").
+  measured work (`docs/verified-facts/pipeline.md`, "Verified by rendering real armor").
 
 **Overlay surfaces, theme rules.** No colour literals, as everywhere in
 `kitbasher.css`, and stylelint enforces it.

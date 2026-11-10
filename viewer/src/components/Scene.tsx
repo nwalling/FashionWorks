@@ -52,7 +52,7 @@ function CaptureBridge({ onReady }: { onReady: (state: { gl: THREE.WebGLRenderer
  * The 95th percentile still sits near 89 against the reference's 68. That
  * residual is specular response, so no lighting value fixes it -- it wants
  * lower metalness or higher roughness in the bake, which is a material
- * question and is recorded in CLAUDE.md rather than papered over here.
+ * question and is recorded in docs/verified-facts/lighting.md rather than papered over here.
  */
 const ENV_INTENSITY = 0.25;
 const EXPOSURE = 0.85;

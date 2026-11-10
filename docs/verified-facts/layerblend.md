@@ -130,7 +130,7 @@ matching the `.mtl` submaterial order.
 
 Chasing why armour rendered lighter than the game shows it turned up two
 errors in how a detail layer's colour was read. Neither was the cause -- that
-was the material-slot bug above -- but both are wrong on their own terms.
+was the material-slot bug in `pipeline.md` -- but both are wrong on their own terms.
 
 **A dielectric's colour is its `Diffuse`.** 168 of 317 dielectric layers set it
 to something other than white and 46 set it below 0.5, and it was being ignored
