@@ -164,9 +164,9 @@ head height, because the prop's origin is not its mount point.
 
 **Colour variants reuse the canonical mesh.** They differ only by tint, so
 converting each one would duplicate geometry for nothing.
-`pipeline.refresh_assets` points a variant at its canonical item's GLB, and the
-viewer re-applies the variant's own palette colour, since the shared mesh carries
-the canonical colour baked into its material.
+`pipeline.refresh_assets` points a variant at its canonical item's GLB, and
+`scx variants` gives the variant its own baked surface on that shared mesh (see
+"Colour variants differ by material, not palette" in `variants.md`).
 
 ### The female body is the same rig with different meshes
 
