@@ -198,7 +198,7 @@ blender/
   normalize_armor.py        batch: converted geometry -> item.glb
   mtl_to_pbr.py             StarEngine .mtl -> Principled BSDF
   make_synthetic.py         placeholder rig and items (no game data needed)
-web/core/src/
+web/core/src/               the Rust core, built to wasm: catalog, meshes, materials, rig
   composite.rs              LayerBlend rules on the CPU, the port's reference
   gold.rs                   accent coverage and contrast, with the band-edge test
   audit.rs                  the invariants, ported to run on composited surfaces
@@ -206,6 +206,12 @@ web/gpu/
   layerblend.js             the LayerBlend fragment shader
   bake.js                   WebGL2 texture arrays, MRT target, read-back
   check.html                scores the shader against the Python's bakes
+web/app/                    @fashionworks/web, the package Hangarworks vendors
+  src/three/                the live scene: surfaces, rig, lighting, hair, zones
+  src/ui/                   React components
+  src/worker/               the archive worker the catalog is built in
+  scripts/                  harness.mjs (scored renders), check-package.mjs
+web/patches/                StarBreaker patches tools/build.sh applies for the browser
 viewer/src/
   manifest.ts               zod schema, mirrors manifest.py
   three/binding.ts          §5.3 Option A + Option B fallback
