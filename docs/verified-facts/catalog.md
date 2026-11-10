@@ -101,6 +101,10 @@ pass a bare filename.
   `viewer/src/three/binding.ts` must remap rather than skip. It currently skips
   a mesh whose bones are unknown, which would reject every real piece.
 
+  Later superseded: the canonical armature now carries the override bones, so
+  Option A works. See "Option A is restored, but only because Blender does the
+  remap" in `pipeline.md`.
+
 **CDF indirection.** Some helmets point at a `.cdf`, a CryXML character
 definition naming the real mesh. Across 640 male armor CDFs the attachment
 types are `CA_SKIN` (751, skinned, `Binding` is the mesh), `CA_BONE` (186,
