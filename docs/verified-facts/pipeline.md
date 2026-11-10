@@ -182,13 +182,12 @@ preserves custom normals where they do exist.
 
 ### Still unverified
 
-- Only one set has been converted end to end. `scx convert` has not been run
-  across the full catalog, so per-item failure rates are unknown.
+- Per-item conversion failure rates across the full catalog have not been
+  measured. `scx sets --pending` lists what is not converted yet.
 - The socket bone is chosen from a per-slot table rather than read from the
   CDF's `CA_BONE` entry, which carries the real `BoneName` and relative
   transform. Fine for backpacks; other rigid pieces may need the CDF.
-- 12 of 41 complete sets are converted. Running the full catalog through
-  conversion has not been attempted, and Collada intermediates are large.
+- Collada intermediates are large (see "Use Collada for meshes, not glTF").
 - Placeholder junk in the catalog (`<= PLACEHOLDER =>`, `Body`) is flagged
   and hidden; the unresolved names are explained under "A name key can carry
   `,P`" in `catalog.md`.
