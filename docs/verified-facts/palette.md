@@ -111,7 +111,7 @@ icon, the arms carry gold on the pauldron frame and the forearm, as the icon
 shows, at 19% of the piece. Some later fix moved them; which one was not
 traced. See "The catalogue held against the game's icons" in `icon-reviews.md`.
 
-### Open: the backpack shell takes the wrong palette entry
+### Closed: the backpack shell takes the wrong palette entry
 
 With the palette now resolving, the CSP-68H Red Alert renders red on its trim
 and grey on its shell, where the game shows the shell red. `backpack_01_m`
