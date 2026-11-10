@@ -8,6 +8,13 @@ A Star Citizen FPS-armor kitbasher. Pipeline:
 Data.p4k -> catalog (JSON) -> geometry/textures -> Blender normalize -> .glb + manifest.json -> React/Three.js viewer
 ```
 
+The public product is the web kitbasher, the `@fashionworks/web` package in
+`web/app/`. It reads a visitor's own `Data.p4k` in the browser through the
+Rust core in `web/core/`, built to WebAssembly by `web/core/build-wasm.sh`.
+The Hangarworks site hosts it as a sub-page (`WEB-INTEGRATION.md`). The Python
+pipeline and the local viewer above are the reference the port is scored
+against (`scx golden`, `web/core/examples/full_diff.rs`).
+
 `WEB-LEGAL.md` holds the Phase 0 legal research: what CIG's EULA and
 Fandom FAQ actually say, the options, and **the go/no-go, which is decided and
 is go** — with the conditions recorded under "Legal" at the foot of this file.
