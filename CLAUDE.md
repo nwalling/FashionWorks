@@ -149,10 +149,10 @@ covers. Each file keeps its sections in the order they were written.
 | File | What it covers | Read before touching |
 | --- | --- | --- |
 | `docs/verified-facts/pipeline.md` | What the pipeline was verified to do on this host and on real armor; what is still unverified | `blender/`, `scx convert`, `scx rig`, normals, material slot assignment |
-| `docs/verified-facts/catalogue.md` | Record shape, slots, the geometry tree trap, names and localization, asset lookup, extraction filters | `catalog.py`, `fields.py`, `dcb.py`, `localization.*`, `find_asset`, the browser catalogue build |
+| `docs/verified-facts/catalog.md` | Record shape, slots, the geometry tree trap, names and localization, asset lookup, extraction filters | `catalog.py`, `fields.py`, `dcb.py`, `localization.*`, `find_asset`, the browser catalog build |
 | `docs/verified-facts/layerblend.md` | LayerBlend_V2 inputs: detail layers, wear, metalness, the blend mask table, gloss, wear off by default | `tint.py`, `layers.py`, `composite.rs`, `layerblend.js`, `bake.js` |
 | `docs/verified-facts/palette.md` | Tint palette entries, PaletteTint indexing, tint versus specular | any palette or PaletteTint code |
-| `docs/verified-facts/variants.md` | Color variants, colourway families, product lines, editions, the audit checks that guard them | `scx variants`, `link_variants`, `discover_materials`, set matching, listing groups |
+| `docs/verified-facts/variants.md` | Color variants, color families, product lines, editions, the audit checks that guard them | `scx variants`, `link_variants`, `discover_materials`, set matching, listing groups |
 | `docs/verified-facts/decals-and-submaterials.md` | Decal UVs in vertex color; mesh groups past the end of a material's list | `decal_uv`, `three/decal.ts`, `three/geometry.ts` |
 | `docs/verified-facts/rig.md` | The canonical armature, coordinate conversion, skin weights, attachment points, sockets, the female body | `build_base_rig.py`, `binding.ts`, `armature`/`socket` code, `rig.ts` |
 | `docs/verified-facts/animation.md` | Clip frames, the pose retarget, idles, emotes | `scx poses`, `tools/anim-dump`, pose or emote code |
@@ -161,7 +161,7 @@ covers. Each file keeps its sections in the order they were written.
 | `docs/verified-facts/lighting.md` | Scene light, metered exposure, the Neutral curve, the floor shadow, backdrops | `lighting.ts`, `toneCurve.ts`, `three/ground.ts`, `Backdrop.tsx` |
 | `docs/verified-facts/local-viewer.md` | The local viewer: binding, the base body, the GLB cache, undo, downloads | `viewer/src/` |
 | `docs/verified-facts/web-kitbasher.md` | The web kitbasher's surfaces, glow, stencils, holsters and the held weapon | `web/app/`, `web/core/src/discover.rs`, gear code |
-| `docs/verified-facts/clothing-and-character.md` | Clothing in the catalogue, the `.chf` character, chunk visibility between pieces | clothing slots, `appearance::Library`, `outfit.offZones` |
+| `docs/verified-facts/clothing-and-character.md` | Clothing in the catalog, the `.chf` character, chunk visibility between pieces | clothing slots, `appearance::Library`, `outfit.offZones` |
 
 The root docs are plans and research. Read the one that matches the work.
 

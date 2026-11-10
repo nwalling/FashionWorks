@@ -1,6 +1,6 @@
 # Reviews against the game's icons
 
-What holding the item renders and the catalogue against the game's inventory icons found and fixed (2026-10-30 to 2026-11-02).
+What holding the item renders and the catalog against the game's inventory icons found and fixed (2026-10-30 to 2026-11-02).
 
 ### Items held against the game's own icons (2026-10-30)
 

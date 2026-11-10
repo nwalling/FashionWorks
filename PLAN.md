@@ -309,7 +309,7 @@ Each task is one session or PR. Acceptance criteria are what Claude Code should 
 
 ## 7a. Task 1 spike results (2026-09-13, build 1.0.191.55227)
 
-Run against a real 158 GB `Data.p4k`. Full detail in `docs/verified-facts/catalogue.md`
+Run against a real 158 GB `Data.p4k`. Full detail in `docs/verified-facts/catalog.md`
 ("Verified against real game data"); the parts that change this plan:
 
 - **§3.1 was right about the field path and the attach types.** `Char_Armor_*`

@@ -191,5 +191,5 @@ preserves custom normals where they do exist.
   conversion has not been attempted, and Collada intermediates are large.
 - Placeholder junk in the catalog (`<= PLACEHOLDER =>`, `Body`) is flagged
   and hidden; the unresolved names are explained under "A name key can carry
-  `,P`" in `catalogue.md`.
+  `,P`" in `catalog.md`.
 - 331 items have no manufacturer code.

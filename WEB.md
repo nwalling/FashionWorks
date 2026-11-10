@@ -562,7 +562,7 @@ that arithmetic rather than assuming it.
 *Stray-weight redistribution is smaller than expected, and the reason is the
 graft.* Once the 35 attachment bones are on the armature, **most armour meshes
 have no stray weight at all** -- measured across eighteen, all but one came out
-at 0.00%. `docs/verified-facts/catalogue.md`'s "41 joints of which only 16 exist" is against the *base*
+at 0.00%. `docs/verified-facts/catalog.md`'s "41 joints of which only 16 exist" is against the *base*
 220, not the canonical 255.
 
 What is left is simulation geometry. The worst mesh measured,

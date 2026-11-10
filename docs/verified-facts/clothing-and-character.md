@@ -1,6 +1,6 @@
 # Clothing and character
 
-Clothing in the catalogue, a player's .chf character, and chunk visibility between pieces.
+Clothing in the catalog, a player's .chf character, and chunk visibility between pieces.
 
 ### Clothing is catalogued, and the pipeline ignores it (schema 5)
 

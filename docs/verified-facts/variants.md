@@ -1,6 +1,6 @@
-# Colour variants and families
+# Color variants and families
 
-How color variants get their own surface, how colourway families and product lines are grouped, and the audit checks that guard them.
+How color variants get their own surface, how color families and product lines are grouped, and the audit checks that guard them.
 
 ### An item with no material wears another item's surface
 

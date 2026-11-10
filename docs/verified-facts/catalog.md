@@ -1,6 +1,6 @@
-# Catalogue and archive
+# Catalog and archive
 
-What the game archive's records look like and how the catalogue reads them: record shape, slots, geometry trees, names and localization, lookups and extraction.
+What the game archive's records look like and how the catalog reads them: record shape, slots, geometry trees, names and localization, lookups and extraction.
 
 ### Verified against real game data
 
