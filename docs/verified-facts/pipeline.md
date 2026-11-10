@@ -2,9 +2,8 @@
 
 What the Python and Blender pipeline was verified to do on this host and on real armor: conversion, normalizing, material slots, normals, and what is still unverified.
 
-Two lists. The first is verified. The second is what the Task 1 spike must fill
-in and **must not be guessed at** — `fields.py` holds the current guesses, and
-they are marked as such.
+"Still unverified" at the end of this file lists what has not been measured.
+Do not treat its items as fact; measure one before relying on it.
 
 ### Verified on this host (2026-09-13)
 
