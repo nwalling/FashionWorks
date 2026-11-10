@@ -14,8 +14,9 @@ is go** — with the conditions recorded under "Legal" at the foot of this file.
 The other root docs are described in the index under "Verified facts".
 
 `PLAN.md` is the design document. This file is the operational one: what is
-decided, what is verified, and what to run. When the two disagree, this file wins
-and `PLAN.md` gets corrected.
+decided and what to run, with an index of the verified facts. When `PLAN.md`
+disagrees with this file or with `docs/verified-facts/`, they win and `PLAN.md`
+gets corrected.
 
 ## Rules
 
