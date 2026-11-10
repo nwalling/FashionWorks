@@ -49,7 +49,8 @@ and `PLAN.md` gets corrected.
    go in `config/settings.local.toml` (gitignored) or `SCX_<SECTION>_<KEY>` env vars.
 2. **StarBreaker output is the source of truth.** Every DataCore field name in
    `extract/sc_extract/fields.py` is a hypothesis. When real data disagrees, fix
-   `fields.py`, then update the "Verified facts" section below and `PLAN.md`.
+   `fields.py`, then record the fact in the matching file under
+   `docs/verified-facts/` (see "Verified facts" below) and correct `PLAN.md`.
 3. **Never commit extracted assets.** Everything under `data/` is CIG copyright
    and gitignored. See "Legal" below.
 4. **Do not mark a stage done without running it.** `scx doctor` says what this
