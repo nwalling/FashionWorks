@@ -20,7 +20,8 @@ because only `offsetKey` was changing.
 The base GLB ships a default undersuit, so there is a body to look at and a
 skinned mesh for the viewer to read the skeleton from. Equipping another
 undersuit would stack two layers, so `BaseCharacter` hides the built-in body
-whenever that slot is filled. It captures the body meshes once at mount, because
+when an undersuit covers it (the coverage test is in "The base body" below).
+It captures the body meshes once at mount, because
 armor pieces are reparented under the same root when they bind and re-traversing
 would hide the armor too.
 
