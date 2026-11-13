@@ -49,6 +49,34 @@ yellow (`core01_m` 173,127,0 -> 151,113,14). Emulate the old behaviour for such
 a diff by passing a palette whose `spec` is set to its `color`; that is exactly
 what the previous code did.
 
+### A painted metal takes the entry's specular alone, not times its own
+
+The rule above settled *which* of the entry's two colors a metal takes. Until
+0.17.5 the product then multiplied that specular by the layer's own Specular,
+so a painted metal carried its library metal's hue and brightness twice. On a
+bright or saturated entry (the Lynx reds and blues) the hue survives and the
+error hides; on a dark neutral one it does not.
+
+**The Corbel Raider Camo settles it.** Its core, arms and legs plates are
+`bronze_scratched_04` (Specular 0.254/0.184/0.112, TintMode 2) on entry A of
+`vanduul_incursion`, whose specular is (59,59,59). The product drew them
+0.044 x bronze, about 0.011 linear: near-black with a bronze sheen. An in-game
+screenshot (Noel, 2026-11-13, a desert in daylight) shows dark **neutral**
+gunmetal with silver worn edges, and no bronze anywhere.
+
+**Bench, 40 looks** (Hangarworks `~/Library/Caches/hangarworks/bench/painted-metal`):
+the four Raider Camo pieces, the Corbel Crush and Halcyon cores, four Lynx arms
+and 30 random looks with a painted metal layer and a cstone icon. 18 moved by
+more than 3/255; every one moved toward its icon (the Raider Camo plates to
+gunmetal, the Berserker and Artimex Chairman's Club gold trim to the bright gold
+of their icons, the Lynx steel to silver, Geist Backpack Forest to its lighter
+green) and none away from it. Unpainted metals are unchanged: they still take
+their own Specular.
+
+All three renderers carry the rule: `live.ts`, `web/gpu/layerblend.js` and
+`tint.py` (bake key token `paintedmetal`); `test_a_painted_metal_takes_the_palette_specular_alone`
+fails on the old rule.
+
 ### The palette modulates a layer's TintColor, it does not replace it
 
 966 of 1984 palette-tinted base layers carry a **non-white** `TintColor`,

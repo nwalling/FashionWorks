@@ -494,7 +494,7 @@ def layered_key(sub, palette: list[Layer], wear: bool = True) -> str:
         )
     parts.append(
         f"wear:{WEAR_THRESHOLD}:{WEAR_FALLOFF}:metal:{METAL_F0_THRESHOLD}"
-        f":diffuse:buckets:{sorted(BLEND_BUCKETS.items())}:tintmul:metalnorm:tintmode2:palspec:entrymetal:shinemap"
+        f":diffuse:buckets:{sorted(BLEND_BUCKETS.items())}:tintmul:metalnorm:tintmode2:palspec:entrymetal:shinemap:paintedmetal"
         f"{'' if wear else ':unworn'}"
     )
     return hashlib.sha1(";".join(parts).encode()).hexdigest()[:10]
@@ -642,12 +642,21 @@ def compose_layered(
                 entry.tint_color, dtype=np.float32
             )
             gloss_scale = max(0.05, min(1.0, chosen.glossiness))
+            painted = True
         else:
             entry_metal = False
+            painted = False
             tint = np.array(entry.tint_color, dtype=np.float32)
             gloss_scale = 1.0
 
-        if entry_metal:
+        if painted and metallic:
+            # A painted metal's F0 is the entry's specular, not that times the
+            # layer's own Specular. The Corbel Raider Camo paints
+            # bronze_scratched_04 (specular 0.25/0.18/0.11) with a (59,59,59)
+            # specular: the product drew it near-black and bronze, and in game
+            # it is dark neutral gunmetal.
+            pass
+        elif entry_metal:
             # The entry's specular is the surface's F0; the layer's own diffuse
             # (a paint's 0.88) is not a term in a metal, and the layer draws as
             # one from here on, its texture as pattern.

@@ -584,3 +584,61 @@ def test_a_layer_gloss_map_is_scaled_by_its_shininess():
     # A layer at 255 is unchanged by the rule, and without a map the constant stands.
     assert abs(float(layer_gloss(1.0, 0.8, 0.5, np.full((1, 1, 1), 0.6, dtype=np.float32)).mean()) - 0.24) < 1e-6
     assert abs(layer_gloss(0.5, 1.0, 1.0) - 0.5) < 1e-9
+
+
+def test_a_painted_metal_takes_the_palette_specular_alone(tmp_path, monkeypatch) -> None:
+    """A painted metal's F0 is the entry's specular, not that times its own.
+
+    The Corbel Raider Camo paints bronze_scratched_04 (specular 0.25/0.18/0.11,
+    TintMode 2) with an entry whose specular is (59,59,59). Multiplying the two
+    drew the plates near-black and bronze; in game they are dark neutral
+    gunmetal (Noel's screenshot, 2026-11-13). An unpainted metal still takes
+    its own specular.
+    """
+    from sc_extract import layers as layer_lib
+    from sc_extract.tint import srgb_to_linear
+
+    bronze = layer_lib.LayerMaterial(
+        path="materials/layers/metal/bronze_scratched_04.mtl",
+        specular=(0.254, 0.184, 0.112),
+        diffuse=(0.032, 0.019, 0.015),
+        shininess=255.0,
+        tint_mode=2,
+    )
+    monkeypatch.setattr(layer_lib, "load", lambda *a, **k: bronze)
+
+    def plate(palette_tint: int) -> SubMaterial:
+        return SubMaterial(
+            name="core01_m",
+            shader="LayerBlend_V2",
+            layers=[
+                MatLayer(
+                    name="BaseLayer1",
+                    path="materials/layers/metal/bronze_scratched_04.mtl",
+                    tint_color=(1.0, 1.0, 1.0),
+                    palette_tint=palette_tint,
+                    gloss_mult=1.0,
+                    uv_tiling=1.0,
+                )
+            ],
+        )
+
+    spec = (59 / 255, 59 / 255, 59 / 255)
+    palette = [Layer(color=(62 / 255, 66 / 255, 52 / 255), spec=spec, glossiness=1.0)]
+
+    def base_color(sub, key):
+        written = compose_layered(
+            sub, palette, tmp_path / key, key, resolved={}, raw_root=tmp_path / "raw", size=2
+        )
+        return np.array(
+            Image.open(written["base_color"]).convert("RGB").load()[0, 0], dtype=np.float32
+        ) / 255.0
+
+    painted = base_color(plate(1), "painted")
+    want = linear_to_srgb(srgb_to_linear(np.array(spec, dtype=np.float32)))
+    assert np.allclose(painted, want, atol=0.02), f"{painted} should be the entry's specular {want}"
+    assert np.ptp(painted) < 0.02, "a neutral specular paints a neutral metal, with no bronze left in it"
+
+    bare = base_color(plate(0), "bare")
+    want = linear_to_srgb(np.array([0.254, 0.184, 0.112], dtype=np.float32))
+    assert np.allclose(bare, want, atol=0.02), f"{bare} should be bronze's own specular {want}"

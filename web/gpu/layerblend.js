@@ -224,10 +224,12 @@ void evaluateLayer(int i, vec2 uv, out vec3 colour, out float rough, out float m
     // game.
     tint = srgbToLinear(source) * tintRow.rgb;
     glossScale = clamp(uPaletteGloss[index - 1], 0.05, 1.0);
-    if (entryMetal) {
-      metal = 1.0;
-      resp = vec3(1.0);
-    }
+    if (entryMetal) metal = 1.0;
+    // A painted metal's F0 is the entry's specular, not that times the
+    // layer's own: the Corbel Raider Camo's bronze_scratched_04 plates on a
+    // (59,59,59) spec are dark neutral gunmetal in game, where the product
+    // drew them near-black and bronze.
+    if (metal > 0.5) resp = vec3(1.0);
   }
   tint *= resp;
 

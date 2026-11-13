@@ -524,10 +524,12 @@ void fwLayer(int i, vec2 uv, vec2 dx, vec2 dy, out vec3 colour, out float rough,
     vec3 source = (metal > 0.5 || entryMetal) ? fwPaletteSpec[index - 1] : fwPaletteColor[index - 1];
     tint = source * own;
     glossScale = clamp(fwPaletteGloss[index - 1], 0.05, 1.0);
-    if (entryMetal) {
-      metal = 1.0;
-      resp = vec3(1.0);
-    }
+    if (entryMetal) metal = 1.0;
+    // A painted metal's F0 is the entry's specular, not that times the
+    // layer's own: the Corbel Raider Camo's bronze_scratched_04 plates on a
+    // (59,59,59) spec are dark neutral gunmetal in game, where the product
+    // drew them near-black and bronze.
+    if (metal > 0.5) resp = vec3(1.0);
   }
   tint *= resp;
   colour = tint;
